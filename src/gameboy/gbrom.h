@@ -30,3 +30,19 @@ int gb_get_rom_size(u8 *rom);
  * @return The number of ROM banks within the ROM.
  */
 int gb_get_rom_bank_count(u8 *rom);
+
+/**
+ * Checks whether the header checksum is valid.
+ * 
+ * @param rom A pointer to the ROM.
+ * @return True if the header checksum is valid, false otherwise.
+ */
+bool gb_verify_rom_header_checksum(u8 *rom);
+
+/**
+ * Checks whether the global checksum is valid.
+ * 
+ * @param rom A pointer to the ROM.
+ * @return True if the global checksum is valid, false otherwise.
+ */
+bool gb_verify_rom_global_checksum(u8 *rom);

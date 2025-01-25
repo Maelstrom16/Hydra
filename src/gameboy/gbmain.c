@@ -53,6 +53,7 @@ int gb_load_rom(char file_path[]) {
     u8 *MEM = malloc(0x10000);
     memcpy(MEM, ROM, 0x08000);
 
+    
     // TODO: Launch CPU, graphics, and sound threads
 
     // Free resources when no longer needed
