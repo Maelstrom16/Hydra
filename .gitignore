@@ -1,3 +1,6 @@
+# Incomplete code
+src-future
+
 # VSCode metadata
 .vscode
 
@@ -57,3 +60,8 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+
+# Added by cargo
+
+/target
