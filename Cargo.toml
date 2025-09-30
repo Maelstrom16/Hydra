@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 futures = "0.3.31"
 muda = "0.17.1"
+rand = "0.9.2"
 serde = "1.0.228"
 wgpu = "26.0.1"
 winit = "0.30.12"

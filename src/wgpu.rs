@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rand::Rng;
 use wgpu::*;
 use winit::window::Window;
 
@@ -10,6 +11,9 @@ pub struct Graphics {
     size: winit::dpi::PhysicalSize<u32>,
     surface: Surface<'static>,
     surface_format: TextureFormat,
+
+    bind_group: BindGroup,
+    screen_texture : Texture,
 
     render_pipeline: RenderPipeline,
     vertices: Option<Buffer>,
@@ -30,6 +34,70 @@ impl Graphics {
         let surface_format = capabilities.formats[0];
         let (device, queue) = adapter.request_device(&DeviceDescriptor::default()).await.unwrap();
 
+        let screen_texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                size: Extent3d { //TODO: Pull resolution from emulator instead of hardcoding it
+                    width: 160,
+                    height: 144,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                label: Some("Screen Texture"),
+                view_formats: &[],
+            }
+        );
+        let screen_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let screen_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let texture_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: TextureViewDimension::D2,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label: Some("Bind Group Layout (Texture)"),
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&screen_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&screen_sampler),
+                }
+            ],
+            label: Some("screen_bind_group"),
+        });
+
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Shader"),
             source: ShaderSource::Wgsl(include_str!("../shader/test.wgsl").into()),
@@ -37,7 +105,7 @@ impl Graphics {
         let render_pipeline_layout =
         device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&texture_bind_group_layout], // NEW!
             push_constant_ranges: &[],
         });
         let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -71,17 +139,17 @@ impl Graphics {
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
-            depth_stencil: None, // 1.
+            depth_stencil: None,
             multisample: MultisampleState {
-                count: 1, // 2.
-                mask: !0, // 3.
-                alpha_to_coverage_enabled: false, // 4.
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
             },
-            multiview: None, // 5.
-            cache: None, // 6.
+            multiview: None,
+            cache: None,
         });
 
-        let result = Graphics {window, device, queue, size, surface, surface_format, render_pipeline, vertices: None, indices: None};
+        let result = Graphics {window, device, queue, size, surface, surface_format, bind_group, screen_texture, render_pipeline, vertices: None, indices: None};
         result.configure_surface();
         return result;
     }
@@ -102,7 +170,8 @@ impl Graphics {
     }
 
     pub fn render_start(&self) {
-        // Render test
+        self.window.request_redraw();
+        
         let surface_texture = self.surface.get_current_texture().unwrap();
         let texture_view = surface_texture.texture.create_view(&TextureViewDescriptor {
             // Without add_srgb_suffix() the image we will be working with
@@ -127,10 +196,32 @@ impl Graphics {
             occlusion_query_set: None,
         });
 
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.draw(0..3, 0..1);
+        let mut temp_rgba = [255; 160*144*4];
+        temp_rgba[rand::rng().random_range(0..160*144*4)] = 0;
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.screen_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &temp_rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * 160),
+                rows_per_image: Some(144),
+            },
+            Extent3d { //TODO: Pull image from emulator instead of hardcoding it
+                width: 160,
+                height: 144,
+                depth_or_array_layers: 1,
+            }
+        );
 
-        // RENDER CODE HERE
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.bind_group, &[]);
+
+        render_pass.draw(0..3, 0..1);
 
         drop(render_pass);
         self.queue.submit([command_encoder.finish()]);
