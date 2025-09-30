@@ -16,6 +16,6 @@ To run this application, run the following in the terminal:
 ```
 cargo run
 ```
-In its current state, the program will generate a window with some dummy options whose functionality is to be implemented once the GB emulator is able to support them. Clicking the `Load ROM...` button will clear the background color of the window to white, as a way to ensure wgpu is working.
+In its current state, the program will generate a window with some dummy options whose functionality is to be implemented once the GB emulator is able to support them. Clicking the `Load ROM...` button will clear the background color of the window to black, then render a single, gradated triangle to the viewport to ensure wgpu is working properly.
 
 I plan to support Windows, MacOS, and Linux, but I do not currently have the means to test the program on Linux. As such, it may be buggy there.
