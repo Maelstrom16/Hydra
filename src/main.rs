@@ -1,4 +1,4 @@
-mod wgpu;
+mod graphics;
 mod window;
 
 use muda::MenuEvent;

@@ -1,20 +1,27 @@
 use std::sync::Arc;
 
 use muda::accelerator::{Accelerator, Code, Modifiers};
+use rand::Rng;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 use muda::{AboutMetadata, AboutMetadataBuilder, CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 
-use crate::wgpu::{self, Graphics};
+use crate::graphics::Graphics;
 
 #[derive(Default)]
 pub struct HydraApp {
     window: Option<Arc<Window>>,
     menu: Option<Menu>,
-    graphics: Option<Graphics>
+    graphics: Option<Graphics>,
+
+    _temp_buffer: Vec<u8>,
+    _temp_counter: u64,
+    _temp_size: usize,
+    _temp_time: Option<std::time::Instant>
 }
 
 impl HydraApp {
@@ -87,6 +94,7 @@ impl HydraApp {
         menu.init_for_nsapp();
 
         self.menu = Some(menu);
+        self._temp_time = Some(std::time::Instant::now());
     }
 }
 
@@ -104,14 +112,40 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             },
             WindowEvent::RedrawRequested => {
                 if let Some(graphics) = &self.graphics {
-                    graphics.render_start();
+                    // Test texture generation 
+                    let upper_bound: usize = (self._temp_size*self._temp_size*4) as usize; //TODO: Remove when finished testing
+                    for _ in 0..upper_bound/4 {
+                        self._temp_buffer[rand::rng().random_range(0..upper_bound)] = 0;
+                    }
+                    // Update and render
+                    graphics.update_screen_texture(self._temp_buffer.as_slice());
+                    graphics.render();
+
+                    self._temp_counter += 1;
+                    let now = std::time::Instant::now();
+                    let diff = (now - self._temp_time.unwrap()).as_secs_f64();
+                    if diff > 1.0 {
+                        println!("{} frames, {} fps", self._temp_counter, self._temp_counter as f64/diff);
+                        self._temp_counter = 0;
+                        self._temp_time = Some(now);
+                    }
                 }
             },
             WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
                 match event.state {
-                    ElementState::Pressed => println!("{:?}", event.physical_key),
+                    ElementState::Pressed => match event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyA) => {
+                            self._temp_size = 160;
+                            self._temp_buffer = vec![255; self._temp_size*self._temp_size*4];
+                            self.graphics.as_mut().unwrap().resize_screen_texture(self._temp_size as u32, self._temp_size as u32); //TODO: Remove when finished testing
+                        },
+                        _ => println!("{:?}", event.physical_key)
+                    },
                     ElementState::Released => {}
                 }
+            },
+            WindowEvent::Resized(_) => if let Some(graphics) = &self.graphics {
+                graphics.resize();
             },
             _ => ()
         }
@@ -122,7 +156,9 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             UserEvent::MenuEvent(e) => match e.id.0.as_str() {
                 "load_rom" => {
                     println!("Loading ROM.");
-                    self.graphics = Some(futures::executor::block_on(wgpu::Graphics::new(self.window.clone().unwrap())));
+                    self._temp_size = 8;
+                    self._temp_buffer = vec![255; self._temp_size*self._temp_size*4];
+                    self.graphics = Some(futures::executor::block_on(Graphics::new(self.window.clone().unwrap(), Some(muda::dpi::PhysicalSize::<u32> {width: self._temp_size as u32, height: self._temp_size as u32})))); 
                     self.window.as_ref().unwrap().request_redraw();
                 },
                 _ => {}
@@ -131,7 +167,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
     }
 
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        println!("Thank you for supporting Hydra <3")
+        println!("Thank you for supporting Hydra <3");
     }
 }
 
