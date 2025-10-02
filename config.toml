@@ -1,0 +1,10 @@
+window_size = [
+    800,
+    600,
+]
+
+[gb.default_models]
+dmg = "MGB"
+sgb = "SGB2"
+cgb = "CGB"
+agb = "AGB"

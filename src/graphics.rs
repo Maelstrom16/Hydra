@@ -13,37 +13,46 @@ pub struct Graphics {
     surface_format: TextureFormat,
 
     bind_group: BindGroup,
-    screen_texture : Texture,
+    screen_texture: Texture,
 
-    render_pipeline: RenderPipeline
+    render_pipeline: RenderPipeline,
 }
 
 impl Graphics {
-    pub async fn new(window: std::sync::Arc<Window>, opt_size: Option<PhysicalSize<u32>>) -> Graphics {
+    pub async fn new(
+        window: std::sync::Arc<Window>,
+        opt_size: Option<PhysicalSize<u32>>,
+    ) -> Graphics {
         let size = match opt_size {
             Some(s) => s,
-            None => window.inner_size()
+            None => window.inner_size(),
         };
         let instance = Instance::new(&InstanceDescriptor::from_env_or_default());
         let surface = instance.create_surface(Arc::clone(&window)).unwrap();
-        let adapter = instance.request_adapter(&RequestAdapterOptions {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface)  
-        }).await.unwrap();
+        let adapter = instance
+            .request_adapter(&RequestAdapterOptions {
+                power_preference: PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+            })
+            .await
+            .unwrap();
         let capabilities = surface.get_capabilities(&adapter);
         let surface_format = capabilities.formats[0];
-        let (device, queue) = adapter.request_device(&DeviceDescriptor::default()).await.unwrap();
+        let (device, queue) = adapter
+            .request_device(&DeviceDescriptor::default())
+            .await
+            .unwrap();
 
-        let (screen_texture, bind_group) = Self::bind_screen_texture(&device, size.width, size.height);
+        let (screen_texture, bind_group) =
+            Self::bind_screen_texture(&device, size.width, size.height);
         let texture_bind_group_layout = Self::get_default_bind_group_layout(&device);
 
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Shader"),
             source: ShaderSource::Wgsl(include_str!("../shader/test.wgsl").into()),
         });
-        let render_pipeline_layout =
-        device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[&texture_bind_group_layout],
             push_constant_ranges: &[],
@@ -53,7 +62,7 @@ impl Graphics {
             layout: Some(&render_pipeline_layout),
             vertex: VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"), 
+                entry_point: Some("vs_main"),
                 buffers: &[],
                 compilation_options: PipelineCompilationOptions::default(),
             },
@@ -89,7 +98,17 @@ impl Graphics {
             cache: None,
         });
 
-        let result = Graphics {window, device, queue, size, surface, surface_format, bind_group, screen_texture, render_pipeline};
+        let result = Graphics {
+            window,
+            device,
+            queue,
+            size,
+            surface,
+            surface_format,
+            bind_group,
+            screen_texture,
+            render_pipeline,
+        };
         result.configure_surface();
         return result;
     }
@@ -111,6 +130,7 @@ impl Graphics {
 
     pub fn render(&self) {
         self.window.request_redraw();
+        println!("Rendering to screen. {:?}", std::time::Instant::now());
 
         let surface_texture = self.surface.get_current_texture().unwrap();
         let texture_view = surface_texture.texture.create_view(&TextureViewDescriptor {
@@ -142,6 +162,7 @@ impl Graphics {
         render_pass.draw(0..3, 0..1);
 
         drop(render_pass);
+        println!("Presenting to screen. {:?}", std::time::Instant::now());
         self.queue.submit([command_encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
@@ -176,22 +197,20 @@ impl Graphics {
     }
 
     fn bind_screen_texture(device: &Device, width: u32, height: u32) -> (Texture, BindGroup) {
-        let screen_texture = device.create_texture(
-            &TextureDescriptor {
-                size: Extent3d {
-                    width: width,
-                    height: height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                label: Some("Screen Texture"),
-                view_formats: &[],
-            }
-        );
+        let screen_texture = device.create_texture(&TextureDescriptor {
+            size: Extent3d {
+                width: width,
+                height: height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            label: Some("Screen Texture"),
+            view_formats: &[],
+        });
         let screen_texture_view = screen_texture.create_view(&TextureViewDescriptor::default());
         let screen_sampler = device.create_sampler(&SamplerDescriptor {
             address_mode_u: AddressMode::ClampToEdge,
@@ -213,7 +232,7 @@ impl Graphics {
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::Sampler(&screen_sampler),
-                }
+                },
             ],
             label: Some("Bind Group (Screen Texture)"),
         });
@@ -221,7 +240,8 @@ impl Graphics {
     }
 
     pub fn resize_screen_texture(&mut self, width: u32, height: u32) {
-        (self.screen_texture, self.bind_group) = Self::bind_screen_texture(&self.device, width, height);
+        (self.screen_texture, self.bind_group) =
+            Self::bind_screen_texture(&self.device, width, height);
     }
 
     pub fn update_screen_texture(&self, new_buffer: &[u8]) {
@@ -242,7 +262,7 @@ impl Graphics {
                 width: self.screen_texture.size().width,
                 height: self.screen_texture.size().height,
                 depth_or_array_layers: 1,
-            }
+            },
         );
     }
 }
