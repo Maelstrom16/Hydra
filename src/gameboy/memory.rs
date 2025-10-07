@@ -4,7 +4,7 @@ use crate::{common::errors::HydraIOError, gameboy::Model};
 use std::fs;
 
 pub const TITLE_ADDRESS: usize = 0x0134;
-pub const NEW_LICENSEE_CODE_ADDRESS: usize = 0x0147;
+pub const NEW_LICENSEE_CODE_ADDRESS: usize = 0x0144;
 pub const HARDWARE_ADDRESS: usize = 0x0147;
 pub const ROM_SIZE_ADDRESS: usize = 0x0148;
 pub const RAM_SIZE_ADDRESS: usize = 0x0149;
@@ -18,18 +18,17 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub fn from_model(model: Model) -> Result<Memory, HydraIOError> {
+    pub fn from_rom_and_model(rom: Box<[u8]>, model: Model) -> Result<Memory, HydraIOError> {
         let result_cart = Memory {
-            cartridge: Option::None,
+            cartridge: Some(cartmbc::from_rom(rom)?),
             console: consmbc::from_model(model)?,
             data_bus: 0,
         };
         Ok(result_cart)
     }
 
-    pub fn load_rom(&mut self, path: &str) -> Result<(), HydraIOError> {
-        let rom = fs::read(path)?;
-        self.cartridge = Some(cartmbc::from_rom(&rom)?);
+    pub fn hot_swap_rom(&mut self, rom: Box<[u8]>) -> Result<(), HydraIOError> {
+        self.cartridge = Some(cartmbc::from_rom(rom)?);
         Ok(())
     }
 
@@ -83,9 +82,7 @@ impl Memory {
                     Err(HydraIOError::OpenBusAccess)
                 }
             }
-            0x8000..0xA000 => self
-                .console
-                .write_vram_u8(value, (address - 0x8000) as usize),
+            0x8000..0xA000 => self.console.write_vram_u8(value, (address - 0x8000) as usize),
             0xA000..0xC000 => {
                 if let Some(valid_cart) = &mut self.cartridge {
                     valid_cart.write_ram_u8(value, (address - 0xA000) as usize)
@@ -93,12 +90,8 @@ impl Memory {
                     Err(HydraIOError::OpenBusAccess)
                 }
             }
-            0xC000..0xE000 => self
-                .console
-                .write_wram_u8(value, (address - 0xC000) as usize),
-            0xE000..0xFE00 => self
-                .console
-                .write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
+            0xC000..0xE000 => self.console.write_wram_u8(value, (address - 0xC000) as usize),
+            0xE000..0xFE00 => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
             0xFE00.. => panic!("OAM / IO / HRAM not yet implemented"),
         };
         if let Err(e) = write_result {

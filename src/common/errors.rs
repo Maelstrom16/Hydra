@@ -1,10 +1,17 @@
-use std::{fmt, io};
+use std::{
+    ffi::{OsStr, OsString},
+    fmt, io,
+};
+
+use crate::common::emulator::Emulator;
 
 #[derive(Debug)]
 pub enum HydraIOError {
+    InvalidEmulator(&'static str, Option<String>),
     InvalidInstruction(u64, usize),
-    MalformedROM(String),
+    MalformedROM(&'static str),
     OpenBusAccess,
+
     IOError(std::io::Error),
     DeserializationError(toml::de::Error),
     SerializationError(toml::ser::Error),
@@ -13,11 +20,11 @@ pub enum HydraIOError {
 impl fmt::Display for HydraIOError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            HydraIOError::InvalidInstruction(value, address) => write!(
-                f,
-                "Attempted to execute invalid instruction {} at address {}",
-                value, address
-            ),
+            HydraIOError::InvalidEmulator(emulator, extension) => match extension {
+                Some(ext) => write!(f, "{} does not support ROM files with a .{} extension", emulator, ext),
+                None => write!(f, "{} does not support extensionless ROM files", emulator),
+            },
+            HydraIOError::InvalidInstruction(value, address) => write!(f, "Attempted to execute invalid instruction {} at address {}", value, address),
             HydraIOError::MalformedROM(details) => write!(f, "Malformed ROM file: {}", details),
             HydraIOError::OpenBusAccess => {
                 write!(f, "Attempted to read from an unmapped memory block")

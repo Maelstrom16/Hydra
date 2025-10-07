@@ -21,7 +21,7 @@ pub trait CartMemoryBankController {
     fn write_ram_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
 }
 
-pub fn from_rom(rom: &Vec<u8>) -> Result<Box<dyn CartMemoryBankController>, HydraIOError> {
+pub fn from_rom(rom: Box<[u8]>) -> Result<Box<dyn CartMemoryBankController>, HydraIOError> {
     match rom[memory::HARDWARE_ADDRESS] {
         0x00 | 0x08..=0x09 => Ok(Box::new(mbc0::MBC0::from_rom(rom)?)),
         0x01..=0x03 => panic!("MBC1 not yet supported"),
@@ -35,14 +35,11 @@ pub fn from_rom(rom: &Vec<u8>) -> Result<Box<dyn CartMemoryBankController>, Hydr
         0xFD => panic!("TAMA5 not yet supported"),
         0xFE => panic!("HuC3 not yet supported"),
         0xFF => panic!("HuC1 not yet supported"),
-        _ => Err(
-            HydraIOError::MalformedROM("Undefined cartridge hardware identifier".to_string())
-                .into(),
-        ),
+        _ => Err(HydraIOError::MalformedROM("Undefined cartridge hardware identifier").into()),
     }
 }
 
-pub fn get_rom_size(rom: &Vec<u8>) -> Result<usize, HydraIOError> {
+pub fn get_rom_size(rom: &Box<[u8]>) -> Result<usize, HydraIOError> {
     match rom[memory::ROM_SIZE_ADDRESS] {
         0x00 => Ok(0x008000 as usize), // 32 KiB
         0x01 => Ok(0x010000 as usize), // 64 KiB
@@ -56,11 +53,11 @@ pub fn get_rom_size(rom: &Vec<u8>) -> Result<usize, HydraIOError> {
         0x52 => Ok(0x120000 as usize), // 1.1 MiB
         0x53 => Ok(0x140000 as usize), // 1.2 MiB
         0x54 => Ok(0x180000 as usize), // 1.5 MiB
-        _ => Err(HydraIOError::MalformedROM("Undefined ROM size identifier".to_string()).into()),
+        _ => Err(HydraIOError::MalformedROM("Undefined ROM size identifier").into()),
     }
 }
 
-pub fn get_ram_size(rom: &Vec<u8>) -> Result<usize, HydraIOError> {
+pub fn get_ram_size(rom: &Box<[u8]>) -> Result<usize, HydraIOError> {
     match rom[memory::RAM_SIZE_ADDRESS] {
         0x00 => Ok(0x00000 as usize), // 0 KiB
         0x01 => Ok(0x00800 as usize), // 2 KiB
@@ -68,6 +65,6 @@ pub fn get_ram_size(rom: &Vec<u8>) -> Result<usize, HydraIOError> {
         0x03 => Ok(0x08000 as usize), // 32 KiB
         0x04 => Ok(0x20000 as usize), // 128 KiB
         0x05 => Ok(0x10000 as usize), // 64 KiB
-        _ => Err(HydraIOError::MalformedROM("Undefined RAM size identifier".to_string()).into()),
+        _ => Err(HydraIOError::MalformedROM("Undefined RAM size identifier").into()),
     }
 }

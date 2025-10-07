@@ -3,6 +3,9 @@ window_size = [
     600,
 ]
 
+[gb]
+show_all_revisions = false
+
 [gb.default_models]
 dmg = "MGB"
 sgb = "SGB2"

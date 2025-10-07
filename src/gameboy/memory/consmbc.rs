@@ -13,13 +13,9 @@ pub trait ConsMemoryBankController {
 
 pub fn from_model(model: Model) -> Result<Box<dyn ConsMemoryBankController>, HydraIOError> {
     match model {
-        Model::DMG0
-        | Model::DMG
-        | Model::MGB
-        | Model::SGB
-        | Model::SGB2
-        | Model::CGBdmg
-        | Model::AGBdmg => Ok(Box::new(dmg::DMG::new()?)),
-        Model::CGB | Model::AGB => panic!("CGB console memory not yet supported"),
+        Model::GameBoy(_) | Model::SuperGameBoy(_) => Ok(Box::new(dmg::DMG::new()?)),
+        Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => {
+            panic!("CGB console memory not yet supported")
+        }
     }
 }

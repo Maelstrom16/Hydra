@@ -2,15 +2,15 @@ use crate::common::errors::HydraIOError;
 use crate::gameboy::memory::cartmbc;
 
 pub struct MBC0 {
-    rom: Vec<u8>,
+    rom: Box<[u8]>,
     ram: Vec<u8>,
 }
 
 impl MBC0 {
-    pub fn from_rom(rom: &Vec<u8>) -> Result<Self, HydraIOError> {
+    pub fn from_rom(rom: Box<[u8]>) -> Result<Self, HydraIOError> {
         Ok(MBC0 {
-            rom: rom.clone(),
-            ram: Vec::with_capacity(cartmbc::get_ram_size(rom)? as usize),
+            ram: Vec::with_capacity(cartmbc::get_ram_size(&rom)? as usize),
+            rom,
         })
     }
 }

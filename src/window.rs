@@ -1,10 +1,8 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use muda::accelerator::{Accelerator, Code, Modifiers};
-use muda::{
-    AboutMetadata, AboutMetadataBuilder, CheckMenuItem, Menu, MenuEvent, MenuItem,
-    PredefinedMenuItem, Submenu,
-};
+use muda::{AboutMetadata, AboutMetadataBuilder, CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use rand::Rng;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
@@ -13,12 +11,19 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 
+use crate::common::emulator::{self, Emulator};
+use crate::common::errors::HydraIOError;
+use crate::config::Config;
+use crate::gameboy;
 use crate::graphics::Graphics;
+use crate::ui::UserInterface;
 
 #[derive(Default)]
 pub struct HydraApp {
+    config: Option<Config>,
+    emulator: Option<Box<dyn Emulator>>,
     window: Option<Arc<Window>>,
-    menu: Option<Menu>,
+    ui: Option<UserInterface>,
     graphics: Option<Graphics>,
 
     _temp_buffer: Vec<u8>,
@@ -28,120 +33,47 @@ pub struct HydraApp {
 }
 
 impl HydraApp {
-    fn init_window(&mut self, event_loop: &ActiveEventLoop) {
+    fn init_app(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes().with_title("Hydra");
-        self.window = Some(Arc::new(
-            event_loop.create_window(window_attributes).unwrap(),
-        ));
-        // Create the main menubar
-        let menu = Menu::new();
+        self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
 
-        let about_metadata: AboutMetadata = AboutMetadataBuilder::new()
-            .authors(Some(vec!["Programmed by Kohradon, with love ♥".to_owned()]))
-            .credits(Some("Programmed by Kohradon, with love ♥".to_owned()))
-            .version(Some(
-                "Hydra 0.0.1\n------------\nWyrm (GB) 0.0.1\nLindwyrm (GBA) 0.0.0",
-            ))
-            .build();
-        let about_submenu = Submenu::with_items(
-            "About",
-            true,
-            &[
-                &PredefinedMenuItem::about(None, Some(about_metadata)),
-                &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::quit(None),
-            ],
-        )
-        .unwrap();
-        let file_submenu = Submenu::with_items(
-            "File",
-            true,
-            &[
-                &MenuItem::with_id("load_rom", "&Load ROM...", true, None),
-                &Submenu::with_items(
-                    "Load ROM to Console",
-                    true,
-                    &[
-                        &MenuItem::new("Game Boy...", true, None),
-                        &MenuItem::new("Super Game Boy...", false, None),
-                        &MenuItem::new("Game Boy Color...", true, None),
-                        &MenuItem::new("Game Boy Advance...", true, None),
-                        &CheckMenuItem::new("Show All Revisions", true, false, None),
-                    ],
-                )
-                .unwrap(),
-                &PredefinedMenuItem::separator(),
-                &MenuItem::new(
-                    "Save State",
-                    true,
-                    Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyS)),
-                ),
-                &MenuItem::new("Load State", true, None),
-                &PredefinedMenuItem::separator(),
-                &MenuItem::new("Reset", true, None),
-                &PredefinedMenuItem::separator(),
-                &MenuItem::new("Exit", true, None),
-            ],
-        )
-        .unwrap();
-        let edit_submenu = Submenu::with_items(
-            "Edit",
-            true,
-            &[
-                &MenuItem::new("Cut", true, None),
-                &MenuItem::new("Copy", true, None),
-                &MenuItem::new("Paste", true, None),
-            ],
-        )
-        .unwrap();
-        let gameboy_submenu = Submenu::with_items(
-            "Game Boy",
-            true,
-            &[&Submenu::with_items(
-                "Default Models",
-                true,
-                &[
-                    &MenuItem::new("Game Boy", false, None),
-                    &CheckMenuItem::new("DMG0", true, false, None),
-                    &CheckMenuItem::new("DMG", true, false, None),
-                    &CheckMenuItem::new("MGB", true, true, None),
-                    &PredefinedMenuItem::separator(),
-                    &MenuItem::new("Super Game Boy", false, None),
-                    &CheckMenuItem::new("SGB", true, false, None),
-                    &CheckMenuItem::new("SGB2", true, true, None),
-                    &PredefinedMenuItem::separator(),
-                    &MenuItem::new("Game Boy Color", false, None),
-                    &CheckMenuItem::new("CGB0", true, false, None),
-                    &CheckMenuItem::new("CGB", true, true, None),
-                    &PredefinedMenuItem::separator(),
-                    &MenuItem::new("Game Boy Advance", false, None),
-                    &CheckMenuItem::new("AGB0", true, false, None),
-                    &CheckMenuItem::new("AGB", true, true, None),
-                    &PredefinedMenuItem::separator(),
-                ],
-            )
-            .unwrap()],
-        )
-        .unwrap();
-
-        menu.append_items(&[
-            &about_submenu,
-            &file_submenu,
-            &edit_submenu,
-            &gameboy_submenu,
-        ])
-        .unwrap();
-        #[cfg(target_os = "windows")]
-        unsafe {
-            menu.init_for_hwnd(window_hwnd)
-        };
-        #[cfg(target_os = "linux")]
-        menu.init_for_gtk_window(&gtk_window, Some(&vertical_gtk_box));
-        #[cfg(target_os = "macos")]
-        menu.init_for_nsapp();
-
-        self.menu = Some(menu);
+        self.config = Some(Config::from_toml());
+        self.ui = Some(UserInterface::from_config(self.config.as_ref().unwrap()));
         self._temp_time = Some(std::time::Instant::now());
+    }
+
+    fn try_init_emulator<F>(&mut self, filters: &[(&str, &[&str])], func: F)
+    where
+        F: Fn(&PathBuf, &Config) -> Result<Box<dyn Emulator>, HydraIOError>,
+    {
+        let file_dialog = filters.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
+        match file_dialog.pick_file() {
+            Some(path) => match func(&path, self.config.as_ref().unwrap()) {
+                // If a file was selected, try to initialize Emulator
+                Ok(emu) => {
+                    // If Emulator construction succeeds, save to app state and launch it
+                    println!("Successfully loaded {}. Launching emulator.", path.file_name().unwrap().display());
+                    emu.launch();
+                    self.emulator = Some(emu);
+                }
+                Err(e) => {
+                    // If Emulator construction fails, show an error message
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .set_title("Error Initializing Emulator")
+                        .set_description(e.to_string())
+                        .show();
+                }
+            },
+            None => {} // No file selected -- do nothing
+        };
+    }
+
+    fn try_init_gameboy(&mut self, model: gameboy::Model) {
+        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, config| {
+            gameboy::GameBoy::from_model(path, model, config).and_then(|emu| Ok(Box::new(emu) as Box<dyn Emulator>))
+        })
     }
 }
 
@@ -149,7 +81,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         println!("Resuming");
         if let None = self.window {
-            self.init_window(event_loop);
+            self.init_app(event_loop);
         }
     }
 
@@ -176,30 +108,19 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     let now = std::time::Instant::now();
                     let diff = (now - self._temp_time.unwrap()).as_secs_f64();
                     if diff > 1.0 {
-                        println!(
-                            "{} frames, {} fps",
-                            self._temp_counter,
-                            self._temp_counter as f64 / diff
-                        );
+                        println!("{} frames, {} fps", self._temp_counter, self._temp_counter as f64 / diff);
                         self._temp_counter = 0;
                         self._temp_time = Some(now);
                     }
                 }
             }
-            WindowEvent::KeyboardInput {
-                device_id,
-                event,
-                is_synthetic,
-            } => {
+            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
                 match event.state {
                     ElementState::Pressed => match event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyA) => {
                             self._temp_size = 1000;
                             self._temp_buffer = vec![255; self._temp_size * self._temp_size * 4];
-                            self.graphics.as_mut().unwrap().resize_screen_texture(
-                                self._temp_size as u32,
-                                self._temp_size as u32,
-                            ); //TODO: Remove when finished testing
+                            self.graphics.as_mut().unwrap().resize_screen_texture(self._temp_size as u32, self._temp_size as u32); //TODO: Remove when finished testing
                         }
                         _ => println!("{:?}", event.physical_key),
                     },
@@ -217,27 +138,44 @@ impl ApplicationHandler<UserEvent> for HydraApp {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::MenuEvent(e) => match e.id.0.as_str() {
-                "load_rom" => {
-                    println!("Loading ROM.");
-                    self._temp_size = 8;
-                    self._temp_buffer = vec![255; self._temp_size * self._temp_size * 4];
-                    self.graphics = Some(futures::executor::block_on(Graphics::new(
-                        self.window.clone().unwrap(),
-                        Some(muda::dpi::PhysicalSize::<u32> {
-                            width: self._temp_size as u32,
-                            height: self._temp_size as u32,
-                        }),
-                    )));
-                    self.window.as_ref().unwrap().request_redraw();
+            UserEvent::MenuEvent(e) => {
+                match e.id.0.as_str() {
+                    "load_rom" => {
+                        println!("Loading ROM.");
+                        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, config| emulator::init_from_file(path, config));
+
+                        self._temp_size = 8;
+                        self._temp_buffer = vec![255; self._temp_size * self._temp_size * 4];
+                        self.graphics = Some(futures::executor::block_on(Graphics::new(
+                            self.window.clone().unwrap(),
+                            Some(muda::dpi::PhysicalSize::<u32> {
+                                width: self._temp_size as u32,
+                                height: self._temp_size as u32,
+                            }),
+                        )));
+                        self.window.as_ref().unwrap().request_redraw();
+                    }
+                    "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(None)),
+                    "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
+                    "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
+                    "load_gb_mgb" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
+                    "load_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(None)),
+                    "load_sgb_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(Some(gameboy::SGBRevision::SGB))),
+                    "load_sgb_sgb2" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(Some(gameboy::SGBRevision::SGB2))),
+                    "load_gbc" => self.try_init_gameboy(gameboy::Model::GameBoyColor(None)),
+                    "load_gbc_cgb0" => self.try_init_gameboy(gameboy::Model::GameBoyColor(Some(gameboy::CGBRevision::CGB0))),
+                    "load_gbc_cgb" => self.try_init_gameboy(gameboy::Model::GameBoyColor(Some(gameboy::CGBRevision::CGB))),
+                    // "load_gba" Will be implemented later
+                    "toggle_revisions" => self.ui.as_mut().unwrap().toggle_revisions(self.config.as_mut().unwrap()),
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
         }
     }
 
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
         println!("Thank you for supporting Hydra <3");
+        self.config.as_ref().unwrap().write_to_toml();
     }
 }
 

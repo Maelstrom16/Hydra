@@ -1,5 +1,5 @@
 use crate::gameboy::{
-    Model,
+    AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
     memory::{self, TITLE_ADDRESS},
 };
 
@@ -14,11 +14,11 @@ pub struct CPU {
 }
 
 impl CPU {
-    pub fn from_rom_and_model(rom: &Vec<u8>, model: Model) -> Self {
+    pub fn from_rom_and_model(rom: &Box<[u8]>, model: Model) -> Self {
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
         match model {
-            Model::DMG0 => CPU {
+            Model::GameBoy(Some(GBRevision::DMG0)) => CPU {
                 af: [0x01, 0b0000 << 4],
                 bc: [0xFF, 0x13],
                 de: [0x00, 0xC1],
@@ -26,37 +26,23 @@ impl CPU {
                 sp,
                 pc,
             },
-            Model::DMG => CPU {
-                af: [
-                    0x01,
-                    if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 {
-                        0b1000 << 4
-                    } else {
-                        0b1011 << 4
-                    },
-                ],
+            Model::GameBoy(Some(GBRevision::DMG)) => CPU {
+                af: [0x01, if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }],
                 bc: [0x00, 0x13],
                 de: [0x00, 0xD8],
                 hl: [0x01, 0x4D],
                 sp,
                 pc,
             },
-            Model::MGB => CPU {
-                af: [
-                    0xFF,
-                    if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 {
-                        0b1000 << 4
-                    } else {
-                        0b1011 << 4
-                    },
-                ],
+            Model::GameBoy(Some(GBRevision::MGB)) => CPU {
+                af: [0xFF, if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }],
                 bc: [0x00, 0x13],
                 de: [0x00, 0xD8],
                 hl: [0x01, 0x4D],
                 sp,
                 pc,
             },
-            Model::SGB => CPU {
+            Model::SuperGameBoy(Some(SGBRevision::SGB)) => CPU {
                 af: [0x01, 0b0000 << 4],
                 bc: [0x00, 0x14],
                 de: [0x00, 0x00],
@@ -64,7 +50,7 @@ impl CPU {
                 sp,
                 pc,
             },
-            Model::SGB2 => CPU {
+            Model::SuperGameBoy(Some(SGBRevision::SGB2)) => CPU {
                 af: [0xFF, 0b0000 << 4],
                 bc: [0x00, 0x14],
                 de: [0x00, 0x00],
@@ -72,13 +58,10 @@ impl CPU {
                 sp,
                 pc,
             },
-            Model::CGBdmg => {
+            Model::GameBoy(Some(GBRevision::CGBdmg)) => {
                 let mut b = 0x00;
                 let mut hl = [0x00, 0x7C];
-                if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01
-                    || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33
-                        && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01
-                {
+                if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01 || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33 && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01 {
                     for offset in 0..16 {
                         // If either licensee code is 0x01, B = sum of all title bytes
                         b += rom[TITLE_ADDRESS + offset];
@@ -97,14 +80,11 @@ impl CPU {
                     pc,
                 }
             }
-            Model::AGBdmg => {
+            Model::GameBoy(Some(GBRevision::AGBdmg)) => {
                 let mut b = 0x01;
                 let mut hl = [0x00, 0x7C];
                 let mut f = 0b00000000;
-                if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01
-                    || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33
-                        && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01
-                {
+                if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01 || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33 && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01 {
                     for offset in 0..16 {
                         // If either licensee code is 0x01, B = sum of all title bytes
                         b += rom[TITLE_ADDRESS + offset];
@@ -130,7 +110,7 @@ impl CPU {
                     pc,
                 }
             }
-            Model::CGB => CPU {
+            Model::GameBoyColor(Some(CGBRevision::CGB0 | CGBRevision::CGB)) => CPU {
                 af: [0x11, 0b1000 << 4],
                 bc: [0x00, 0x00],
                 de: [0xFF, 0x56],
@@ -138,7 +118,7 @@ impl CPU {
                 sp,
                 pc,
             },
-            Model::AGB => CPU {
+            Model::GameBoyAdvance(Some(AGBRevision::AGB0 | AGBRevision::AGB)) => CPU {
                 af: [0x11, 0b0000 << 4],
                 bc: [0x01, 0x00],
                 de: [0xFF, 0x56],
@@ -146,6 +126,7 @@ impl CPU {
                 sp,
                 pc,
             },
+            _ => panic!("Attempt to initialize Game Boy CPU without a proper revision"),
         }
     }
 
