@@ -3,10 +3,10 @@ mod memory;
 mod ppu;
 
 use crate::{
-    common::{emulator::Emulator, errors::HydraIOError},
+    common::{clockbarrier::ClockBarrier, emulator::Emulator, errors::HydraIOError},
     config::Config,
 };
-use std::{ffi::OsStr, fmt, fs, path::Path};
+use std::{ffi::OsStr, fmt, fs, path::Path, sync::{Arc, Barrier, Condvar, RwLock, Weak}, thread};
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Model {
@@ -67,9 +67,11 @@ pub enum AGBRevision {
 
 pub struct GameBoy {
     //apu: apu::APU,
-    cpu: cpu::CPU,
-    memory: memory::Memory,
-    ppu: ppu::PPU,
+    cpu: Option<cpu::CPU>,
+    memory: Option<memory::Memory>,
+    ppu: Option<ppu::PPU>,
+
+    master_clock: u32,
 }
 
 impl GameBoy {
@@ -77,9 +79,10 @@ impl GameBoy {
         let rom = fs::read(path)?.into_boxed_slice();
 
         Ok(GameBoy {
-            cpu: cpu::CPU::from_rom_and_model(&rom, model),
-            memory: memory::Memory::from_rom_and_model(rom, model)?,
-            ppu: ppu::PPU {},
+            cpu: Some(cpu::CPU::from_rom_and_model(&rom, model)),
+            memory: Some(memory::Memory::from_rom_and_model(rom, model)?),
+            ppu: Some(ppu::PPU {}),
+            master_clock: 0,
         })
     }
     pub fn from_model(path: &Path, model: Model, config: &Config) -> Result<Self, HydraIOError> {
@@ -95,13 +98,27 @@ impl GameBoy {
     }
     fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
         let rom: Box<[u8]> = fs::read(path)?.into_boxed_slice();
-        self.memory.hot_swap_rom(rom)?;
+        self.memory.as_mut().unwrap().hot_swap_rom(rom)?;
         Ok(())
     }
 }
 
 impl Emulator for GameBoy {
-    fn launch(&self) {
+    fn main_thread(&mut self) {
         println!("Launching Wyrm");
+        const CYCLES_PER_FRAME: usize = 70224; // Based on PPU speed
+        let clock_barrier = Arc::new(ClockBarrier::new(2, CYCLES_PER_FRAME)); // 1 for each spawned thread, +1 for the main thread
+        let cpu_handle = self.cpu.take().unwrap().step(clock_barrier.clone());
+        thread::spawn(|| println!(""));
+        thread::spawn(|| println!("PPU"));
+        thread::spawn(|| println!("APU"));
+        println!("mainthread");
+        loop {
+            println!("{} from main!", clock_barrier.cycle());
+            clock_barrier.wait();
+            if clock_barrier.new_frame() {break}
+        }
+        cpu_handle.join();
+        println!("Exiting Wyrm");
     }
 }

@@ -3,7 +3,7 @@ use std::{ffi::OsStr, path::Path};
 use crate::{common::errors::HydraIOError, config::Config, gameboy};
 
 pub trait Emulator {
-    fn launch(&self);
+    fn main_thread(&mut self);
 }
 
 pub fn init_from_file(path: &Path, config: &Config) -> Result<Box<dyn Emulator>, HydraIOError> {

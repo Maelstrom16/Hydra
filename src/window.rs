@@ -50,10 +50,10 @@ impl HydraApp {
         match file_dialog.pick_file() {
             Some(path) => match func(&path, self.config.as_ref().unwrap()) {
                 // If a file was selected, try to initialize Emulator
-                Ok(emu) => {
+                Ok(mut emu) => {
                     // If Emulator construction succeeds, save to app state and launch it
                     println!("Successfully loaded {}. Launching emulator.", path.file_name().unwrap().display());
-                    emu.launch();
+                    emu.main_thread();
                     self.emulator = Some(emu);
                 }
                 Err(e) => {

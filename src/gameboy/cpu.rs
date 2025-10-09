@@ -1,7 +1,10 @@
-use crate::gameboy::{
-    AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
-    memory::{self, TITLE_ADDRESS},
-};
+use std::{sync::{Arc, Barrier, RwLock}, thread::{self, JoinHandle, ScopedJoinHandle, Thread}};
+
+use futures::lock::Mutex;
+
+use crate::{common::clockbarrier::ClockBarrier, gameboy::{
+    memory::{self, Memory, TITLE_ADDRESS}, AGBRevision, CGBRevision, GBRevision, Model, SGBRevision
+}};
 
 #[derive(Default)]
 pub struct CPU {
@@ -130,8 +133,22 @@ impl CPU {
         }
     }
 
-    pub fn step(&mut self, memory: &memory::Memory) -> () {
-        let opcode_address = self.pc;
-        self.pc += 1;
+    pub fn step(self, clock_barrier: Arc<ClockBarrier>) -> JoinHandle<()>{
+        thread::spawn(move || {
+            loop {
+                println!("{} from cpu!", clock_barrier.cycle());
+                clock_barrier.wait();
+                if clock_barrier.new_frame() {break}
+            }
+        })
     }
+
+    // pub fn step(&mut self, memory: &mut memory::Memory) -> () {
+    //     let opcode_address = self.pc;
+    //     self.pc += 1;
+    //     match memory.read_u8(opcode_address) {
+    //         0x00 => {} // NOP
+    //         _ => panic!("Undefined opcode")
+    //     }
+    // }
 }
