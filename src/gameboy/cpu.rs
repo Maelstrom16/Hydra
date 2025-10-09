@@ -1,10 +1,17 @@
-use std::{sync::{Arc, Barrier, RwLock}, thread::{self, JoinHandle, ScopedJoinHandle, Thread}};
+use std::{
+    sync::{Arc, Barrier, RwLock},
+    thread::{self, JoinHandle, ScopedJoinHandle, Thread},
+};
 
 use futures::lock::Mutex;
 
-use crate::{common::clockbarrier::ClockBarrier, gameboy::{
-    memory::{self, Memory, TITLE_ADDRESS}, AGBRevision, CGBRevision, GBRevision, Model, SGBRevision
-}};
+use crate::{
+    common::clockbarrier::ClockBarrier,
+    gameboy::{
+        AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
+        memory::{self, Memory, TITLE_ADDRESS},
+    },
+};
 
 #[derive(Default)]
 pub struct CPU {
@@ -133,12 +140,14 @@ impl CPU {
         }
     }
 
-    pub fn step(self, clock_barrier: Arc<ClockBarrier>) -> JoinHandle<()>{
+    pub fn step(self, clock_barrier: Arc<ClockBarrier>) -> JoinHandle<()> {
         thread::spawn(move || {
             loop {
                 println!("{} from cpu!", clock_barrier.cycle());
                 clock_barrier.wait();
-                if clock_barrier.new_frame() {break}
+                if clock_barrier.new_frame() {
+                    break;
+                }
             }
         })
     }

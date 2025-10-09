@@ -6,7 +6,13 @@ use crate::{
     common::{clockbarrier::ClockBarrier, emulator::Emulator, errors::HydraIOError},
     config::Config,
 };
-use std::{ffi::OsStr, fmt, fs, path::Path, sync::{Arc, Barrier, Condvar, RwLock, Weak}, thread};
+use std::{
+    ffi::OsStr,
+    fmt, fs,
+    path::Path,
+    sync::{Arc, Barrier, Condvar, RwLock, Weak},
+    thread,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Model {
@@ -116,7 +122,9 @@ impl Emulator for GameBoy {
         loop {
             println!("{} from main!", clock_barrier.cycle());
             clock_barrier.wait();
-            if clock_barrier.new_frame() {break}
+            if clock_barrier.new_frame() {
+                break;
+            }
         }
         cpu_handle.join();
         println!("Exiting Wyrm");

@@ -7,13 +7,13 @@ use std::sync::{Condvar, Mutex};
 
 /// A clock barrier enables multiple threads to synchronize the beginning
 /// of some computation, while also providing access to its modulated generation ID.
-/// 
+///
 /// Struct definition and all function implementations adapted from std::sync::Barrier.
 pub struct ClockBarrier {
     lock: Mutex<ClockBarrierState>,
     cvar: Condvar,
     num_threads: usize,
-    num_cycles: usize
+    num_cycles: usize,
 }
 
 // The inner state of a double barrier
@@ -42,7 +42,7 @@ impl ClockBarrier {
             lock: Mutex::new(ClockBarrierState { count: 0, generation_id: 0 }),
             cvar: Condvar::new(),
             num_threads: t,
-            num_cycles: c
+            num_cycles: c,
         }
     }
 
@@ -51,8 +51,7 @@ impl ClockBarrier {
         let local_gen = lock.generation_id;
         lock.count += 1;
         if lock.count < self.num_threads {
-            let _guard =
-                self.cvar.wait_while(lock, |state| local_gen == state.generation_id).unwrap();
+            let _guard = self.cvar.wait_while(lock, |state| local_gen == state.generation_id).unwrap();
             ClockBarrierWaitResult(false)
         } else {
             lock.count = 0;
