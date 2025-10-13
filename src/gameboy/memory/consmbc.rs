@@ -4,7 +4,7 @@ mod dmg;
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
 
-pub trait ConsMemoryBankController {
+pub trait ConsMemoryBankController: Send + Sync + 'static {
     fn read_vram_u8(&self, address: usize) -> Result<u8, HydraIOError>;
     fn read_wram_u8(&self, address: usize) -> Result<u8, HydraIOError>;
     fn write_vram_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;

@@ -1,4 +1,7 @@
+mod opcode;
+
 use std::{
+    rc::Rc,
     sync::{Arc, Barrier, RwLock},
     thread::{self, JoinHandle, ScopedJoinHandle, Thread},
 };
@@ -8,12 +11,32 @@ use futures::lock::Mutex;
 use crate::{
     common::clockbarrier::ClockBarrier,
     gameboy::{
-        AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
+        AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision,
+        cpu::{
+            self,
+            opcode::{CondOperand, IntOperand, RegisterOperand8},
+        },
         memory::{self, Memory, TITLE_ADDRESS},
     },
 };
 
-#[derive(Default)]
+/// A Game Boy CPU.
+///
+/// Note: Registers are stored in little-endian byte arrays, so the representation in code may be misleading.
+/// The AF register, for example, is indexed as follows:
+/// ```
+/// let af: u16 = u16::from_le_bytes(cpu.af);
+/// let a: u8 = cpu.af[1];
+/// let f: u8 = cpu.af[0];
+/// let z: bool = (cpu.af[0] & 0b10000000) != 0;
+/// let n: bool = (cpu.af[0] & 0b01000000) != 0;
+/// let h: bool = (cpu.af[0] & 0b00100000) != 0;
+/// let c: bool = (cpu.af[0] & 0b00010000) != 0;
+///
+/// cpu.af[0] &= 0b01111111; // Reset zero flag
+/// cpu.af[0] |= 0b00010000; // Set carry flag
+/// cpu.af[0] = ((true as u8) << 5) | (cpu.af[0] & 0b11011111) // Set/reset half-carry flag based on bool
+/// ```
 pub struct CPU {
     af: [u8; 2],
     bc: [u8; 2],
@@ -21,56 +44,80 @@ pub struct CPU {
     hl: [u8; 2],
     sp: u16,
     pc: u16,
+    ir: u8,
+    ie: u8,
+    ime: bool,
+    ime_queued: bool,
+
+    memory: Arc<RwLock<Memory>>,
+    clock: Arc<ClockBarrier>,
+}
+
+pub enum Register8 {
+    A,
+    F,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+}
+pub enum Register16 {
+    AF,
+    BC,
+    DE,
+    HL,
+    SP,
+    PC,
 }
 
 impl CPU {
-    pub fn from_rom_and_model(rom: &Box<[u8]>, model: Model) -> Self {
+    pub fn new(rom: &Box<[u8]>, model: Model, memory: Arc<RwLock<Memory>>, clock: Arc<ClockBarrier>) -> Self {
+        let af;
+        let bc;
+        let de;
+        let hl;
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
+        const ir: u8 = 0x00;
+        const ie: u8 = 0x00;
+        const ime: bool = false;
+        const ime_queued: bool = false;
         match model {
-            Model::GameBoy(Some(GBRevision::DMG0)) => CPU {
-                af: [0x01, 0b0000 << 4],
-                bc: [0xFF, 0x13],
-                de: [0x00, 0xC1],
-                hl: [0x84, 0x03],
-                sp,
-                pc,
-            },
-            Model::GameBoy(Some(GBRevision::DMG)) => CPU {
-                af: [0x01, if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }],
-                bc: [0x00, 0x13],
-                de: [0x00, 0xD8],
-                hl: [0x01, 0x4D],
-                sp,
-                pc,
-            },
-            Model::GameBoy(Some(GBRevision::MGB)) => CPU {
-                af: [0xFF, if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }],
-                bc: [0x00, 0x13],
-                de: [0x00, 0xD8],
-                hl: [0x01, 0x4D],
-                sp,
-                pc,
-            },
-            Model::SuperGameBoy(Some(SGBRevision::SGB)) => CPU {
-                af: [0x01, 0b0000 << 4],
-                bc: [0x00, 0x14],
-                de: [0x00, 0x00],
-                hl: [0xC0, 0x60],
-                sp,
-                pc,
-            },
-            Model::SuperGameBoy(Some(SGBRevision::SGB2)) => CPU {
-                af: [0xFF, 0b0000 << 4],
-                bc: [0x00, 0x14],
-                de: [0x00, 0x00],
-                hl: [0xC0, 0x60],
-                sp,
-                pc,
-            },
+            Model::GameBoy(Some(GBRevision::DMG0)) => {
+                af = [0b0000 << 4, 0x01];
+                bc = [0x13, 0xFF];
+                de = [0xC1, 0x00];
+                hl = [0x03, 0x84];
+            }
+            Model::GameBoy(Some(GBRevision::DMG)) => {
+                af = [if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
+                bc = [0x13, 0x00];
+                de = [0xD8, 0x00];
+                hl = [0x4D, 0x01];
+            }
+            Model::GameBoy(Some(GBRevision::MGB)) => {
+                af = [if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
+                bc = [0x13, 0x00];
+                de = [0xD8, 0x00];
+                hl = [0x4D, 0x01];
+            }
+            Model::SuperGameBoy(Some(SGBRevision::SGB)) => {
+                af = [0b0000 << 4, 0x01];
+                bc = [0x14, 0x00];
+                de = [0x00, 0x00];
+                hl = [0x60, 0xC0];
+            }
+            Model::SuperGameBoy(Some(SGBRevision::SGB2)) => {
+                af = [0b0000 << 4, 0xFF];
+                bc = [0x14, 0x00];
+                de = [0x00, 0x00];
+                hl = [0x60, 0xC0];
+            }
             Model::GameBoy(Some(GBRevision::CGBdmg)) => {
                 let mut b = 0x00;
-                let mut hl = [0x00, 0x7C];
+                let mut hl_bytes = [0x7C, 0x00];
                 if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01 || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33 && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01 {
                     for offset in 0..16 {
                         // If either licensee code is 0x01, B = sum of all title bytes
@@ -78,21 +125,17 @@ impl CPU {
                     }
                     if b == 0x43 || b == 0x58 {
                         // And, check special cases for HL
-                        hl = [0x99, 0x1A];
+                        hl_bytes = [0x1A, 0x99];
                     }
                 }
-                CPU {
-                    af: [0x11, 0b1000 << 4],
-                    bc: [b, 0x00],
-                    de: [0x00, 0x08],
-                    hl,
-                    sp,
-                    pc,
-                }
+                af = [0b1000 << 4, 0x11];
+                bc = [0x00, b];
+                de = [0x08, 0x00];
+                hl = hl_bytes;
             }
             Model::GameBoy(Some(GBRevision::AGBdmg)) => {
                 let mut b = 0x01;
-                let mut hl = [0x00, 0x7C];
+                let mut hl_bytes = [0x7C, 0x00];
                 let mut f = 0b00000000;
                 if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01 || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33 && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01 {
                     for offset in 0..16 {
@@ -108,56 +151,486 @@ impl CPU {
                         }
                     } else if b == 0x44 || b == 0x59 {
                         // Otherwise, still check special cases for HL
-                        hl = [0x99, 0x1A];
+                        hl_bytes = [0x1A, 0x99];
                     }
                 }
-                CPU {
-                    af: [0x11, f],
-                    bc: [b, 0x00],
-                    de: [0x00, 0x08],
-                    hl,
-                    sp,
-                    pc,
-                }
+                af = [f, 0x11];
+                bc = [0x00, b];
+                de = [0x08, 0x00];
+                hl = hl_bytes;
             }
-            Model::GameBoyColor(Some(CGBRevision::CGB0 | CGBRevision::CGB)) => CPU {
-                af: [0x11, 0b1000 << 4],
-                bc: [0x00, 0x00],
-                de: [0xFF, 0x56],
-                hl: [0x00, 0x0D],
-                sp,
-                pc,
-            },
-            Model::GameBoyAdvance(Some(AGBRevision::AGB0 | AGBRevision::AGB)) => CPU {
-                af: [0x11, 0b0000 << 4],
-                bc: [0x01, 0x00],
-                de: [0xFF, 0x56],
-                hl: [0x00, 0x0D],
-                sp,
-                pc,
-            },
+            Model::GameBoyColor(Some(CGBRevision::CGB0 | CGBRevision::CGB)) => {
+                af = [0b1000 << 4, 0x11];
+                bc = [0x00, 0x00];
+                de = [0x56, 0xFF];
+                hl = [0x0D, 0x00];
+            }
+            Model::GameBoyAdvance(Some(AGBRevision::AGB0 | AGBRevision::AGB)) => {
+                af = [0b0000 << 4, 0x11];
+                bc = [0x00, 0x01];
+                de = [0x56, 0xFF];
+                hl = [0x0D, 0x00];
+            }
             _ => panic!("Attempt to initialize Game Boy CPU without a proper revision"),
+        }
+        CPU {
+            af,
+            bc,
+            de,
+            hl,
+            sp,
+            pc,
+            ir,
+            ie,
+            ime,
+            ime_queued,
+            memory,
+            clock,
         }
     }
 
-    pub fn step(self, clock_barrier: Arc<ClockBarrier>) -> JoinHandle<()> {
+    #[inline(always)]
+    fn step_u8_and_wait(&mut self) -> u8 {
+        let result = self.memory.read().unwrap().read_u8(self.pc);
+        self.pc += 1;
+        self.clock.wait();
+        result
+    }
+
+    #[inline(always)]
+    fn read_u8_and_wait(&self, address: u16) -> u8 {
+        self.clock.wait();
+        self.memory.read().unwrap().read_u8(address)
+    }
+
+    #[inline(always)]
+    fn write_u8_and_wait(&self, address: u16, value: u8) -> () {
+        self.clock.wait();
+        self.memory.write().unwrap().write_u8(value, address);
+    }
+
+    pub fn step(mut self) -> JoinHandle<()> {
+        println!("A: {}", self.af[1]);
+        self.af[1] = self.af[1].wrapping_add(5);
+        println!("A + 5: {}", self.af[1]);
         thread::spawn(move || {
             loop {
-                println!("{} from cpu!", clock_barrier.cycle());
-                clock_barrier.wait();
-                if clock_barrier.new_frame() {
+                // Fetch cycle
+                self.ir = self.step_u8_and_wait();
+                if self.ime_queued {
+                    self.ime = true;
+                    self.ime_queued = false;
+                }
+
+                // Execute cycle(s)
+                opcode::OPCODE_TABLE[self.ir as usize](&mut self);
+
+                // TODO: Remove when debugging is complete
+                if self.clock.new_frame() {
                     break;
                 }
             }
         })
     }
+}
 
-    // pub fn step(&mut self, memory: &mut memory::Memory) -> () {
-    //     let opcode_address = self.pc;
-    //     self.pc += 1;
-    //     match memory.read_u8(opcode_address) {
-    //         0x00 => {} // NOP
-    //         _ => panic!("Undefined opcode")
-    //     }
-    // }
+// Opcode Helpers
+macro_rules! _offset {
+    (z) => {
+        7
+    };
+    (n) => {
+        6
+    };
+    (h) => {
+        5
+    };
+    (c) => {
+        4
+    };
+}
+macro_rules! _inverse_mask {
+    (z) => {
+        0b01111111
+    };
+    (n) => {
+        0b10111111
+    };
+    (h) => {
+        0b11011111
+    };
+    (c) => {
+        0b11101111
+    };
+}
+macro_rules! set_flags {
+    ($cpu:expr; $($key:ident=$val:expr),* $(,)?) => {
+        $(
+            $cpu.af[0] = ($cpu.af[0] & _inverse_mask!($key)) & (($val as u8) << _offset!($key));
+        )*
+    };
+}
+macro_rules! _mask {
+    (z) => {
+        0b10000000
+    };
+    (n) => {
+        0b01000000
+    };
+    (h) => {
+        0b00100000
+    };
+    (c) => {
+        0b00010000
+    };
+}
+macro_rules! get_flag {
+    ($cpu:expr; $flag:ident) => {
+        $cpu.af[0] & _mask!($flag) != 0
+    };
+}
+
+impl CPU {
+    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, dest: O1, src: O2) {
+        dest.set(src.get(self), self);
+    }
+
+    fn inc<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let (result, _) = o.overflowing_add(1);
+        let (_, half_carry) = (o | 0xF0).overflowing_add(1);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry)
+        );
+        operand.set(result, self);
+    }
+    fn inc16<O: IntOperand<u16>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let result = o.wrapping_add(1);
+        self.clock.wait();
+        operand.set(result, self);
+    }
+
+    fn dec<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let (result, _) = o.overflowing_sub(1);
+        let (_, half_carry) = (o & 0x0F).overflowing_sub(1);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry)
+        );
+        operand.set(result, self);
+    }
+    fn dec16<O: IntOperand<u16>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let result = o.wrapping_sub(1);
+        self.clock.wait();
+        operand.set(result, self);
+    }
+
+    fn add<O: IntOperand<u8>>(&mut self, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self));
+        let (result, carry) = a.overflowing_add(operand);
+        let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.af[1] = result;
+    }
+
+    fn adc<O: IntOperand<u8>>(&mut self, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self) + get_flag!(self; c) as u8);
+        let (result, carry) = a.overflowing_add(operand);
+        let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.af[1] = result;
+    }
+
+    fn sub<O: IntOperand<u8>>(&mut self, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self));
+        let (result, carry) = a.overflowing_sub(operand);
+        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.af[1] = result;
+    }
+
+    fn sbc<O: IntOperand<u8>>(&mut self, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self) + get_flag!(self; c) as u8);
+        let (result, carry) = a.overflowing_sub(operand);
+        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.af[1] = result;
+    }
+
+    fn and<O: IntOperand<u8>>(&mut self, operand: O) {
+        let result = self.af[1] & operand.get(self);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(true),
+            c=(false)
+        );
+        self.af[1] = result;
+    }
+
+    fn or<O: IntOperand<u8>>(&mut self, operand: O) {
+        let result = self.af[1] | operand.get(self);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(false),
+            c=(false)
+        );
+        self.af[1] = result;
+    }
+
+    fn xor<O: IntOperand<u8>>(&mut self, operand: O) {
+        let result = self.af[1] ^ operand.get(self);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(false),
+            c=(false)
+        );
+        self.af[1] = result;
+    }
+
+    fn cp<O: IntOperand<u8>>(&mut self, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self));
+        let (result, carry) = a.overflowing_sub(operand);
+        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+    }
+
+    fn push<O: IntOperand<u16>>(&mut self, operand: O) {
+        let bytes = u16::to_le_bytes(operand.get(self));
+        self.clock.wait();
+        self.sp -= 1;
+        self.write_u8_and_wait(self.sp, bytes[1]);
+        self.sp -= 1;
+        self.write_u8_and_wait(self.sp, bytes[0]);
+    }
+
+    fn pop<O: IntOperand<u16>>(&mut self, operand: O) {
+        let mut bytes = [0; 2];
+        bytes[0] = self.read_u8_and_wait(self.sp);
+        self.sp += 1;
+        bytes[1] = self.read_u8_and_wait(self.sp);
+        self.sp += 1;
+        operand.set(u16::from_le_bytes(bytes), self);
+    }
+
+    fn ccf(&mut self) {
+        set_flags!(self;
+            n=(false),
+            h=(false)
+        );
+        self.af[0] ^= _mask!(c);
+    }
+
+    fn scf(&mut self) {
+        set_flags!(self;
+            n=(false),
+            h=(false),
+            c=(true)
+        );
+    }
+
+    fn daa(&mut self) {
+        // TODO: Implement
+    }
+
+    fn cpl(&mut self) {
+        self.af[1] ^= 0xFF;
+        set_flags!(self;
+            n=(true),
+            h=(true)
+        );
+    }
+
+    fn rlc<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let result = o.rotate_left(1);
+        set_flags!(self;
+            z=(false),
+            n=(false),
+            h=(false),
+            c=(result & 0b00000001 != 0)
+        );
+        operand.set(result, self);
+    }
+
+    fn rrc<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let result = o.rotate_right(1);
+        set_flags!(self;
+            z=(false),
+            n=(false),
+            h=(false),
+            c=(result & 0b10000000 != 0)
+        );
+        operand.set(result, self);
+    }
+
+    fn rl<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let (result, carry) = o.overflowing_shl(1);
+        set_flags!(self;
+            z=(false),
+            n=(false),
+            h=(false),
+            c=(carry)
+        );
+        operand.set(result | get_flag!(self; c) as u8, self);
+    }
+
+    fn rr<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let (result, carry) = o.overflowing_shr(1);
+        set_flags!(self;
+            z=(false),
+            n=(false),
+            h=(false),
+            c=(carry)
+        );
+        operand.set(result | (get_flag!(self; c) as u8) << 7, self);
+    }
+
+    fn sla<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let (result, carry) = o.overflowing_shl(1);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(false),
+            c=(carry)
+        );
+        operand.set(result, self);
+    }
+
+    fn sra<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self) as i8;
+        let (result, carry) = o.overflowing_shr(1);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(false),
+            c=(carry)
+        );
+        operand.set(result as u8, self);
+    }
+
+    fn swap<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let result = (o & 0x0F) << 4 | (o & 0xF0) >> 4;
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(false),
+            c=(false)
+        );
+        operand.set(result, self);
+    }
+
+    fn srl<O: IntOperand<u8>>(&mut self, operand: O) {
+        let o = operand.get(self);
+        let (result, carry) = o.overflowing_shr(1);
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            h=(false),
+            c=(carry)
+        );
+        operand.set(result, self);
+    }
+
+    fn bit<O: IntOperand<u8>>(&mut self, index: u8, operand: O) {
+        let o = operand.get(self);
+        set_flags!(self;
+            z=(o & (1 << index) != 0),
+            n=(false),
+            h=(true),
+        );
+    }
+
+    fn res<O: IntOperand<u8>>(&mut self, index: u8, operand: O) {
+        let o = operand.get(self);
+        operand.set(o & ((1 << index) ^ 0b11111111), self);
+    }
+
+    fn set<O: IntOperand<u8>>(&mut self, index: u8, operand: O) {
+        let o = operand.get(self);
+        operand.set(o | (1 << index), self);
+    }
+
+    fn jp<O: IntOperand<u16>>(&mut self, condition: CondOperand, operand: O) {
+        let addr = operand.get(self);
+        if condition.evaluate(self) {
+            self.clock.wait();
+            self.pc = addr;
+        }
+    }
+
+    fn jr<O: IntOperand<i8>>(&mut self, condition: CondOperand, operand: O) {
+        let addr = self.pc.wrapping_add_signed(operand.get(self).into());
+        if condition.evaluate(self) {
+            self.clock.wait();
+            self.pc = addr;
+        }
+    }
+
+    fn call<O: IntOperand<u16>>(&mut self, condition: CondOperand, operand: O) {
+        let addr = operand.get(self);
+        if condition.evaluate(self) {
+            self.push(opcode::RegisterOperand16(Register16::PC));
+            self.pc = addr;
+        }
+    }
+
+    fn ret(&mut self, condition: CondOperand) {
+        self.clock.wait();
+        if condition.evaluate(self) {
+            self.pop(opcode::RegisterOperand16(Register16::PC));
+            self.clock.wait();
+        }
+    }
+
+    fn reti(&mut self) {
+        self.ret(CondOperand::Unconditional);
+        self.ime = true;
+    }
+
+    fn ei(&mut self) {
+        self.ime_queued = true;
+    }
+
+    fn di(&mut self) {
+        self.ime = false;
+    }
 }

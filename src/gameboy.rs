@@ -74,21 +74,28 @@ pub enum AGBRevision {
 pub struct GameBoy {
     //apu: apu::APU,
     cpu: Option<cpu::CPU>,
-    memory: Option<memory::Memory>,
+    memory: Arc<RwLock<memory::Memory>>,
     ppu: Option<ppu::PPU>,
 
-    master_clock: u32,
+    clock: Arc<ClockBarrier>,
 }
 
 impl GameBoy {
     fn from_revision(path: &Path, model: Model) -> Result<Self, HydraIOError> {
+        const THREAD_COUNT: usize = 2; // Based on PPU speed
+        const CYCLES_PER_FRAME: usize = 70224; // Based on PPU speed
+
         let rom = fs::read(path)?.into_boxed_slice();
+        let clock = Arc::new(ClockBarrier::new(THREAD_COUNT, CYCLES_PER_FRAME));
+        let memory = Arc::new(RwLock::new(memory::Memory::from_rom_and_model(rom.clone(), model)?));
+        let cpu = Some(cpu::CPU::new(&rom, model, memory.clone(), clock.clone()));
 
         Ok(GameBoy {
-            cpu: Some(cpu::CPU::from_rom_and_model(&rom, model)),
-            memory: Some(memory::Memory::from_rom_and_model(rom, model)?),
+            cpu,
+            memory,
             ppu: Some(ppu::PPU {}),
-            master_clock: 0,
+
+            clock,
         })
     }
     pub fn from_model(path: &Path, model: Model, config: &Config) -> Result<Self, HydraIOError> {
@@ -104,25 +111,23 @@ impl GameBoy {
     }
     fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
         let rom: Box<[u8]> = fs::read(path)?.into_boxed_slice();
-        self.memory.as_mut().unwrap().hot_swap_rom(rom)?;
-        Ok(())
+        self.memory.write().unwrap().hot_swap_rom(rom)
     }
 }
 
 impl Emulator for GameBoy {
     fn main_thread(&mut self) {
         println!("Launching Wyrm");
-        const CYCLES_PER_FRAME: usize = 70224; // Based on PPU speed
-        let clock_barrier = Arc::new(ClockBarrier::new(2, CYCLES_PER_FRAME)); // 1 for each spawned thread, +1 for the main thread
-        let cpu_handle = self.cpu.take().unwrap().step(clock_barrier.clone());
+
+        let cpu_handle = self.cpu.take().unwrap().step();
         thread::spawn(|| println!(""));
         thread::spawn(|| println!("PPU"));
         thread::spawn(|| println!("APU"));
         println!("mainthread");
         loop {
-            println!("{} from main!", clock_barrier.cycle());
-            clock_barrier.wait();
-            if clock_barrier.new_frame() {
+            println!("{} from main!", self.clock.cycle());
+            self.clock.wait();
+            if self.clock.new_frame() {
                 break;
             }
         }

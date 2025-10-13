@@ -14,7 +14,7 @@ mod mbc0;
 use crate::common::errors::HydraIOError;
 use crate::gameboy::memory;
 
-pub trait CartMemoryBankController {
+pub trait CartMemoryBankController: Send + Sync + 'static {
     fn read_rom_u8(&self, address: usize) -> Result<u8, HydraIOError>;
     fn read_ram_u8(&self, address: usize) -> Result<u8, HydraIOError>;
     fn write_rom_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
