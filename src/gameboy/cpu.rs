@@ -209,14 +209,13 @@ impl CPU {
         self.memory.write().unwrap().write_u8(value, address);
     }
 
-    pub fn step(mut self) -> JoinHandle<()> {
-        println!("A: {}", self.af[1]);
-        self.af[1] = self.af[1].wrapping_add(5);
-        println!("A + 5: {}", self.af[1]);
+    pub fn run(mut self) -> JoinHandle<()> {
         thread::spawn(move || {
             loop {
                 // Fetch cycle
+                print!("{:#06X}: ", self.pc);
                 self.ir = self.step_u8_and_wait();
+                println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
                 if self.ime_queued {
                     self.ime = true;
                     self.ime_queued = false;
@@ -266,7 +265,7 @@ macro_rules! _inverse_mask {
 macro_rules! set_flags {
     ($cpu:expr; $($key:ident=$val:expr),* $(,)?) => {
         $(
-            $cpu.af[0] = ($cpu.af[0] & _inverse_mask!($key)) & (($val as u8) << _offset!($key));
+            $cpu.af[0] = ($cpu.af[0] & _inverse_mask!($key)) | (($val as u8) << _offset!($key));
         )*
     };
 }
@@ -293,6 +292,23 @@ macro_rules! get_flag {
 impl CPU {
     fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, dest: O1, src: O2) {
         dest.set(src.get(self), self);
+    }
+
+    fn ld_hlspe(&mut self) {
+        let e = self.step_u8_and_wait() as i8;
+        let result = self.sp.wrapping_add_signed(e.into());
+        let lsb = (self.sp & 0xFF) as u8;
+        let (_, carry) = lsb.overflowing_add_signed(e);
+        let lsb_half = if e.signum() == 1 {lsb | 0xF0} else {lsb & 0x0F};
+        let (_, half_carry) = lsb_half.overflowing_add_signed(e);
+        set_flags!(self;
+            z=(false),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.clock.wait();
+        self.hl = u16::to_le_bytes(result);
     }
 
     fn inc<O: IntOperand<u8>>(&mut self, operand: O) {
@@ -342,6 +358,39 @@ impl CPU {
             c=(carry)
         );
         self.af[1] = result;
+    }
+
+    fn add_hl<O: IntOperand<u16>>(&mut self, operand: O) {
+        let (hl, operand) = (u16::from_le_bytes(self.hl), operand.get(self));
+        let result = hl.wrapping_add(operand);
+        let [_, h] = self.hl;
+        let [_, oph] = u16::to_le_bytes(operand);
+        let (_, carry) = h.overflowing_add(oph);
+        let (_, half_carry) = (h | 0xF0).overflowing_add(oph);
+        set_flags!(self;
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.hl = u16::to_le_bytes(result);
+    }
+
+    fn add_spe(&mut self) {
+        let e = self.step_u8_and_wait() as i8;
+        let result = self.sp.wrapping_add_signed(e.into());
+        let lsb = (self.sp & 0xFF) as u8;
+        let (_, carry) = lsb.overflowing_add_signed(e);
+        let lsb_half = if e.signum() == 1 {lsb | 0xF0} else {lsb & 0x0F};
+        let (_, half_carry) = lsb_half.overflowing_add_signed(e);
+        set_flags!(self;
+            z=(false),
+            n=(false),
+            h=(half_carry),
+            c=(carry)
+        );
+        self.clock.wait();
+        self.clock.wait();
+        self.sp = result;
     }
 
     fn adc<O: IntOperand<u8>>(&mut self, operand: O) {
@@ -407,6 +456,7 @@ impl CPU {
 
     fn xor<O: IntOperand<u8>>(&mut self, operand: O) {
         let result = self.af[1] ^ operand.get(self);
+        println!("{}", result);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -463,7 +513,7 @@ impl CPU {
     }
 
     fn daa(&mut self) {
-        // TODO: Implement
+        todo!() //TODO
     }
 
     fn cpl(&mut self) {
@@ -632,5 +682,13 @@ impl CPU {
 
     fn di(&mut self) {
         self.ime = false;
+    }
+
+    fn halt(&mut self) {
+        todo!() //TODO
+    }
+
+    fn stop(&mut self) {
+        todo!() //TODO
     }
 }

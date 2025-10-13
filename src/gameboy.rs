@@ -119,13 +119,12 @@ impl Emulator for GameBoy {
     fn main_thread(&mut self) {
         println!("Launching Wyrm");
 
-        let cpu_handle = self.cpu.take().unwrap().step();
+        let cpu_handle = self.cpu.take().unwrap().run();
         thread::spawn(|| println!(""));
         thread::spawn(|| println!("PPU"));
         thread::spawn(|| println!("APU"));
         println!("mainthread");
         loop {
-            println!("{} from main!", self.clock.cycle());
             self.clock.wait();
             if self.clock.new_frame() {
                 break;
@@ -133,5 +132,14 @@ impl Emulator for GameBoy {
         }
         cpu_handle.join();
         println!("Exiting Wyrm");
+
+        // Dump memory (for debugging)
+        for y in 0..=0xFFF {
+            print!("{:#06X}:   ", y<<4);
+            for x in 0..=0xF {
+                print!("{:02X} ", self.memory.read().unwrap().read_u8(x | (y << 4)));
+            }
+            println!("");
+        }
     }
 }

@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use crate::gameboy::cpu::{self, CPU};
 
 pub trait IntOperand<T> {
@@ -44,7 +42,7 @@ impl IntOperand<u8> for ImmediateOperand8 {
         cpu.step_u8_and_wait()
     }
     #[inline(always)]
-    fn set(&self, value: u8, cpu: &mut CPU) {
+    fn set(&self, _: u8, _: &mut CPU) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -56,13 +54,13 @@ impl IntOperand<i8> for ImmediateSignedOperand8 {
         cpu.step_u8_and_wait() as i8
     }
     #[inline(always)]
-    fn set(&self, value: i8, cpu: &mut CPU) {
+    fn set(&self, _: i8, _: &mut CPU) {
         panic!("Cannot write to immediate operand")
     }
 }
 
-pub struct IndirectOperand<O: IntOperand<u16>>(pub O);
-impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand<O> {
+pub struct IndirectOperand8<O: IntOperand<u16>>(pub O);
+impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand8<O> {
     #[inline(always)]
     fn get(&self, cpu: &mut CPU) -> u8 {
         let address = self.0.get(cpu);
@@ -71,6 +69,36 @@ impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand<O> {
     #[inline(always)]
     fn set(&self, value: u8, cpu: &mut CPU) {
         let address = self.0.get(cpu);
+        cpu.write_u8_and_wait(address, value);
+    }
+}
+pub struct IncIndirectOperand8<O: IntOperand<u16>>(pub O);
+impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
+    #[inline(always)]
+    fn get(&self, cpu: &mut CPU) -> u8 {
+        let address = self.0.get(cpu);
+        self.0.set(address+1, cpu);
+        cpu.read_u8_and_wait(address)
+    }
+    #[inline(always)]
+    fn set(&self, value: u8, cpu: &mut CPU) {
+        let address = self.0.get(cpu);
+        self.0.set(address+1, cpu);
+        cpu.write_u8_and_wait(address, value);
+    }
+}
+pub struct DecIndirectOperand8<O: IntOperand<u16>>(pub O);
+impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
+    #[inline(always)]
+    fn get(&self, cpu: &mut CPU) -> u8 {
+        let address = self.0.get(cpu);
+        self.0.set(address-1, cpu);
+        cpu.read_u8_and_wait(address)
+    }
+    #[inline(always)]
+    fn set(&self, value: u8, cpu: &mut CPU) {
+        let address = self.0.get(cpu);
+        self.0.set(address-1, cpu);
         cpu.write_u8_and_wait(address, value);
     }
 }
@@ -92,6 +120,20 @@ impl<O: IntOperand<u8>> IntOperand<u8> for HramIndirectOperand<O> {
     fn set(&self, value: u8, cpu: &mut CPU) {
         let hram_address = self.as_hram_address(cpu);
         cpu.write_u8_and_wait(hram_address, value);
+    }
+}
+impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
+    #[inline(always)]
+    fn get(&self, cpu: &mut CPU) -> u16 {
+        let address = self.0.get(cpu);
+        u16::from_le_bytes([cpu.read_u8_and_wait(address), cpu.read_u8_and_wait(address+1)])
+    }
+    #[inline(always)]
+    fn set(&self, value: u16, cpu: &mut CPU) {
+        let address = self.0.get(cpu);
+        let bytes = u16::to_le_bytes(value);
+        cpu.write_u8_and_wait(address, bytes[0]);
+        cpu.write_u8_and_wait(address+1, bytes[1]);
     }
 }
 
@@ -128,7 +170,7 @@ impl IntOperand<u16> for ImmediateOperand16 {
         u16::from_le_bytes([cpu.step_u8_and_wait(), cpu.step_u8_and_wait()])
     }
     #[inline(always)]
-    fn set(&self, value: u16, cpu: &mut CPU) {
+    fn set(&self, _: u16, _: &mut CPU) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -136,11 +178,11 @@ impl IntOperand<u16> for ImmediateOperand16 {
 pub struct ConstOperand16(u16);
 impl IntOperand<u16> for ConstOperand16 {
     #[inline(always)]
-    fn get(&self, cpu: &mut CPU) -> u16 {
+    fn get(&self, _: &mut CPU) -> u16 {
         self.0
     }
     #[inline(always)]
-    fn set(&self, value: u16, cpu: &mut CPU) {
+    fn set(&self, _: u16, _: &mut CPU) {
         panic!("Cannot write to constant operand")
     }
 }
@@ -173,14 +215,6 @@ pub static OPCODE_TABLE: [OpHandler; 0x100] = init_opcode_table();
 static CB_TABLE: [OpHandler; 0x100] = init_cb_table();
 
 const fn init_opcode_table() -> [OpHandler; 0x100] {
-    // Opcode macros
-    macro_rules! ld16 {
-        ($cpu:expr => $dest:expr, $src:expr) => {
-            $dest = $src;
-            $cpu.clock.wait();
-        };
-    }
-
     // Table initialization
     let mut opcode_table: [OpHandler; 0x100] = [OP_UNINIT; 0x100];
     opcode_table[0x00] = |_| { // NOP
@@ -190,7 +224,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand16(cpu::Register16::BC), ImmediateOperand16);
     };
     opcode_table[0x02] = |cpu| { // LD (BC), A
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::BC)), RegisterOperand8(cpu::Register8::A));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::BC)), RegisterOperand8(cpu::Register8::A));
     };
     opcode_table[0x03] = |cpu| { // INC BC
         cpu.inc16(RegisterOperand16(cpu::Register16::BC));
@@ -208,13 +242,13 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.rlc(RegisterOperand8(cpu::Register8::A));
     };
     opcode_table[0x08] = |cpu| { // LD (nn), SP
-        
+        cpu.ld(IndirectOperand8(ImmediateOperand16), RegisterOperand16(cpu::Register16::SP));
     };
     opcode_table[0x09] = |cpu| { // ADD HL, BC
-        
+        cpu.add_hl(RegisterOperand16(cpu::Register16::BC));
     };
     opcode_table[0x0A] = |cpu| { // LD A, (BC)
-        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand(RegisterOperand16(cpu::Register16::BC)));
+        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand8(RegisterOperand16(cpu::Register16::BC)));
     };
     opcode_table[0x0B] = |cpu| { // DEC BC
         cpu.dec16(RegisterOperand16(cpu::Register16::BC));
@@ -233,13 +267,13 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
     };
 
     opcode_table[0x10] = |cpu| { // STOP
-        
+        cpu.stop();
     };
     opcode_table[0x11] = |cpu| { // LD DE, nn
         cpu.ld(RegisterOperand16(cpu::Register16::DE), ImmediateOperand16);
     };
     opcode_table[0x12] = |cpu| { // LD (DE), A
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::DE)), RegisterOperand8(cpu::Register8::A));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::DE)), RegisterOperand8(cpu::Register8::A));
     };
     opcode_table[0x13] = |cpu| { // INC DE
         cpu.inc16(RegisterOperand16(cpu::Register16::DE));
@@ -260,10 +294,10 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.jr(CondOperand::Unconditional, ImmediateSignedOperand8);
     };
     opcode_table[0x19] = |cpu| { // ADD HL, DE
-        
+        cpu.add_hl(RegisterOperand16(cpu::Register16::DE));
     };
     opcode_table[0x1A] = |cpu| { // LD A, (DE)
-        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand(RegisterOperand16(cpu::Register16::DE)));
+        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand8(RegisterOperand16(cpu::Register16::DE)));
     };
     opcode_table[0x1B] = |cpu| { // DEC DE
         cpu.dec16(RegisterOperand16(cpu::Register16::DE));
@@ -288,7 +322,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand16(cpu::Register16::HL), ImmediateOperand16);
     };
     opcode_table[0x22] = |cpu| { // LD (HL+), A
-        
+        cpu.ld(IncIndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
     };
     opcode_table[0x23] = |cpu| { // INC HL
         cpu.inc16(RegisterOperand16(cpu::Register16::HL));
@@ -309,10 +343,10 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.jr(CondOperand::Z, ImmediateSignedOperand8);
     };
     opcode_table[0x29] = |cpu| { // ADD HL, HL
-        
+        cpu.add_hl(RegisterOperand16(cpu::Register16::HL));
     };
     opcode_table[0x2A] = |cpu| { // LD A, (HL+)
-        
+        cpu.ld(RegisterOperand8(cpu::Register8::A), IncIndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x2B] = |cpu| { // DEC HL
         cpu.dec16(RegisterOperand16(cpu::Register16::HL));
@@ -337,19 +371,19 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand16(cpu::Register16::SP), ImmediateOperand16);
     };
     opcode_table[0x32] = |cpu| { // LD (HL-), A
-        
+        cpu.ld(DecIndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
     };
     opcode_table[0x33] = |cpu| { // INC SP
         cpu.inc16(RegisterOperand16(cpu::Register16::SP));
     };
     opcode_table[0x34] = |cpu| { // INC (HL)
-        cpu.inc(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.inc(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x35] = |cpu| { // DEC (HL)
-        cpu.dec(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.dec(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x36] = |cpu| { // LD (HL), n
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), ImmediateOperand8);
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), ImmediateOperand8);
     };
     opcode_table[0x37] = |cpu| { // SCF
         cpu.scf();
@@ -358,10 +392,10 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.jr(CondOperand::C, ImmediateSignedOperand8);
     };
     opcode_table[0x39] = |cpu| { // ADD HL, SP
-        
+        cpu.add_hl(RegisterOperand16(cpu::Register16::SP));
     };
     opcode_table[0x3A] = |cpu| { // LD A, (HL-)
-        
+        cpu.ld(RegisterOperand8(cpu::Register8::A), DecIndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x3B] = |cpu| { // DEC SP
         cpu.dec16(RegisterOperand16(cpu::Register16::SP));
@@ -398,7 +432,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x46] = |cpu| { // LD B, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::B), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::B), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x47] = |cpu| { // LD B, A
         cpu.ld(RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::A));
@@ -422,7 +456,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x4E] = |cpu| { // LD C, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::C), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::C), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x4F] = |cpu| { // LD C, A
         cpu.ld(RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::A));
@@ -447,7 +481,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x56] = |cpu| { // LD D, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::D), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::D), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x57] = |cpu| { // LD D, A
         cpu.ld(RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::A));
@@ -471,7 +505,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x5E] = |cpu| { // LD E, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::E), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::E), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x5F] = |cpu| { // LD E, A
         cpu.ld(RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::A));
@@ -496,7 +530,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x66] = |cpu| { // LD H, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::H), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::H), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x67] = |cpu| { // LD H, A
         cpu.ld(RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::A));
@@ -520,35 +554,35 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x6E] = |cpu| { // LD L, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::L), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::L), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x6F] = |cpu| { // LD L, A
         cpu.ld(RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::A));
     };
 
     opcode_table[0x70] = |cpu| { // LD (HL), B
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::B));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::B));
     };
     opcode_table[0x71] = |cpu| { // LD (HL), C
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::C));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::C));
     };
     opcode_table[0x72] = |cpu| { // LD (HL), D
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::D));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::D));
     };
     opcode_table[0x73] = |cpu| { // LD (HL), E
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::E));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::E));
     };
     opcode_table[0x74] = |cpu| { // LD (HL), H
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::H));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::H));
     };
     opcode_table[0x75] = |cpu| { // LD (HL), L
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::L));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x76] = |cpu| { // HALT
-        // TODO: Implement
+        cpu.halt();
     };
     opcode_table[0x77] = |cpu| { // LD (HL), A
-        cpu.ld(IndirectOperand(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
+        cpu.ld(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
     };
     opcode_table[0x78] = |cpu| { // LD A, B
         cpu.ld(RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::B));
@@ -569,7 +603,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.ld(RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x7E] = |cpu| { // LD A, (HL)
-        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x7F] = |cpu| { // LD A, A
         cpu.ld(RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::A));
@@ -594,7 +628,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.add(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x86] = |cpu| { // ADD (HL)
-        cpu.add(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.add(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x87] = |cpu| { // ADD A
         cpu.add(RegisterOperand8(cpu::Register8::A));
@@ -618,7 +652,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.adc(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x8E] = |cpu| { // ADC (HL)
-        cpu.adc(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.adc(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x8F] = |cpu| { // ADC A
         cpu.adc(RegisterOperand8(cpu::Register8::A));
@@ -643,7 +677,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.sub(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x96] = |cpu| { // SUB (HL)
-        cpu.sub(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.sub(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x97] = |cpu| { // SUB A
         cpu.sub(RegisterOperand8(cpu::Register8::A));
@@ -667,7 +701,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.sbc(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x9E] = |cpu| { // SBC (HL)
-        cpu.sbc(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.sbc(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x9F] = |cpu| { // SBC A
         cpu.sbc(RegisterOperand8(cpu::Register8::A));
@@ -692,7 +726,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.and(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0xA6] = |cpu| { // AND (HL)
-        cpu.and(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.and(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xA7] = |cpu| { // AND A
         cpu.and(RegisterOperand8(cpu::Register8::A));
@@ -716,7 +750,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.xor(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0xAE] = |cpu| { // XOR (HL)
-        cpu.xor(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.xor(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xAF] = |cpu| { // XOR A
         cpu.xor(RegisterOperand8(cpu::Register8::A));
@@ -741,7 +775,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.or(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0xB6] = |cpu| { // OR (HL)
-        cpu.or(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.or(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xB7] = |cpu| { // OR A
         cpu.or(RegisterOperand8(cpu::Register8::A));
@@ -765,7 +799,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.cp(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0xBE] = |cpu| { // CP (HL)
-        cpu.cp(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.cp(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xBF] = |cpu| { // CP A
         cpu.cp(RegisterOperand8(cpu::Register8::A));
@@ -885,13 +919,13 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.call(CondOperand::Unconditional, ConstOperand16(0x0020));
     };
     opcode_table[0xE8] = |cpu| { // ADD SP, e
-        
+        cpu.add_spe();
     };
     opcode_table[0xE9] = |cpu| { // JP HL
         cpu.ld(RegisterOperand16(cpu::Register16::PC), RegisterOperand16(cpu::Register16::HL));
     };
     opcode_table[0xEA] = |cpu| { // LD (nn), A
-        cpu.ld(IndirectOperand(ImmediateOperand16), RegisterOperand8(cpu::Register8::A));
+        cpu.ld(IndirectOperand8(ImmediateOperand16), RegisterOperand8(cpu::Register8::A));
     };
     // opcode_table[0xEB] = (invalid)
     // opcode_table[0xEC] = (invalid)
@@ -926,14 +960,14 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
         cpu.call(CondOperand::Unconditional, ConstOperand16(0x0030));
     };
     opcode_table[0xF8] = |cpu| { // LD HL, SP+e
-        
+        cpu.ld_hlspe();
     };
     opcode_table[0xF9] = |cpu| { // LD SP, HL
         cpu.ld(RegisterOperand16(cpu::Register16::SP), RegisterOperand16(cpu::Register16::HL));
         cpu.clock.wait();
     };
     opcode_table[0xFA] = |cpu| { // LD A, (nn)
-        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand(ImmediateOperand16));
+        cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand8(ImmediateOperand16));
     };
     opcode_table[0xFB] = |cpu| { // EI
         cpu.ei();
@@ -971,7 +1005,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.rlc(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x06] = |cpu| { // RLC (HL)
-        cpu.rlc(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.rlc(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x07] = |cpu| { // RLC A
         cpu.rlc(RegisterOperand8(cpu::Register8::A));
@@ -995,7 +1029,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.rrc(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x0E] = |cpu| { // RRC (HL)
-        cpu.rrc(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.rrc(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x0F] = |cpu| { // RRC A
         cpu.rrc(RegisterOperand8(cpu::Register8::A));
@@ -1020,7 +1054,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.rl(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x16] = |cpu| { // RL (HL)
-        cpu.rl(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.rl(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x17] = |cpu| { // RL A
         cpu.rl(RegisterOperand8(cpu::Register8::A));
@@ -1044,7 +1078,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.rr(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x1E] = |cpu| { // RR (HL)
-        cpu.rr(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.rr(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x1F] = |cpu| { // RR A
         cpu.rr(RegisterOperand8(cpu::Register8::A));
@@ -1069,7 +1103,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.sla(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x26] = |cpu| { // SLA (HL)
-        cpu.sla(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.sla(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x27] = |cpu| { // SLA A
         cpu.sla(RegisterOperand8(cpu::Register8::A));
@@ -1093,7 +1127,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.sra(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x2E] = |cpu| { // SRA (HL)
-        cpu.sra(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.sra(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x2F] = |cpu| { // SRA A
         cpu.sra(RegisterOperand8(cpu::Register8::A));
@@ -1118,7 +1152,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.swap(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x36] = |cpu| { // SWAP (HL)
-        cpu.swap(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.swap(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x37] = |cpu| { // SWAP A
         cpu.swap(RegisterOperand8(cpu::Register8::A));
@@ -1142,7 +1176,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
         cpu.srl(RegisterOperand8(cpu::Register8::L));
     };
     opcode_table[0x3E] = |cpu| { // SRL (HL)
-        cpu.srl(IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.srl(IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x3F] = |cpu| { // SRL A
         cpu.srl(RegisterOperand8(cpu::Register8::A));
@@ -1167,7 +1201,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(0, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x46] = |cpu| { // BIT 0, (HL)
-        cpu.bit(0, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x47] = |cpu| { // BIT 0, A
 		cpu.bit(0, RegisterOperand8(cpu::Register8::A))        
@@ -1191,7 +1225,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(1, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x4E] = |cpu| { // BIT 1, (HL)
-        cpu.bit(1, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x4F] = |cpu| { // BIT 1, A
 		cpu.bit(1, RegisterOperand8(cpu::Register8::A))        
@@ -1216,7 +1250,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(2, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x56] = |cpu| { // BIT 2, (HL)
-        cpu.bit(2, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x57] = |cpu| { // BIT 2, A
 		cpu.bit(2, RegisterOperand8(cpu::Register8::A))        
@@ -1240,7 +1274,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(3, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x5E] = |cpu| { // BIT 3, (HL)
-        cpu.bit(3, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x5F] = |cpu| { // BIT 3, A
 		cpu.bit(3, RegisterOperand8(cpu::Register8::A))        
@@ -1265,7 +1299,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(4, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x66] = |cpu| { // BIT 4, (HL)
-        cpu.bit(4, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x67] = |cpu| { // BIT 4, A
 		cpu.bit(4, RegisterOperand8(cpu::Register8::A))        
@@ -1289,7 +1323,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(5, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x6E] = |cpu| { // BIT 5, (HL)
-        cpu.bit(5, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x6F] = |cpu| { // BIT 5, A
 		cpu.bit(5, RegisterOperand8(cpu::Register8::A))        
@@ -1314,7 +1348,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(6, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x76] = |cpu| { // BIT 6, (HL)
-        cpu.bit(6, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x77] = |cpu| { // BIT 6, A
 		cpu.bit(6, RegisterOperand8(cpu::Register8::A))        
@@ -1338,7 +1372,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.bit(7, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x7E] = |cpu| { // BIT 7, (HL)
-        cpu.bit(7, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.bit(7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x7F] = |cpu| { // BIT 7, A
 		cpu.bit(7, RegisterOperand8(cpu::Register8::A))        
@@ -1363,7 +1397,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(0, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x86] = |cpu| { // RES 0, (HL)
-        cpu.res(0, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x87] = |cpu| { // RES 0, A
 		cpu.res(0, RegisterOperand8(cpu::Register8::A))        
@@ -1387,7 +1421,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(1, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x8E] = |cpu| { // RES 1, (HL)
-        cpu.res(1, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x8F] = |cpu| { // RES 1, A
 		cpu.res(1, RegisterOperand8(cpu::Register8::A))        
@@ -1412,7 +1446,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(2, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x96] = |cpu| { // RES 2, (HL)
-        cpu.res(2, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x97] = |cpu| { // RES 2, A
 		cpu.res(2, RegisterOperand8(cpu::Register8::A))        
@@ -1436,7 +1470,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(3, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0x9E] = |cpu| { // RES 3, (HL)
-        cpu.res(3, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0x9F] = |cpu| { // RES 3, A
 		cpu.res(3, RegisterOperand8(cpu::Register8::A))        
@@ -1461,7 +1495,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(4, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xA6] = |cpu| { // RES 4, (HL)
-        cpu.res(4, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xA7] = |cpu| { // RES 4, A
 		cpu.res(4, RegisterOperand8(cpu::Register8::A))        
@@ -1485,7 +1519,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(5, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xAE] = |cpu| { // RES 5, (HL)
-        cpu.res(5, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xAF] = |cpu| { // RES 5, A
 		cpu.res(5, RegisterOperand8(cpu::Register8::A))        
@@ -1510,7 +1544,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(6, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xB6] = |cpu| { // RES 6, (HL)
-        cpu.res(6, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xB7] = |cpu| { // RES 6, A
 		cpu.res(6, RegisterOperand8(cpu::Register8::A))        
@@ -1534,7 +1568,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.res(7, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xBE] = |cpu| { // RES 7, (HL)
-        cpu.res(7, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.res(7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xBF] = |cpu| { // RES 7, A
 		cpu.res(7, RegisterOperand8(cpu::Register8::A))        
@@ -1559,7 +1593,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(0, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xC6] = |cpu| { // SET 0, (HL)
-        cpu.set(0, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xC7] = |cpu| { // SET 0, A
 		cpu.set(0, RegisterOperand8(cpu::Register8::A))        
@@ -1583,7 +1617,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(1, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xCE] = |cpu| { // SET 1, (HL)
-        cpu.set(1, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xCF] = |cpu| { // SET 1, A
 		cpu.set(1, RegisterOperand8(cpu::Register8::A))        
@@ -1608,7 +1642,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(2, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xD6] = |cpu| { // SET 2, (HL)
-        cpu.set(2, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xD7] = |cpu| { // SET 2, A
 		cpu.set(2, RegisterOperand8(cpu::Register8::A))        
@@ -1632,7 +1666,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(3, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xDE] = |cpu| { // SET 3, (HL)
-        cpu.set(3, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xDF] = |cpu| { // SET 3, A
 		cpu.set(3, RegisterOperand8(cpu::Register8::A))        
@@ -1657,7 +1691,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(4, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xE6] = |cpu| { // SET 4, (HL)
-        cpu.set(4, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xE7] = |cpu| { // SET 4, A
 		cpu.set(4, RegisterOperand8(cpu::Register8::A))        
@@ -1681,7 +1715,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(5, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xEE] = |cpu| { // SET 5, (HL)
-        cpu.set(5, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xEF] = |cpu| { // SET 5, A
 		cpu.set(5, RegisterOperand8(cpu::Register8::A))        
@@ -1706,7 +1740,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(6, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xF6] = |cpu| { // SET 6, (HL)
-        cpu.set(6, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xF7] = |cpu| { // SET 6, A
 		cpu.set(6, RegisterOperand8(cpu::Register8::A))        
@@ -1730,7 +1764,7 @@ const fn init_cb_table() -> [OpHandler; 0x100] {
 		cpu.set(7, RegisterOperand8(cpu::Register8::L))        
     };
     opcode_table[0xFE] = |cpu| { // SET 7, (HL)
-        cpu.set(7, IndirectOperand(RegisterOperand16(cpu::Register16::HL)));
+        cpu.set(7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
     };
     opcode_table[0xFF] = |cpu| { // SET 7, A
 		cpu.set(7, RegisterOperand8(cpu::Register8::A))        
