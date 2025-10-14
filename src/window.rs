@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use muda::accelerator::{Accelerator, Code, Modifiers};
 use muda::{AboutMetadata, AboutMetadataBuilder, CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
@@ -21,14 +21,12 @@ use crate::ui::UserInterface;
 #[derive(Default)]
 pub struct HydraApp {
     config: Option<Config>,
-    emulator: Option<Box<dyn Emulator>>,
+    emulator: Option<Arc<dyn Emulator>>,
     window: Option<Arc<Window>>,
     ui: Option<UserInterface>,
-    graphics: Option<Graphics>,
+    graphics: Option<Arc<RwLock<Graphics>>>,
 
-    _temp_buffer: Vec<u8>,
     _temp_counter: u64,
-    _temp_size: usize,
     _temp_time: Option<std::time::Instant>,
 }
 
@@ -36,6 +34,10 @@ impl HydraApp {
     fn init_app(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes().with_title("Hydra");
         self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
+        self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(
+            self.window.clone().unwrap(),
+            None,
+        )))));
 
         self.config = Some(Config::from_toml());
         self.ui = Some(UserInterface::from_config(self.config.as_ref().unwrap()));
@@ -44,16 +46,17 @@ impl HydraApp {
 
     fn try_init_emulator<F>(&mut self, filters: &[(&str, &[&str])], func: F)
     where
-        F: Fn(&PathBuf, &Config) -> Result<Box<dyn Emulator>, HydraIOError>,
+        F: Fn(&PathBuf, Arc<RwLock<Graphics>>, &Config) -> Result<Arc<dyn Emulator>, HydraIOError>,
     {
+        println!("Loading ROM.");
         let file_dialog = filters.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
         match file_dialog.pick_file() {
-            Some(path) => match func(&path, self.config.as_ref().unwrap()) {
+            Some(path) => match func(&path, Arc::clone(self.graphics.as_ref().unwrap()), self.config.as_ref().unwrap()) {
                 // If a file was selected, try to initialize Emulator
                 Ok(mut emu) => {
                     // If Emulator construction succeeds, save to app state and launch it
                     println!("Successfully loaded {}. Launching emulator.", path.file_name().unwrap().display());
-                    emu.main_thread();
+                    Arc::clone(&emu).main_thread();
                     self.emulator = Some(emu);
                 }
                 Err(e) => {
@@ -71,8 +74,8 @@ impl HydraApp {
     }
 
     fn try_init_gameboy(&mut self, model: gameboy::Model) {
-        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, config| {
-            gameboy::GameBoy::from_model(path, model, config).and_then(|emu| Ok(Box::new(emu) as Box<dyn Emulator>))
+        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, graphics, config| {
+            gameboy::GameBoy::from_model(path, model, graphics, config).and_then(|emu| Ok(Arc::new(emu) as Arc<dyn Emulator>))
         })
     }
 }
@@ -93,17 +96,6 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(graphics) = &self.graphics {
-                    println!("Drawing test graphic. {:?}", std::time::Instant::now());
-                    // Test texture generation
-                    let upper_bound: usize = (self._temp_size * self._temp_size * 4) as usize; //TODO: Remove when finished testing
-                    for _ in 0..upper_bound / 4 {
-                        self._temp_buffer[rand::rng().random_range(0..upper_bound)] = 0;
-                    }
-                    // Update and render
-                    println!("Updating screen. {:?}", std::time::Instant::now());
-                    graphics.update_screen_texture(self._temp_buffer.as_slice());
-                    graphics.render();
-
                     self._temp_counter += 1;
                     let now = std::time::Instant::now();
                     let diff = (now - self._temp_time.unwrap()).as_secs_f64();
@@ -117,11 +109,6 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
                 match event.state {
                     ElementState::Pressed => match event.physical_key {
-                        PhysicalKey::Code(KeyCode::KeyA) => {
-                            self._temp_size = 1000;
-                            self._temp_buffer = vec![255; self._temp_size * self._temp_size * 4];
-                            self.graphics.as_mut().unwrap().resize_screen_texture(self._temp_size as u32, self._temp_size as u32); //TODO: Remove when finished testing
-                        }
                         _ => println!("{:?}", event.physical_key),
                     },
                     ElementState::Released => {}
@@ -129,7 +116,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             }
             WindowEvent::Resized(_) => {
                 if let Some(graphics) = &self.graphics {
-                    graphics.resize();
+                    graphics.read().unwrap().resize();
                 }
             }
             _ => (),
@@ -140,21 +127,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
         match event {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
-                    "load_rom" => {
-                        println!("Loading ROM.");
-                        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, config| emulator::init_from_file(path, config));
-
-                        self._temp_size = 8;
-                        self._temp_buffer = vec![255; self._temp_size * self._temp_size * 4];
-                        self.graphics = Some(futures::executor::block_on(Graphics::new(
-                            self.window.clone().unwrap(),
-                            Some(muda::dpi::PhysicalSize::<u32> {
-                                width: self._temp_size as u32,
-                                height: self._temp_size as u32,
-                            }),
-                        )));
-                        self.window.as_ref().unwrap().request_redraw();
-                    }
+                    "load_rom" => self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, graphics, config| emulator::init_from_file(path, graphics, config)),
                     "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(None)),
                     "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
                     "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),

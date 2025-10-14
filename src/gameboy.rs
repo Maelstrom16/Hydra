@@ -4,13 +4,13 @@ mod ppu;
 
 use crate::{
     common::{clockbarrier::ClockBarrier, emulator::Emulator, errors::HydraIOError},
-    config::Config,
+    config::Config, graphics::Graphics,
 };
 use std::{
     ffi::OsStr,
     fmt, fs,
     path::Path,
-    sync::{Arc, Barrier, Condvar, RwLock, Weak},
+    sync::{Arc, Barrier, Condvar, Mutex, RwLock, Weak},
     thread,
 };
 
@@ -73,40 +73,46 @@ pub enum AGBRevision {
 
 pub struct GameBoy {
     //apu: apu::APU,
-    cpu: Option<cpu::CPU>,
+    cpu: Mutex<Option<cpu::CPU>>,
     memory: Arc<RwLock<memory::Memory>>,
-    ppu: Option<ppu::PPU>,
+    ppu: Mutex<Option<ppu::PPU>>,
 
     clock: Arc<ClockBarrier>,
 }
 
 impl GameBoy {
-    fn from_revision(path: &Path, model: Model) -> Result<Self, HydraIOError> {
-        const THREAD_COUNT: usize = 2; // Based on PPU speed
+    fn from_revision(path: &Path, model: Model, graphics: Arc<RwLock<Graphics>>) -> Result<Self, HydraIOError> {
+        const THREAD_COUNT: usize = 3; // Main console, CPU, PPU
         const CYCLES_PER_FRAME: usize = 70224; // Based on PPU speed
 
         let rom = fs::read(path)?.into_boxed_slice();
         let clock = Arc::new(ClockBarrier::new(THREAD_COUNT, CYCLES_PER_FRAME));
         let memory = Arc::new(RwLock::new(memory::Memory::from_rom_and_model(rom.clone(), model)?));
-        let cpu = Some(cpu::CPU::new(&rom, model, memory.clone(), clock.clone()));
+        let cpu = Mutex::new(Some(cpu::CPU::new(&rom, model, memory.clone(), clock.clone())));
+        let ppu = Mutex::new(Some(ppu::PPU::new(graphics, memory.clone(), clock.clone())));
 
         Ok(GameBoy {
             cpu,
             memory,
-            ppu: Some(ppu::PPU {}),
+            ppu,
 
             clock,
         })
     }
-    pub fn from_model(path: &Path, model: Model, config: &Config) -> Result<Self, HydraIOError> {
+    pub fn from_model(path: &Path, model: Model, graphics: Arc<RwLock<Graphics>>, config: &Config) -> Result<Self, HydraIOError> {
         // If file extension is valid for the given model, initialize the emulator
         // Otherwise, return an InvalidExtension error
         match (path.extension().and_then(OsStr::to_str), model) {
-            (Some("gb") | Some("gbc"), Model::GameBoy(revision)) => Ok(Self::from_revision(path, Model::GameBoy(Some(revision.unwrap_or(config.gb.default_models.dmg))))?),
-            (Some("gb") | Some("gbc"), Model::SuperGameBoy(revision)) => Ok(Self::from_revision(path, Model::SuperGameBoy(Some(revision.unwrap_or(config.gb.default_models.sgb))))?),
-            (Some("gb") | Some("gbc"), Model::GameBoyColor(revision)) => Ok(Self::from_revision(path, Model::GameBoyColor(Some(revision.unwrap_or(config.gb.default_models.cgb))))?),
-            (Some("gb") | Some("gbc") | Some("gba"), Model::GameBoyAdvance(revision)) => Ok(Self::from_revision(path, Model::GameBoyAdvance(Some(revision.unwrap_or(config.gb.default_models.agb))))?),
-            (ext, model) => Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string))),
+            (Some("gb") | Some("gbc"), Model::GameBoy(revision)) => 
+                Ok(Self::from_revision(path, Model::GameBoy(Some(revision.unwrap_or(config.gb.default_models.dmg))), graphics)?),
+            (Some("gb") | Some("gbc"), Model::SuperGameBoy(revision)) => 
+                Ok(Self::from_revision(path, Model::SuperGameBoy(Some(revision.unwrap_or(config.gb.default_models.sgb))), graphics)?),
+            (Some("gb") | Some("gbc"), Model::GameBoyColor(revision)) => 
+                Ok(Self::from_revision(path, Model::GameBoyColor(Some(revision.unwrap_or(config.gb.default_models.cgb))), graphics)?),
+            (Some("gb") | Some("gbc") | Some("gba"), Model::GameBoyAdvance(revision)) => 
+                Ok(Self::from_revision(path, Model::GameBoyAdvance(Some(revision.unwrap_or(config.gb.default_models.agb))), graphics)?),
+            (ext, model) => 
+                Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string))),
         }
     }
     fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
@@ -116,30 +122,31 @@ impl GameBoy {
 }
 
 impl Emulator for GameBoy {
-    fn main_thread(&mut self) {
+    fn main_thread(self: Arc<GameBoy>) {
         println!("Launching Wyrm");
-
-        let cpu_handle = self.cpu.take().unwrap().run();
-        thread::spawn(|| println!(""));
-        thread::spawn(|| println!("PPU"));
-        thread::spawn(|| println!("APU"));
-        println!("mainthread");
-        loop {
-            self.clock.wait();
-            if self.clock.new_frame() {
-                break;
+        thread::spawn(move || {
+            // Spawn child threads
+            let cpu_handle = self.cpu.lock().unwrap().take().unwrap().run();
+            let ppu_handle = self.ppu.lock().unwrap().take().unwrap().run();
+            thread::spawn(|| println!("APU"));
+            
+            // Main thread
+            loop {
+                self.clock.wait();
             }
-        }
-        cpu_handle.join();
-        println!("Exiting Wyrm");
+            
+            cpu_handle.join();
+            ppu_handle.join();
+            println!("Exiting Wyrm");
 
-        // Dump memory (for debugging)
-        for y in 0..=0xFFF {
-            print!("{:#06X}:   ", y<<4);
-            for x in 0..=0xF {
-                print!("{:02X} ", self.memory.read().unwrap().read_u8(x | (y << 4)));
+            // Dump memory (for debugging)
+            for y in 0..=0xFFF {
+                print!("{:#06X}:   ", y<<4);
+                for x in 0..=0xF {
+                    print!("{:02X} ", self.memory.read().unwrap().read_u8(x | (y << 4)));
+                }
+                println!("");
             }
-            println!("");
-        }
+        });
     }
 }

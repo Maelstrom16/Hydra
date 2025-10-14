@@ -122,8 +122,7 @@ impl Graphics {
     }
 
     pub fn render(&self) {
-        self.window.request_redraw();
-        println!("Rendering to screen. {:?}", std::time::Instant::now());
+        self.window.request_redraw(); 
 
         let surface_texture = self.surface.get_current_texture().unwrap();
         let texture_view = surface_texture.texture.create_view(&TextureViewDescriptor {
@@ -155,7 +154,8 @@ impl Graphics {
         render_pass.draw(0..3, 0..1);
 
         drop(render_pass);
-        println!("Presenting to screen. {:?}", std::time::Instant::now());
+        
+        // Present to screen
         self.queue.submit([command_encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();

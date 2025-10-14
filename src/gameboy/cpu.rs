@@ -213,9 +213,9 @@ impl CPU {
         thread::spawn(move || {
             loop {
                 // Fetch cycle
-                print!("{:#06X}: ", self.pc);
+                //print!("{:#06X}: ", self.pc);
                 self.ir = self.step_u8_and_wait();
-                println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
+                //println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
                 if self.ime_queued {
                     self.ime = true;
                     self.ime_queued = false;
@@ -223,11 +223,6 @@ impl CPU {
 
                 // Execute cycle(s)
                 opcode::OPCODE_TABLE[self.ir as usize](&mut self);
-
-                // TODO: Remove when debugging is complete
-                if self.clock.new_frame() {
-                    break;
-                }
             }
         })
     }
