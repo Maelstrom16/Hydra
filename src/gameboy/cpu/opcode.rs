@@ -964,7 +964,7 @@ const fn init_opcode_table() -> [OpHandler; 0x100] {
     };
     opcode_table[0xF9] = |cpu| { // LD SP, HL
         cpu.ld(RegisterOperand16(cpu::Register16::SP), RegisterOperand16(cpu::Register16::HL));
-        cpu.clock.wait();
+        
     };
     opcode_table[0xFA] = |cpu| { // LD A, (nn)
         cpu.ld(RegisterOperand8(cpu::Register8::A), IndirectOperand8(ImmediateOperand16));

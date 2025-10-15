@@ -9,7 +9,6 @@ use std::{
 use futures::lock::Mutex;
 
 use crate::{
-    common::clockbarrier::ClockBarrier,
     gameboy::{
         AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision,
         cpu::{
@@ -50,7 +49,6 @@ pub struct CPU {
     ime_queued: bool,
 
     memory: Arc<RwLock<Memory>>,
-    clock: Arc<ClockBarrier>,
 }
 
 pub enum Register8 {
@@ -73,7 +71,7 @@ pub enum Register16 {
 }
 
 impl CPU {
-    pub fn new(rom: &Box<[u8]>, model: Model, memory: Arc<RwLock<Memory>>, clock: Arc<ClockBarrier>) -> Self {
+    pub fn new(rom: &Box<[u8]>, model: Model, memory: Arc<RwLock<Memory>>) -> Self {
         let af;
         let bc;
         let de;
@@ -185,7 +183,6 @@ impl CPU {
             ime,
             ime_queued,
             memory,
-            clock,
         }
     }
 
@@ -193,38 +190,34 @@ impl CPU {
     fn step_u8_and_wait(&mut self) -> u8 {
         let result = self.memory.read().unwrap().read_u8(self.pc);
         self.pc += 1;
-        self.clock.wait();
+        
         result
     }
 
     #[inline(always)]
     fn read_u8_and_wait(&self, address: u16) -> u8 {
-        self.clock.wait();
+        
         self.memory.read().unwrap().read_u8(address)
     }
 
     #[inline(always)]
     fn write_u8_and_wait(&self, address: u16, value: u8) -> () {
-        self.clock.wait();
+        
         self.memory.write().unwrap().write_u8(value, address);
     }
 
-    pub fn run(mut self) -> JoinHandle<()> {
-        thread::spawn(move || {
-            loop {
-                // Fetch cycle
-                //print!("{:#06X}: ", self.pc);
-                self.ir = self.step_u8_and_wait();
-                //println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
-                if self.ime_queued {
-                    self.ime = true;
-                    self.ime_queued = false;
-                }
+    pub fn step(&mut self) {
+        // Fetch cycle
+        //print!("{:#06X}: ", self.pc);
+        self.ir = self.step_u8_and_wait();
+        //println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
+        if self.ime_queued {
+            self.ime = true;
+            self.ime_queued = false;
+        }
 
-                // Execute cycle(s)
-                opcode::OPCODE_TABLE[self.ir as usize](&mut self);
-            }
-        })
+        // Execute cycle(s)
+        opcode::OPCODE_TABLE[self.ir as usize](self);
     }
 }
 
@@ -303,7 +296,7 @@ impl CPU {
             h=(half_carry),
             c=(carry)
         );
-        self.clock.wait();
+        
         self.hl = u16::to_le_bytes(result);
     }
 
@@ -323,7 +316,7 @@ impl CPU {
     fn inc16<O: IntOperand<u16>>(&mut self, operand: O) {
         let o = operand.get(self);
         let result = o.wrapping_add(1);
-        self.clock.wait();
+        
         operand.set(result, self);
     }
 
@@ -343,7 +336,7 @@ impl CPU {
     fn dec16<O: IntOperand<u16>>(&mut self, operand: O) {
         let o = operand.get(self);
         let result = o.wrapping_sub(1);
-        self.clock.wait();
+        
         operand.set(result, self);
     }
 
@@ -389,8 +382,8 @@ impl CPU {
             h=(half_carry),
             c=(carry)
         );
-        self.clock.wait();
-        self.clock.wait();
+        
+        
         self.sp = result;
     }
 
@@ -489,7 +482,7 @@ impl CPU {
     #[inline(always)]
     fn push<O: IntOperand<u16>>(&mut self, operand: O) {
         let bytes = u16::to_le_bytes(operand.get(self));
-        self.clock.wait();
+        
         self.sp -= 1;
         self.write_u8_and_wait(self.sp, bytes[1]);
         self.sp -= 1;
@@ -668,7 +661,7 @@ impl CPU {
     fn jp<O: IntOperand<u16>>(&mut self, condition: CondOperand, operand: O) {
         let addr = operand.get(self);
         if condition.evaluate(self) {
-            self.clock.wait();
+            
             self.pc = addr;
         }
     }
@@ -677,7 +670,7 @@ impl CPU {
     fn jr<O: IntOperand<i8>>(&mut self, condition: CondOperand, operand: O) {
         let addr = self.pc.wrapping_add_signed(operand.get(self).into());
         if condition.evaluate(self) {
-            self.clock.wait();
+            
             self.pc = addr;
         }
     }
@@ -693,10 +686,10 @@ impl CPU {
 
     #[inline(always)]
     fn ret(&mut self, condition: CondOperand) {
-        self.clock.wait();
+        
         if condition.evaluate(self) {
             self.pop(opcode::RegisterOperand16(Register16::PC));
-            self.clock.wait();
+            
         }
     }
 

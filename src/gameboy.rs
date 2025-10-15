@@ -2,8 +2,10 @@ mod cpu;
 mod memory;
 mod ppu;
 
+use winit::window::Window;
+
 use crate::{
-    common::{clockbarrier::ClockBarrier, emulator::Emulator, errors::HydraIOError},
+    common::{emulator::Emulator, errors::HydraIOError},
     config::Config, graphics::Graphics,
 };
 use std::{
@@ -76,41 +78,33 @@ pub struct GameBoy {
     cpu: Mutex<Option<cpu::CPU>>,
     memory: Arc<RwLock<memory::Memory>>,
     ppu: Mutex<Option<ppu::PPU>>,
-
-    clock: Arc<ClockBarrier>,
 }
 
 impl GameBoy {
-    fn from_revision(path: &Path, model: Model, graphics: Arc<RwLock<Graphics>>) -> Result<Self, HydraIOError> {
-        const THREAD_COUNT: usize = 3; // Main console, CPU, PPU
-        const CYCLES_PER_FRAME: usize = 70224; // Based on PPU speed
-
+    fn from_revision(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Result<Self, HydraIOError> {
         let rom = fs::read(path)?.into_boxed_slice();
-        let clock = Arc::new(ClockBarrier::new(THREAD_COUNT, CYCLES_PER_FRAME));
         let memory = Arc::new(RwLock::new(memory::Memory::from_rom_and_model(rom.clone(), model)?));
-        let cpu = Mutex::new(Some(cpu::CPU::new(&rom, model, memory.clone(), clock.clone())));
-        let ppu = Mutex::new(Some(ppu::PPU::new(graphics, memory.clone(), clock.clone())));
+        let cpu = Mutex::new(Some(cpu::CPU::new(&rom, model, memory.clone())));
+        let ppu = Mutex::new(Some(ppu::PPU::new(window, graphics, memory.clone())));
 
         Ok(GameBoy {
             cpu,
             memory,
             ppu,
-
-            clock,
         })
     }
-    pub fn from_model(path: &Path, model: Model, graphics: Arc<RwLock<Graphics>>, config: &Config) -> Result<Self, HydraIOError> {
+    pub fn from_model(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>, config: &Config) -> Result<Self, HydraIOError> {
         // If file extension is valid for the given model, initialize the emulator
         // Otherwise, return an InvalidExtension error
         match (path.extension().and_then(OsStr::to_str), model) {
             (Some("gb") | Some("gbc"), Model::GameBoy(revision)) => 
-                Ok(Self::from_revision(path, Model::GameBoy(Some(revision.unwrap_or(config.gb.default_models.dmg))), graphics)?),
+                Ok(Self::from_revision(path, Model::GameBoy(Some(revision.unwrap_or(config.gb.default_models.dmg))), window, graphics)?),
             (Some("gb") | Some("gbc"), Model::SuperGameBoy(revision)) => 
-                Ok(Self::from_revision(path, Model::SuperGameBoy(Some(revision.unwrap_or(config.gb.default_models.sgb))), graphics)?),
+                Ok(Self::from_revision(path, Model::SuperGameBoy(Some(revision.unwrap_or(config.gb.default_models.sgb))), window, graphics)?),
             (Some("gb") | Some("gbc"), Model::GameBoyColor(revision)) => 
-                Ok(Self::from_revision(path, Model::GameBoyColor(Some(revision.unwrap_or(config.gb.default_models.cgb))), graphics)?),
+                Ok(Self::from_revision(path, Model::GameBoyColor(Some(revision.unwrap_or(config.gb.default_models.cgb))), window, graphics)?),
             (Some("gb") | Some("gbc") | Some("gba"), Model::GameBoyAdvance(revision)) => 
-                Ok(Self::from_revision(path, Model::GameBoyAdvance(Some(revision.unwrap_or(config.gb.default_models.agb))), graphics)?),
+                Ok(Self::from_revision(path, Model::GameBoyAdvance(Some(revision.unwrap_or(config.gb.default_models.agb))), window, graphics)?),
             (ext, model) => 
                 Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string))),
         }
@@ -126,17 +120,15 @@ impl Emulator for GameBoy {
         println!("Launching Wyrm");
         thread::spawn(move || {
             // Spawn child threads
-            let cpu_handle = self.cpu.lock().unwrap().take().unwrap().run();
-            let ppu_handle = self.ppu.lock().unwrap().take().unwrap().run();
+            let mut cpu = self.cpu.lock().unwrap().take().unwrap();
+            let mut ppu = self.ppu.lock().unwrap().take().unwrap();
             thread::spawn(|| println!("APU"));
             
             // Main thread
             loop {
-                self.clock.wait();
+                cpu.step();
+                ppu.step();
             }
-            
-            cpu_handle.join();
-            ppu_handle.join();
             println!("Exiting Wyrm");
 
             // Dump memory (for debugging)

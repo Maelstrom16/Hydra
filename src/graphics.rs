@@ -122,8 +122,6 @@ impl Graphics {
     }
 
     pub fn render(&self) {
-        self.window.request_redraw(); 
-
         let surface_texture = self.surface.get_current_texture().unwrap();
         let texture_view = surface_texture.texture.create_view(&TextureViewDescriptor {
             // Without add_srgb_suffix() the image we will be working with

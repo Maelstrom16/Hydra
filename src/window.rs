@@ -14,7 +14,7 @@ use winit::window::{Window, WindowId};
 use crate::common::emulator::{self, Emulator};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
-use crate::gameboy;
+use crate::{gameboy, graphics};
 use crate::graphics::Graphics;
 use crate::ui::UserInterface;
 
@@ -46,12 +46,12 @@ impl HydraApp {
 
     fn try_init_emulator<F>(&mut self, filters: &[(&str, &[&str])], func: F)
     where
-        F: Fn(&PathBuf, Arc<RwLock<Graphics>>, &Config) -> Result<Arc<dyn Emulator>, HydraIOError>,
+        F: Fn(&PathBuf, Arc<Window>, Arc<RwLock<Graphics>>, &Config) -> Result<Arc<dyn Emulator>, HydraIOError>,
     {
         println!("Loading ROM.");
         let file_dialog = filters.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
         match file_dialog.pick_file() {
-            Some(path) => match func(&path, Arc::clone(self.graphics.as_ref().unwrap()), self.config.as_ref().unwrap()) {
+            Some(path) => match func(&path, Arc::clone(self.window.as_ref().unwrap()), Arc::clone(self.graphics.as_ref().unwrap()), self.config.as_ref().unwrap()) {
                 // If a file was selected, try to initialize Emulator
                 Ok(mut emu) => {
                     // If Emulator construction succeeds, save to app state and launch it
@@ -74,8 +74,8 @@ impl HydraApp {
     }
 
     fn try_init_gameboy(&mut self, model: gameboy::Model) {
-        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, graphics, config| {
-            gameboy::GameBoy::from_model(path, model, graphics, config).and_then(|emu| Ok(Arc::new(emu) as Arc<dyn Emulator>))
+        self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, window, graphics, config| {
+            gameboy::GameBoy::from_model(path, model, window, graphics, config).and_then(|emu| Ok(Arc::new(emu) as Arc<dyn Emulator>))
         })
     }
 }
@@ -95,6 +95,8 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
+                self.graphics.as_ref().unwrap().read().unwrap().render();
+                
                 if let Some(graphics) = &self.graphics {
                     self._temp_counter += 1;
                     let now = std::time::Instant::now();
@@ -127,7 +129,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
         match event {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
-                    "load_rom" => self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, graphics, config| emulator::init_from_file(path, graphics, config)),
+                    "load_rom" => self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, window, graphics, config| emulator::init_from_file(path, window, graphics, config)),
                     "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(None)),
                     "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
                     "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
