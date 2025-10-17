@@ -1,4 +1,4 @@
-use std::{sync::{Arc, RwLock}, thread::{self, JoinHandle}};
+use std::{sync::{Arc, MutexGuard, RwLock}, thread::{self, JoinHandle}};
 
 use futures::lock::Mutex;
 use rand::Rng;
@@ -11,7 +11,6 @@ pub struct PPU {
 
     window: Arc<Window>,
     graphics: Arc<RwLock<Graphics>>,
-    memory: Arc<RwLock<Memory>>,
 }
 
 const DOTS: usize = 456;
@@ -21,9 +20,9 @@ const SCREEN_Y: usize = 144;
 const BUFFER_SIZE: usize = SCREEN_X * SCREEN_Y * 4;
 
 impl PPU {
-    pub fn new(window: Arc<Window>, graphics: Arc<RwLock<Graphics>>, memory: Arc<RwLock<Memory>>) -> Self {
+    pub fn new(window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
-        let mut result = PPU { screen_buffer, window, graphics, memory };
+        let mut result = PPU { screen_buffer, window, graphics };
         result.init_graphics();
         result
     }
@@ -33,15 +32,15 @@ impl PPU {
     }
 
     #[inline(always)]
-    pub fn step(&mut self) {
+    pub fn step(&mut self, clock: &u32) {
         // // Test texture generation TODO: Remove when finished testing
-        for i in 0..BUFFER_SIZE*4 {
-            self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
-        }
+        self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
 
         // Update and render
+        // if *clock == 0 {
             let graphics = self.graphics.read().unwrap();
             graphics.update_screen_texture(&self.screen_buffer);
             self.window.request_redraw();
+        // }
     }
 }

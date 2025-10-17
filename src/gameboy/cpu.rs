@@ -2,7 +2,7 @@ mod opcode;
 
 use std::{
     rc::Rc,
-    sync::{Arc, Barrier, RwLock},
+    sync::{Arc, Barrier, MutexGuard, RwLock},
     thread::{self, JoinHandle, ScopedJoinHandle, Thread},
 };
 
@@ -47,8 +47,6 @@ pub struct CPU {
     ie: u8,
     ime: bool,
     ime_queued: bool,
-
-    memory: Arc<RwLock<Memory>>,
 }
 
 pub enum Register8 {
@@ -71,7 +69,7 @@ pub enum Register16 {
 }
 
 impl CPU {
-    pub fn new(rom: &Box<[u8]>, model: Model, memory: Arc<RwLock<Memory>>) -> Self {
+    pub fn new(rom: &Box<[u8]>, model: Model) -> Self {
         let af;
         let bc;
         let de;
@@ -182,34 +180,33 @@ impl CPU {
             ie,
             ime,
             ime_queued,
-            memory,
         }
     }
 
     #[inline(always)]
-    fn step_u8_and_wait(&mut self) -> u8 {
-        let result = self.memory.read().unwrap().read_u8(self.pc);
+    fn step_u8_and_wait(&mut self, memory: &Memory) -> u8 {
+        let result = memory.read_u8(self.pc);
         self.pc += 1;
         
         result
     }
 
     #[inline(always)]
-    fn read_u8_and_wait(&self, address: u16) -> u8 {
+    fn read_u8_and_wait(&self, memory: &Memory, address: u16) -> u8 {
         
-        self.memory.read().unwrap().read_u8(address)
+        memory.read_u8(address)
     }
 
     #[inline(always)]
-    fn write_u8_and_wait(&self, address: u16, value: u8) -> () {
+    fn write_u8_and_wait(&self, memory: &mut Memory, address: u16, value: u8) -> () {
         
-        self.memory.write().unwrap().write_u8(value, address);
+        memory.write_u8(value, address);
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, memory: &mut Memory) {
         // Fetch cycle
         //print!("{:#06X}: ", self.pc);
-        self.ir = self.step_u8_and_wait();
+        self.ir = self.step_u8_and_wait(memory);
         //println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
         if self.ime_queued {
             self.ime = true;
@@ -217,7 +214,7 @@ impl CPU {
         }
 
         // Execute cycle(s)
-        opcode::OPCODE_TABLE[self.ir as usize](self);
+        opcode::OPCODE_FUNCTIONS[self.ir as usize](self, memory);
     }
 }
 
@@ -279,12 +276,12 @@ macro_rules! get_flag {
 
 impl CPU {
     #[inline(always)]
-    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, dest: O1, src: O2) {
-        dest.set(src.get(self), self);
+    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, memory: &mut Memory, dest: O1, src: O2) {
+        dest.set(src.get(self, memory), self, memory);
     }
     #[inline(always)]
-    fn ld_hlspe(&mut self) {
-        let e = self.step_u8_and_wait() as i8;
+    fn ld_hlspe(&mut self, memory: &mut Memory) {
+        let e = self.step_u8_and_wait(memory) as i8;
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
@@ -301,8 +298,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn inc<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn inc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let (result, _) = o.overflowing_add(1);
         let (_, half_carry) = (o | 0xF0).overflowing_add(1);
         set_flags!(self;
@@ -310,19 +307,19 @@ impl CPU {
             n=(false),
             h=(half_carry)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
     #[inline(always)]
-    fn inc16<O: IntOperand<u16>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn inc16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let result = o.wrapping_add(1);
         
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn dec<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn dec<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let (result, _) = o.overflowing_sub(1);
         let (_, half_carry) = (o & 0x0F).overflowing_sub(1);
         set_flags!(self;
@@ -330,19 +327,19 @@ impl CPU {
             n=(false),
             h=(half_carry)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
     #[inline(always)]
-    fn dec16<O: IntOperand<u16>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn dec16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let result = o.wrapping_sub(1);
         
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn add<O: IntOperand<u8>>(&mut self, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self));
+    fn add<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self, memory));
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
         set_flags!(self;
@@ -354,8 +351,8 @@ impl CPU {
         self.af[1] = result;
     }
     #[inline(always)]
-    fn add_hl<O: IntOperand<u16>>(&mut self, operand: O) {
-        let (hl, operand) = (u16::from_le_bytes(self.hl), operand.get(self));
+    fn add_hl<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
+        let (hl, operand) = (u16::from_le_bytes(self.hl), operand.get(self, memory));
         let result = hl.wrapping_add(operand);
         let [_, h] = self.hl;
         let [_, oph] = u16::to_le_bytes(operand);
@@ -369,8 +366,8 @@ impl CPU {
         self.hl = u16::to_le_bytes(result);
     }
     #[inline(always)]
-    fn add_spe(&mut self) {
-        let e = self.step_u8_and_wait() as i8;
+    fn add_spe(&mut self, memory: &mut Memory) {
+        let e = self.step_u8_and_wait(memory) as i8;
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
@@ -388,8 +385,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn adc<O: IntOperand<u8>>(&mut self, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self) + get_flag!(self; c) as u8);
+    fn adc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self, memory) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
         set_flags!(self;
@@ -402,8 +399,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn sub<O: IntOperand<u8>>(&mut self, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self));
+    fn sub<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self, memory));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
         set_flags!(self;
@@ -416,8 +413,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn sbc<O: IntOperand<u8>>(&mut self, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self) + get_flag!(self; c) as u8);
+    fn sbc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self, memory) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
         set_flags!(self;
@@ -430,8 +427,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn and<O: IntOperand<u8>>(&mut self, operand: O) {
-        let result = self.af[1] & operand.get(self);
+    fn and<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let result = self.af[1] & operand.get(self, memory);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -442,8 +439,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn or<O: IntOperand<u8>>(&mut self, operand: O) {
-        let result = self.af[1] | operand.get(self);
+    fn or<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let result = self.af[1] | operand.get(self, memory);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -454,8 +451,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn xor<O: IntOperand<u8>>(&mut self, operand: O) {
-        let result = self.af[1] ^ operand.get(self);
+    fn xor<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let result = self.af[1] ^ operand.get(self, memory);
         println!("{}", result);
         set_flags!(self;
             z=(result == 0),
@@ -467,8 +464,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn cp<O: IntOperand<u8>>(&mut self, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self));
+    fn cp<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let (a, operand) = (self.af[1], operand.get(self, memory));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
         set_flags!(self;
@@ -480,27 +477,27 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn push<O: IntOperand<u16>>(&mut self, operand: O) {
-        let bytes = u16::to_le_bytes(operand.get(self));
+    fn push<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
+        let bytes = u16::to_le_bytes(operand.get(self, memory));
         
         self.sp -= 1;
-        self.write_u8_and_wait(self.sp, bytes[1]);
+        self.write_u8_and_wait(memory, self.sp, bytes[1]);
         self.sp -= 1;
-        self.write_u8_and_wait(self.sp, bytes[0]);
+        self.write_u8_and_wait(memory, self.sp, bytes[0]);
     }
 
     #[inline(always)]
-    fn pop<O: IntOperand<u16>>(&mut self, operand: O) {
+    fn pop<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
         let mut bytes = [0; 2];
-        bytes[0] = self.read_u8_and_wait(self.sp);
+        bytes[0] = self.read_u8_and_wait(memory, self.sp);
         self.sp += 1;
-        bytes[1] = self.read_u8_and_wait(self.sp);
+        bytes[1] = self.read_u8_and_wait(memory, self.sp);
         self.sp += 1;
-        operand.set(u16::from_le_bytes(bytes), self);
+        operand.set(u16::from_le_bytes(bytes), self, memory);
     }
 
     #[inline(always)]
-    fn ccf(&mut self) {
+    fn ccf(&mut self, memory: &mut Memory) {
         set_flags!(self;
             n=(false),
             h=(false)
@@ -509,7 +506,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn scf(&mut self) {
+    fn scf(&mut self, memory: &mut Memory) {
         set_flags!(self;
             n=(false),
             h=(false),
@@ -518,12 +515,12 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn daa(&mut self) {
+    fn daa(&mut self, memory: &mut Memory) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    fn cpl(&mut self) {
+    fn cpl(&mut self, memory: &mut Memory) {
         self.af[1] ^= 0xFF;
         set_flags!(self;
             n=(true),
@@ -532,8 +529,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn rlc<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn rlc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let result = o.rotate_left(1);
         set_flags!(self;
             z=(false),
@@ -541,12 +538,12 @@ impl CPU {
             h=(false),
             c=(result & 0b00000001 != 0)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn rrc<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn rrc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let result = o.rotate_right(1);
         set_flags!(self;
             z=(false),
@@ -554,12 +551,12 @@ impl CPU {
             h=(false),
             c=(result & 0b10000000 != 0)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn rl<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn rl<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let (result, carry) = o.overflowing_shl(1);
         set_flags!(self;
             z=(false),
@@ -567,12 +564,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result | get_flag!(self; c) as u8, self);
+        operand.set(result | get_flag!(self; c) as u8, self, memory);
     }
 
     #[inline(always)]
-    fn rr<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn rr<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
             z=(false),
@@ -580,12 +577,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result | (get_flag!(self; c) as u8) << 7, self);
+        operand.set(result | (get_flag!(self; c) as u8) << 7, self, memory);
     }
 
     #[inline(always)]
-    fn sla<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn sla<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let (result, carry) = o.overflowing_shl(1);
         set_flags!(self;
             z=(result == 0),
@@ -593,12 +590,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn sra<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self) as i8;
+    fn sra<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory) as i8;
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
             z=(result == 0),
@@ -606,12 +603,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result as u8, self);
+        operand.set(result as u8, self, memory);
     }
 
     #[inline(always)]
-    fn swap<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn swap<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let result = (o & 0x0F) << 4 | (o & 0xF0) >> 4;
         set_flags!(self;
             z=(result == 0),
@@ -619,12 +616,12 @@ impl CPU {
             h=(false),
             c=(false)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn srl<O: IntOperand<u8>>(&mut self, operand: O) {
-        let o = operand.get(self);
+    fn srl<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
+        let o = operand.get(self, memory);
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
             z=(result == 0),
@@ -632,12 +629,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result, self);
+        operand.set(result, self, memory);
     }
 
     #[inline(always)]
-    fn bit<O: IntOperand<u8>>(&mut self, index: u8, operand: O) {
-        let o = operand.get(self);
+    fn bit<O: IntOperand<u8>>(&mut self, memory: &mut Memory, index: u8, operand: O) {
+        let o = operand.get(self, memory);
         set_flags!(self;
             z=(o & (1 << index) != 0),
             n=(false),
@@ -646,20 +643,20 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn res<O: IntOperand<u8>>(&mut self, index: u8, operand: O) {
-        let o = operand.get(self);
-        operand.set(o & ((1 << index) ^ 0b11111111), self);
+    fn res<O: IntOperand<u8>>(&mut self, memory: &mut Memory, index: u8, operand: O) {
+        let o = operand.get(self, memory);
+        operand.set(o & ((1 << index) ^ 0b11111111), self, memory);
     }
 
     #[inline(always)]
-    fn set<O: IntOperand<u8>>(&mut self, index: u8, operand: O) {
-        let o = operand.get(self);
-        operand.set(o | (1 << index), self);
+    fn set<O: IntOperand<u8>>(&mut self, memory: &mut Memory, index: u8, operand: O) {
+        let o = operand.get(self, memory);
+        operand.set(o | (1 << index), self, memory);
     }
 
     #[inline(always)]
-    fn jp<O: IntOperand<u16>>(&mut self, condition: CondOperand, operand: O) {
-        let addr = operand.get(self);
+    fn jp<O: IntOperand<u16>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
+        let addr = operand.get(self, memory);
         if condition.evaluate(self) {
             
             self.pc = addr;
@@ -667,8 +664,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn jr<O: IntOperand<i8>>(&mut self, condition: CondOperand, operand: O) {
-        let addr = self.pc.wrapping_add_signed(operand.get(self).into());
+    fn jr<O: IntOperand<i8>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
+        let addr = self.pc.wrapping_add_signed(operand.get(self, memory).into());
         if condition.evaluate(self) {
             
             self.pc = addr;
@@ -676,46 +673,46 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn call<O: IntOperand<u16>>(&mut self, condition: CondOperand, operand: O) {
-        let addr = operand.get(self);
+    fn call<O: IntOperand<u16>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
+        let addr = operand.get(self, memory);
         if condition.evaluate(self) {
-            self.push(opcode::RegisterOperand16(Register16::PC));
+            self.push(memory, opcode::RegisterOperand16(Register16::PC));
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    fn ret(&mut self, condition: CondOperand) {
+    fn ret(&mut self, memory: &mut Memory, condition: CondOperand) {
         
         if condition.evaluate(self) {
-            self.pop(opcode::RegisterOperand16(Register16::PC));
+            self.pop(memory, opcode::RegisterOperand16(Register16::PC));
             
         }
     }
 
     #[inline(always)]
-    fn reti(&mut self) {
-        self.ret(CondOperand::Unconditional);
+    fn reti(&mut self, memory: &mut Memory) {
+        self.ret(memory, CondOperand::Unconditional);
         self.ime = true;
     }
 
     #[inline(always)]
-    fn ei(&mut self) {
+    fn ei(&mut self, memory: &mut Memory) {
         self.ime_queued = true;
     }
 
     #[inline(always)]
-    fn di(&mut self) {
+    fn di(&mut self, memory: &mut Memory) {
         self.ime = false;
     }
 
     #[inline(always)]
-    fn halt(&mut self) {
+    fn halt(&mut self, memory: &mut Memory) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    fn stop(&mut self) {
+    fn stop(&mut self, memory: &mut Memory) {
         todo!() //TODO
     }
 }

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 
 use muda::accelerator::{Accelerator, Code, Modifiers};
@@ -11,7 +12,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 
-use crate::common::emulator::{self, Emulator};
+use crate::common::emulator::{self, EmuMessage, Emulator};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
 use crate::{gameboy, graphics};
@@ -21,7 +22,7 @@ use crate::ui::UserInterface;
 #[derive(Default)]
 pub struct HydraApp {
     config: Option<Config>,
-    emulator: Option<Arc<dyn Emulator>>,
+    emulator: Option<Sender<EmuMessage>>,
     window: Option<Arc<Window>>,
     ui: Option<UserInterface>,
     graphics: Option<Arc<RwLock<Graphics>>>,
@@ -46,7 +47,7 @@ impl HydraApp {
 
     fn try_init_emulator<F>(&mut self, filters: &[(&str, &[&str])], func: F)
     where
-        F: Fn(&PathBuf, Arc<Window>, Arc<RwLock<Graphics>>, &Config) -> Result<Arc<dyn Emulator>, HydraIOError>,
+        F: Fn(&PathBuf, Arc<Window>, Arc<RwLock<Graphics>>, &Config) -> Result<Sender<EmuMessage>, HydraIOError>,
     {
         println!("Loading ROM.");
         let file_dialog = filters.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
@@ -54,9 +55,8 @@ impl HydraApp {
             Some(path) => match func(&path, Arc::clone(self.window.as_ref().unwrap()), Arc::clone(self.graphics.as_ref().unwrap()), self.config.as_ref().unwrap()) {
                 // If a file was selected, try to initialize Emulator
                 Ok(mut emu) => {
-                    // If Emulator construction succeeds, save to app state and launch it
+                    // If Emulator construction succeeds, save communication channel to app state
                     println!("Successfully loaded {}. Launching emulator.", path.file_name().unwrap().display());
-                    Arc::clone(&emu).main_thread();
                     self.emulator = Some(emu);
                 }
                 Err(e) => {
@@ -75,7 +75,7 @@ impl HydraApp {
 
     fn try_init_gameboy(&mut self, model: gameboy::Model) {
         self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, window, graphics, config| {
-            gameboy::GameBoy::from_model(path, model, window, graphics, config).and_then(|emu| Ok(Arc::new(emu) as Arc<dyn Emulator>))
+            gameboy::GameBoy::from_model(path, model, window, graphics, config)
         })
     }
 }

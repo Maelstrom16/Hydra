@@ -5,14 +5,14 @@ mod ppu;
 use winit::window::Window;
 
 use crate::{
-    common::{emulator::Emulator, errors::HydraIOError},
+    common::{emulator::{EmuMessage, Emulator}, errors::HydraIOError},
     config::Config, graphics::Graphics,
 };
 use std::{
     ffi::OsStr,
     fmt, fs,
     path::Path,
-    sync::{Arc, Barrier, Condvar, Mutex, RwLock, Weak},
+    sync::{mpsc::{channel, Receiver, Sender}, Arc, Barrier, Condvar, Mutex, RwLock, Weak},
     thread,
 };
 
@@ -75,25 +75,31 @@ pub enum AGBRevision {
 
 pub struct GameBoy {
     //apu: apu::APU,
-    cpu: Mutex<Option<cpu::CPU>>,
-    memory: Arc<RwLock<memory::Memory>>,
-    ppu: Mutex<Option<ppu::PPU>>,
+    cpu: cpu::CPU,
+    memory: memory::Memory,
+    ppu: ppu::PPU,
+    clock: u32,
+
+    channel: Receiver<EmuMessage>
 }
 
 impl GameBoy {
-    fn from_revision(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Result<Self, HydraIOError> {
+    fn from_revision(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Result<Sender<EmuMessage>, HydraIOError> {
         let rom = fs::read(path)?.into_boxed_slice();
-        let memory = Arc::new(RwLock::new(memory::Memory::from_rom_and_model(rom.clone(), model)?));
-        let cpu = Mutex::new(Some(cpu::CPU::new(&rom, model, memory.clone())));
-        let ppu = Mutex::new(Some(ppu::PPU::new(window, graphics, memory.clone())));
-
-        Ok(GameBoy {
+        let memory = memory::Memory::from_rom_and_model(rom.clone(), model)?;
+        let cpu = cpu::CPU::new(&rom, model);
+        let ppu = ppu::PPU::new(window, graphics);
+        let (send, recv) = channel();
+        GameBoy {
             cpu,
             memory,
             ppu,
-        })
+            clock: 0,
+            channel: recv
+        }.main_thread();
+        Ok(send)
     }
-    pub fn from_model(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>, config: &Config) -> Result<Self, HydraIOError> {
+    pub fn from_model(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>, config: &Config) -> Result<Sender<EmuMessage>, HydraIOError> {
         // If file extension is valid for the given model, initialize the emulator
         // Otherwise, return an InvalidExtension error
         match (path.extension().and_then(OsStr::to_str), model) {
@@ -111,23 +117,21 @@ impl GameBoy {
     }
     fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
         let rom: Box<[u8]> = fs::read(path)?.into_boxed_slice();
-        self.memory.write().unwrap().hot_swap_rom(rom)
+        self.memory.hot_swap_rom(rom)
     }
 }
 
+const CYCLES_PER_FRAME: u32 = 70224;
+
 impl Emulator for GameBoy {
-    fn main_thread(self: Arc<GameBoy>) {
+    fn main_thread(mut self) {
         println!("Launching Wyrm");
         thread::spawn(move || {
-            // Spawn child threads
-            let mut cpu = self.cpu.lock().unwrap().take().unwrap();
-            let mut ppu = self.ppu.lock().unwrap().take().unwrap();
-            thread::spawn(|| println!("APU"));
-            
-            // Main thread
+            // Main loop
             loop {
-                cpu.step();
-                ppu.step();
+                self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
+                self.cpu.step(&mut self.memory);
+                self.ppu.step(&self.clock);
             }
             println!("Exiting Wyrm");
 
@@ -135,7 +139,7 @@ impl Emulator for GameBoy {
             for y in 0..=0xFFF {
                 print!("{:#06X}:   ", y<<4);
                 for x in 0..=0xF {
-                    print!("{:02X} ", self.memory.read().unwrap().read_u8(x | (y << 4)));
+                    print!("{:02X} ", self.memory.read_u8(x | (y << 4)));
                 }
                 println!("");
             }
