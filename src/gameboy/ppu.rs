@@ -37,10 +37,10 @@ impl PPU {
         self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
 
         // Update and render
-        // if *clock == 0 {
+        if *clock == 0 {
             let graphics = self.graphics.read().unwrap();
             graphics.update_screen_texture(&self.screen_buffer);
             self.window.request_redraw();
-        // }
+        }
     }
 }
