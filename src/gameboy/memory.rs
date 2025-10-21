@@ -1,7 +1,7 @@
 mod cartmbc;
 mod consmbc;
 use crate::{common::errors::HydraIOError, gameboy::Model};
-use std::{cell::RefCell, fs, ops::Index, sync::RwLock};
+use std::{cell::{Cell, RefCell}, fs, ops::Index, sync::RwLock};
 
 // Header Registers
 pub const TITLE_ADDRESS: usize = 0x0134;
@@ -93,7 +93,7 @@ pub const IE: usize = 0xFFFF;
 pub struct Memory {
     cartridge: Option<Box<dyn cartmbc::CartMemoryBankController>>,
     console: Box<dyn consmbc::ConsMemoryBankController>,
-    data_bus: RwLock<u8>,
+    data_bus: Cell<u8>,
 }
 
 impl Memory {
@@ -101,7 +101,7 @@ impl Memory {
         let result_cart = Memory {
             cartridge: Some(cartmbc::from_rom(rom)?),
             console: consmbc::from_model(model)?,
-            data_bus: RwLock::new(0),
+            data_bus: Cell::new(0),
         };
         Ok(result_cart)
     }
@@ -133,18 +133,18 @@ impl Memory {
             0xFE00.. => panic!("OAM / IO / HRAM not yet implemented"),
         };
         match read_result {
-            Ok(value) => *self.data_bus.write().unwrap() = value,
+            Ok(value) => self.data_bus.set(value),
             Err(e) => match e {
                 HydraIOError::OpenBusAccess => {}
                 _ => panic!("Error reading from memory.\n{}", e),
             },
         }
 
-        return *self.data_bus.read().unwrap();
+        return self.data_bus.get();
     }
 
     pub fn write_u8(&mut self, value: u8, address: u16) -> () {
-        *self.data_bus.write().unwrap() = value;
+        self.data_bus.set(value);
         let write_result = match address {
             0x0000..0x8000 => {
                 if let Some(valid_cart) = &mut self.cartridge {
