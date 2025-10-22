@@ -1,7 +1,7 @@
 mod cartmbc;
 mod consmbc;
-use crate::{common::errors::HydraIOError, gameboy::Model};
-use std::{cell::{Cell, RefCell}, fs, ops::Index, sync::RwLock};
+use crate::{common::errors::HydraIOError, gameboy::{cpu::CPU, ppu::PPU, Model}};
+use std::{cell::{Cell, RefCell}, fs, ops::Index, rc::Rc, sync::RwLock};
 
 // Header Registers
 pub const TITLE_ADDRESS: usize = 0x0134;
@@ -91,17 +91,21 @@ pub const PCM34: usize = 0xFF77;
 pub const IE: usize = 0xFFFF;
 
 pub struct Memory {
-    cartridge: Option<Box<dyn cartmbc::CartMemoryBankController>>,
-    console: Box<dyn consmbc::ConsMemoryBankController>,
+    cartridge: Option<Box<dyn cartmbc::CartMemoryBankController>>, // ROM, SRAM
+    console: Box<dyn consmbc::ConsMemoryBankController>, // VRAM, WRAM/Echo RAM
     data_bus: Cell<u8>,
+
+    // CPU register handles
+    ie: Rc<Cell<u8>>,
 }
 
 impl Memory {
-    pub fn from_rom_and_model(rom: Box<[u8]>, model: Model) -> Result<Memory, HydraIOError> {
+    pub fn from_rom_and_model(rom: Box<[u8]>, model: Model, cpu: &CPU, ppu: &PPU) -> Result<Memory, HydraIOError> {
         let result_cart = Memory {
             cartridge: Some(cartmbc::from_rom(rom)?),
-            console: consmbc::from_model(model)?,
+            console: consmbc::from_model(model),
             data_bus: Cell::new(0),
+            ie: cpu.ie.clone(),
         };
         Ok(result_cart)
     }
@@ -130,7 +134,8 @@ impl Memory {
             }
             0xC000..0xE000 => self.console.read_wram_u8((address - 0xC000) as usize),
             0xE000..0xFE00 => self.console.read_wram_u8((address - 0xE000) as usize), // Echo RAM mirrors WRAM
-            0xFE00.. => panic!("OAM / IO / HRAM not yet implemented"),
+            0xFE00..0xFFFF => panic!("OAM / IO / HRAM not yet implemented"),
+            0xFFFF => Ok(self.ie.get()),
         };
         match read_result {
             Ok(value) => self.data_bus.set(value),
@@ -163,10 +168,14 @@ impl Memory {
             }
             0xC000..0xE000 => self.console.write_wram_u8(value, (address - 0xC000) as usize),
             0xE000..0xFE00 => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
-            0xFE00.. => panic!("OAM / IO / HRAM not yet implemented"),
+            0xFE00..0xFFFF => panic!("OAM / IO / HRAM not yet implemented"),
+            0xFFFF => Ok(self.ie.set(value)),
         };
         if let Err(e) = write_result {
             panic!("Error writing to memory.\n{}", e);
         }
+    }
+    pub fn debug(&self) {
+        println!("{}", self.ie.get())
     }
 }

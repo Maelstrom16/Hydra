@@ -7,11 +7,11 @@ pub struct DMG {
 }
 
 impl DMG {
-    pub fn new() -> Result<Self, HydraIOError> {
-        Ok(DMG {
+    pub fn new() -> Self {
+        DMG {
             vram: vec![0; 0x2000],
             wram: vec![0; 0x2000],
-        })
+        }
     }
 }
 

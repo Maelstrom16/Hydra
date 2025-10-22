@@ -1,9 +1,7 @@
 mod opcode;
 
 use std::{
-    rc::Rc,
-    sync::{Arc, Barrier, MutexGuard, RwLock},
-    thread::{self, JoinHandle, ScopedJoinHandle, Thread},
+    cell::Cell, rc::Rc, sync::{Arc, Barrier, MutexGuard, RwLock}, thread::{self, JoinHandle, ScopedJoinHandle, Thread}
 };
 
 use futures::lock::Mutex;
@@ -44,7 +42,7 @@ pub struct CPU {
     sp: u16,
     pc: u16,
     ir: u8,
-    ie: u8,
+    pub ie: Rc<Cell<u8>>,
     ime: bool,
     ime_queued: bool,
 }
@@ -77,7 +75,7 @@ impl CPU {
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
         const ir: u8 = 0x00;
-        const ie: u8 = 0x00;
+        let ie: Rc<Cell<u8>> = Rc::new(Cell::new(0x00));
         const ime: bool = false;
         const ime_queued: bool = false;
         match model {

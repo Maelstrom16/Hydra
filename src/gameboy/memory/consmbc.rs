@@ -11,9 +11,9 @@ pub trait ConsMemoryBankController: Send + Sync + 'static {
     fn write_wram_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
 }
 
-pub fn from_model(model: Model) -> Result<Box<dyn ConsMemoryBankController>, HydraIOError> {
+pub fn from_model(model: Model) -> Box<dyn ConsMemoryBankController> {
     match model {
-        Model::GameBoy(_) | Model::SuperGameBoy(_) => Ok(Box::new(dmg::DMG::new()?)),
+        Model::GameBoy(_) | Model::SuperGameBoy(_) => Box::new(dmg::DMG::new()),
         Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => {
             panic!("CGB console memory not yet supported")
         }

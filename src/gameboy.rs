@@ -86,17 +86,20 @@ pub struct GameBoy {
 impl GameBoy {
     fn from_revision(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Result<Sender<EmuMessage>, HydraIOError> {
         let rom = fs::read(path)?.into_boxed_slice();
-        let memory = memory::Memory::from_rom_and_model(rom.clone(), model)?;
-        let cpu = cpu::CPU::new(&rom, model);
-        let ppu = ppu::PPU::new(window, graphics);
         let (send, recv) = channel();
-        GameBoy {
-            cpu,
-            memory,
-            ppu,
-            clock: 0,
-            channel: recv
-        }.main_thread();
+
+        thread::spawn(move || {
+            let cpu = cpu::CPU::new(&rom, model);
+            let ppu = ppu::PPU::new(window, graphics);
+            let memory = memory::Memory::from_rom_and_model(rom, model, &cpu, &ppu).unwrap(); // TODO: Error should be handled rather than unwrapped
+            GameBoy {
+                cpu,
+                memory,
+                ppu,
+                clock: 0,
+                channel: recv
+            }.main_thread();
+        });
         Ok(send)
     }
     pub fn from_model(path: &Path, model: Model, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>, config: &Config) -> Result<Sender<EmuMessage>, HydraIOError> {
@@ -126,23 +129,21 @@ const CYCLES_PER_FRAME: u32 = 70224;
 impl Emulator for GameBoy {
     fn main_thread(mut self) {
         println!("Launching Wyrm");
-        thread::spawn(move || {
-            // Main loop
-            loop {
-                self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
-                self.cpu.step(&mut self.memory);
-                self.ppu.step(&self.clock);
-            }
-            println!("Exiting Wyrm");
+        // Main loop
+        loop {
+            self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
+            self.cpu.step(&mut self.memory);
+            self.ppu.step(&self.clock);
+        }
+        println!("Exiting Wyrm");
 
-            // Dump memory (for debugging)
-            for y in 0..=0xFFF {
-                print!("{:#06X}:   ", y<<4);
-                for x in 0..=0xF {
-                    print!("{:02X} ", self.memory.read_u8(x | (y << 4)));
-                }
-                println!("");
+        // Dump memory (for debugging)
+        for y in 0..=0xFFF {
+            print!("{:#06X}:   ", y<<4);
+            for x in 0..=0xF {
+                print!("{:02X} ", self.memory.read_u8(x | (y << 4)));
             }
-        });
+            println!("");
+        }
     }
 }
