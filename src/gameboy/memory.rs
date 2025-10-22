@@ -1,6 +1,7 @@
 mod cartmbc;
 mod consmbc;
-use crate::{common::errors::HydraIOError, gameboy::{cpu::CPU, ppu::PPU, Model}};
+pub mod io;
+use crate::{common::errors::HydraIOError, gameboy::{cpu::CPU, memory::io::IO, ppu::PPU, Model}};
 use std::{cell::{Cell, RefCell}, fs, ops::Index, rc::Rc, sync::RwLock};
 
 // Header Registers
@@ -12,100 +13,22 @@ pub const RAM_SIZE_ADDRESS: usize = 0x0149;
 pub const OLD_LICENSEE_CODE_ADDRESS: usize = 0x014B;
 pub const HEADER_CHECKSUM_ADDRESS: usize = 0x014D;
 
-// I/O Registers
-pub const P1: usize = 0xFF00;
-pub const SB: usize = 0xFF01;
-pub const SC: usize = 0xFF02;
-pub const DIV: usize = 0xFF04;
-pub const TIMA: usize = 0xFF05;
-pub const TMA: usize = 0xFF06;
-pub const TAC: usize = 0xFF07;
-pub const IF: usize = 0xFF0F;
-pub const NR10: usize = 0xFF10;
-pub const NR11: usize = 0xFF11;
-pub const NR12: usize = 0xFF12;
-pub const NR13: usize = 0xFF13;
-pub const NR14: usize = 0xFF14;
-pub const NR21: usize = 0xFF16;
-pub const NR22: usize = 0xFF17;
-pub const NR23: usize = 0xFF18;
-pub const NR24: usize = 0xFF19;
-pub const NR30: usize = 0xFF1A;
-pub const NR31: usize = 0xFF1B;
-pub const NR32: usize = 0xFF1C;
-pub const NR33: usize = 0xFF1D;
-pub const NR34: usize = 0xFF1E;
-pub const NR41: usize = 0xFF20;
-pub const NR42: usize = 0xFF21;
-pub const NR43: usize = 0xFF22;
-pub const NR44: usize = 0xFF23;
-pub const NR50: usize = 0xFF24;
-pub const NR51: usize = 0xFF25;
-pub const NR52: usize = 0xFF26;
-pub const WAV00: usize = 0xFF30;
-pub const WAV01: usize = 0xFF31;
-pub const WAV02: usize = 0xFF32;
-pub const WAV03: usize = 0xFF33;
-pub const WAV04: usize = 0xFF34;
-pub const WAV05: usize = 0xFF35;
-pub const WAV06: usize = 0xFF36;
-pub const WAV07: usize = 0xFF37;
-pub const WAV08: usize = 0xFF38;
-pub const WAV09: usize = 0xFF39;
-pub const WAV10: usize = 0xFF3A;
-pub const WAV11: usize = 0xFF3B;
-pub const WAV12: usize = 0xFF3C;
-pub const WAV13: usize = 0xFF3D;
-pub const WAV14: usize = 0xFF3E;
-pub const WAV15: usize = 0xFF3F;
-pub const LCDC: usize = 0xFF40;
-pub const STAT: usize = 0xFF41;
-pub const SCY: usize = 0xFF42;
-pub const SCX: usize = 0xFF43;
-pub const LY: usize = 0xFF44;
-pub const LYC: usize = 0xFF45;
-pub const DMA: usize = 0xFF46;
-pub const BGP: usize = 0xFF47;
-pub const OBP0: usize = 0xFF48;
-pub const OBP1: usize = 0xFF49;
-pub const WY: usize = 0xFF4A;
-pub const WX: usize = 0xFF4B;
-pub const KEY0: usize = 0xFF4C;
-pub const KEY1: usize = 0xFF4D;
-pub const VBK: usize = 0xFF4F;
-pub const BOOT: usize = 0xFF50;
-pub const HDMA1: usize = 0xFF51;
-pub const HDMA2: usize = 0xFF52;
-pub const HDMA3: usize = 0xFF53;
-pub const HDMA4: usize = 0xFF54;
-pub const HDMA5: usize = 0xFF55;
-pub const RP: usize = 0xFF56;
-pub const BCPS: usize = 0xFF68;
-pub const BPCD: usize = 0xFF69;
-pub const OCPS: usize = 0xFF6A;
-pub const OCPD: usize = 0xFF6B;
-pub const OPRI: usize = 0xFF6C;
-pub const SVBK: usize = 0xFF70;
-pub const PCM12: usize = 0xFF76;
-pub const PCM34: usize = 0xFF77;
-pub const IE: usize = 0xFFFF;
-
 pub struct Memory {
     cartridge: Option<Box<dyn cartmbc::CartMemoryBankController>>, // ROM, SRAM
     console: Box<dyn consmbc::ConsMemoryBankController>, // VRAM, WRAM/Echo RAM
+    hram: Box<[u8]>,
+    io: IO,
     data_bus: Cell<u8>,
-
-    // CPU register handles
-    ie: Rc<Cell<u8>>,
 }
 
 impl Memory {
-    pub fn from_rom_and_model(rom: Box<[u8]>, model: Model, cpu: &CPU, ppu: &PPU) -> Result<Memory, HydraIOError> {
+    pub fn from_rom_and_model(rom: Box<[u8]>, model: Model, io: IO) -> Result<Memory, HydraIOError> {
         let result_cart = Memory {
             cartridge: Some(cartmbc::from_rom(rom)?),
             console: consmbc::from_model(model),
+            hram: Box::new([0; 0x7F]),
+            io,
             data_bus: Cell::new(0),
-            ie: cpu.ie.clone(),
         };
         Ok(result_cart)
     }
@@ -135,7 +58,7 @@ impl Memory {
             0xC000..0xE000 => self.console.read_wram_u8((address - 0xC000) as usize),
             0xE000..0xFE00 => self.console.read_wram_u8((address - 0xE000) as usize), // Echo RAM mirrors WRAM
             0xFE00..0xFFFF => panic!("OAM / IO / HRAM not yet implemented"),
-            0xFFFF => Ok(self.ie.get()),
+            0xFFFF => Ok(self.io.ie.get()),
         };
         match read_result {
             Ok(value) => self.data_bus.set(value),
@@ -169,13 +92,10 @@ impl Memory {
             0xC000..0xE000 => self.console.write_wram_u8(value, (address - 0xC000) as usize),
             0xE000..0xFE00 => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
             0xFE00..0xFFFF => panic!("OAM / IO / HRAM not yet implemented"),
-            0xFFFF => Ok(self.ie.set(value)),
+            0xFFFF => Ok(self.io.ie.set(value)),
         };
         if let Err(e) = write_result {
             panic!("Error writing to memory.\n{}", e);
         }
-    }
-    pub fn debug(&self) {
-        println!("{}", self.ie.get())
     }
 }

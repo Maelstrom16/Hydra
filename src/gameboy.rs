@@ -5,8 +5,7 @@ mod ppu;
 use winit::window::Window;
 
 use crate::{
-    common::{emulator::{EmuMessage, Emulator}, errors::HydraIOError},
-    config::Config, graphics::Graphics,
+    common::{emulator::{EmuMessage, Emulator}, errors::HydraIOError}, config::Config, gameboy::memory::io::IO, graphics::Graphics
 };
 use std::{
     ffi::OsStr,
@@ -89,9 +88,10 @@ impl GameBoy {
         let (send, recv) = channel();
 
         thread::spawn(move || {
-            let cpu = cpu::CPU::new(&rom, model);
-            let ppu = ppu::PPU::new(window, graphics);
-            let memory = memory::Memory::from_rom_and_model(rom, model, &cpu, &ppu).unwrap(); // TODO: Error should be handled rather than unwrapped
+            let io = IO::new(model);
+            let cpu = cpu::CPU::new(&rom, &io, model);
+            let ppu = ppu::PPU::new(&io, window, graphics);
+            let memory = memory::Memory::from_rom_and_model(rom, model, io).unwrap(); // TODO: Error should be handled rather than unwrapped
             GameBoy {
                 cpu,
                 memory,

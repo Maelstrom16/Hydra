@@ -1,13 +1,21 @@
-use std::{sync::{Arc, MutexGuard, RwLock}, thread::{self, JoinHandle}};
+use std::{cell::Cell, rc::Rc, sync::{Arc, MutexGuard, RwLock}, thread::{self, JoinHandle}};
 
 use futures::lock::Mutex;
 use rand::Rng;
 use winit::window::Window;
 
-use crate::{gameboy::memory::Memory, graphics::{self, Graphics}};
+use crate::{gameboy::memory::{io::IO, Memory}, graphics::{self, Graphics}};
 
 pub struct PPU {
     screen_buffer: Box<[u8]>,
+
+    pub stat: Rc<Cell<u8>>,
+    pub scy: Rc<Cell<u8>>,
+    pub scx: Rc<Cell<u8>>,
+    pub ly: Rc<Cell<u8>>,
+    pub lyc: Rc<Cell<u8>>,
+    pub wy: Rc<Cell<u8>>,
+    pub wx: Rc<Cell<u8>>,
 
     window: Arc<Window>,
     graphics: Arc<RwLock<Graphics>>,
@@ -20,9 +28,22 @@ const SCREEN_Y: usize = 144;
 const BUFFER_SIZE: usize = SCREEN_X * SCREEN_Y * 4;
 
 impl PPU {
-    pub fn new(window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Self {
+    pub fn new(io: &IO, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
-        let mut result = PPU { screen_buffer, window, graphics };
+        let mut result = PPU { 
+            screen_buffer, 
+
+            stat: io.stat.clone(),
+            scy: io.scy.clone(),
+            scx: io.scx.clone(),
+            ly: io.ly.clone(),
+            lyc: io.lyc.clone(),
+            wy: io.wy.clone(),
+            wx: io.wx.clone(),
+            
+            window, 
+            graphics 
+        };
         result.init_graphics();
         result
     }

@@ -6,16 +6,12 @@ use std::{
 
 use futures::lock::Mutex;
 
-use crate::{
-    gameboy::{
-        AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision,
+use crate::gameboy::{
         cpu::{
             self,
             opcode::{CondOperand, IntOperand, RegisterOperand8},
-        },
-        memory::{self, Memory, TITLE_ADDRESS},
-    },
-};
+        }, memory::{self, io::IO, Memory, TITLE_ADDRESS}, AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision
+    };
 
 /// A Game Boy CPU.
 ///
@@ -67,7 +63,7 @@ pub enum Register16 {
 }
 
 impl CPU {
-    pub fn new(rom: &Box<[u8]>, model: Model) -> Self {
+    pub fn new(rom: &Box<[u8]>, io: &IO, model: Model) -> Self {
         let af;
         let bc;
         let de;
@@ -75,7 +71,7 @@ impl CPU {
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
         const ir: u8 = 0x00;
-        let ie: Rc<Cell<u8>> = Rc::new(Cell::new(0x00));
+        let ie: Rc<Cell<u8>> = io.ie.clone();
         const ime: bool = false;
         const ime_queued: bool = false;
         match model {
