@@ -109,7 +109,7 @@ pub struct HramIndirectOperand<O: IntOperand<u8>>(pub O);
 impl<O: IntOperand<u8>> HramIndirectOperand<O> {
     #[inline(always)]
     fn as_hram_address(&self, cpu: &mut CPU, memory: &mut Memory) -> u16 {
-        0xFF00 & (self.0.get(cpu, memory) as u16)
+        0xFF00 | (self.0.get(cpu, memory) as u16)
     }
 }
 impl<O: IntOperand<u8>> IntOperand<u8> for HramIndirectOperand<O> {

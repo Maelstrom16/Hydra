@@ -40,24 +40,26 @@ impl Memory {
 
     pub fn read_u8(&self, address: u16) -> u8 {
         let read_result = match address {
-            0x0000..0x8000 => {
+            0x0000..=0x7FFF => {
                 if let Some(valid_cart) = &self.cartridge {
                     valid_cart.read_rom_u8(address as usize)
                 } else {
                     Err(HydraIOError::OpenBusAccess)
                 }
             }
-            0x8000..0xA000 => self.console.read_vram_u8((address - 0x8000) as usize),
-            0xA000..0xC000 => {
+            0x8000..=0x9FFF => self.console.read_vram_u8((address - 0x8000) as usize),
+            0xA000..=0xBFFF => {
                 if let Some(valid_cart) = &self.cartridge {
                     valid_cart.read_ram_u8((address - 0xA000) as usize)
                 } else {
                     Err(HydraIOError::OpenBusAccess)
                 }
             }
-            0xC000..0xE000 => self.console.read_wram_u8((address - 0xC000) as usize),
-            0xE000..0xFE00 => self.console.read_wram_u8((address - 0xE000) as usize), // Echo RAM mirrors WRAM
-            0xFE00..0xFFFF => panic!("OAM / IO / HRAM not yet implemented"),
+            0xC000..=0xDFFF => self.console.read_wram_u8((address - 0xC000) as usize),
+            0xE000..=0xFDFF => self.console.read_wram_u8((address - 0xE000) as usize), // Echo RAM mirrors WRAM
+            0xFE00..=0xFEFF => panic!("OAM not yet implemented"),
+            0xFF00..=0xFF7F => panic!("IO not yet implemented"),
+            0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             0xFFFF => Ok(self.io.ie.get()),
         };
         match read_result {
@@ -74,24 +76,26 @@ impl Memory {
     pub fn write_u8(&mut self, value: u8, address: u16) -> () {
         self.data_bus.set(value);
         let write_result = match address {
-            0x0000..0x8000 => {
+            0x0000..=0x7FFF => {
                 if let Some(valid_cart) = &mut self.cartridge {
                     valid_cart.write_rom_u8(value, address as usize)
                 } else {
                     Err(HydraIOError::OpenBusAccess)
                 }
             }
-            0x8000..0xA000 => self.console.write_vram_u8(value, (address - 0x8000) as usize),
-            0xA000..0xC000 => {
+            0x8000..=0x9FFF => self.console.write_vram_u8(value, (address - 0x8000) as usize),
+            0xA000..=0xBFFF => {
                 if let Some(valid_cart) = &mut self.cartridge {
                     valid_cart.write_ram_u8(value, (address - 0xA000) as usize)
                 } else {
                     Err(HydraIOError::OpenBusAccess)
                 }
             }
-            0xC000..0xE000 => self.console.write_wram_u8(value, (address - 0xC000) as usize),
-            0xE000..0xFE00 => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
-            0xFE00..0xFFFF => panic!("OAM / IO / HRAM not yet implemented"),
+            0xC000..=0xDFFF => self.console.write_wram_u8(value, (address - 0xC000) as usize),
+            0xE000..=0xFDFF => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
+            0xFE00..=0xFEFF => panic!("OAM not yet implemented"),
+            0xFF00..=0xFF7F => panic!("IO not yet implemented"),
+            0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
             0xFFFF => Ok(self.io.ie.set(value)),
         };
         if let Err(e) = write_result {
