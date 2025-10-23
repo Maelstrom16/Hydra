@@ -58,9 +58,9 @@ impl Memory {
             0xC000..=0xDFFF => self.console.read_wram_u8((address - 0xC000) as usize),
             0xE000..=0xFDFF => self.console.read_wram_u8((address - 0xE000) as usize), // Echo RAM mirrors WRAM
             0xFE00..=0xFEFF => panic!("OAM not yet implemented"),
-            0xFF00..=0xFF7F => panic!("IO not yet implemented"),
+            0xFF00..=0xFF7F => Ok(self.io[address as usize - io::ADDRESS_OFFSET].get()),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
-            0xFFFF => Ok(self.io.ie.get()),
+            0xFFFF => Ok(self.io[io::IE].get()),
         };
         match read_result {
             Ok(value) => self.data_bus.set(value),
@@ -94,9 +94,9 @@ impl Memory {
             0xC000..=0xDFFF => self.console.write_wram_u8(value, (address - 0xC000) as usize),
             0xE000..=0xFDFF => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
             0xFE00..=0xFEFF => panic!("OAM not yet implemented"),
-            0xFF00..=0xFF7F => panic!("IO not yet implemented"),
+            0xFF00..=0xFF7F => Ok(self.io[address as usize - io::ADDRESS_OFFSET].set(value)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
-            0xFFFF => Ok(self.io.ie.set(value)),
+            0xFFFF => Ok(self.io[io::IE].set(value)),
         };
         if let Err(e) = write_result {
             panic!("Error writing to memory.\n{}", e);

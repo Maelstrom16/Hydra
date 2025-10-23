@@ -4,7 +4,7 @@ use futures::lock::Mutex;
 use rand::Rng;
 use winit::window::Window;
 
-use crate::{gameboy::memory::{io::IO, Memory}, graphics::{self, Graphics}};
+use crate::{gameboy::memory::{io::{self, IO}, Memory}, graphics::{self, Graphics}};
 
 pub struct PPU {
     screen_buffer: Box<[u8]>,
@@ -33,13 +33,13 @@ impl PPU {
         let mut result = PPU { 
             screen_buffer, 
 
-            stat: io.stat.clone(),
-            scy: io.scy.clone(),
-            scx: io.scx.clone(),
-            ly: io.ly.clone(),
-            lyc: io.lyc.clone(),
-            wy: io.wy.clone(),
-            wx: io.wx.clone(),
+            stat: io[io::STAT].clone(),
+            scy: io[io::SCY].clone(),
+            scx: io[io::SCX].clone(),
+            ly: io[io::LY].clone(),
+            lyc: io[io::LYC].clone(),
+            wy: io[io::WY].clone(),
+            wx: io[io::WX].clone(),
             
             window, 
             graphics 

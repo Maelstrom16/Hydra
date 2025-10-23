@@ -10,7 +10,7 @@ use crate::gameboy::{
         cpu::{
             self,
             opcode::{CondOperand, IntOperand, RegisterOperand8},
-        }, memory::{self, io::IO, Memory, TITLE_ADDRESS}, AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision
+        }, memory::{self, io::{self, IO}, Memory, TITLE_ADDRESS}, AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision
     };
 
 /// A Game Boy CPU.
@@ -71,7 +71,7 @@ impl CPU {
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
         const ir: u8 = 0x00;
-        let ie: Rc<Cell<u8>> = io.ie.clone();
+        let ie: Rc<Cell<u8>> = io[io::IE].clone();
         const ime: bool = false;
         const ime_queued: bool = false;
         match model {
