@@ -199,9 +199,9 @@ impl CPU {
 
     pub fn step(&mut self, memory: &mut Memory) {
         // Fetch cycle
-        //print!("{:#06X}: ", self.pc);
+        // print!("{:#06X}: ", self.pc);
         self.ir = self.step_u8_and_wait(memory);
-        //println!("{:02X}   F: {:08b}", self.ir, self.af[0]);
+        // println!("{:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}", self.ir, self.af[1], self.af[0], u16::from_le_bytes(self.bc), u16::from_le_bytes(self.de), u16::from_le_bytes(self.hl), self.sp);
         if self.ime_queued {
             self.ime = true;
             self.ime_queued = false;

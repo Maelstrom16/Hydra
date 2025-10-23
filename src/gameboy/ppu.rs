@@ -1,4 +1,4 @@
-use std::{cell::Cell, rc::Rc, sync::{Arc, MutexGuard, RwLock}, thread::{self, JoinHandle}};
+use std::{cell::Cell, ops::Div, rc::Rc, sync::{Arc, MutexGuard, RwLock}, thread::{self, JoinHandle}};
 
 use futures::lock::Mutex;
 use rand::Rng;
@@ -54,7 +54,10 @@ impl PPU {
 
     #[inline(always)]
     pub fn step(&mut self, clock: &u32) {
-        // // Test texture generation TODO: Remove when finished testing
+        // Update registers
+        self.ly.set(clock.div(DOTS as u32) as u8);
+
+        // Test texture generation TODO: Remove when finished testing
         self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
 
         // Update and render

@@ -122,6 +122,15 @@ impl GameBoy {
         let rom: Box<[u8]> = fs::read(path)?.into_boxed_slice();
         self.memory.hot_swap_rom(rom)
     }
+    fn dump_mem(&self) {
+        for y in 0..=0xFFF {
+            print!("{:#06X}:   ", y<<4);
+            for x in 0..=0xF {
+                print!("{:02X} ", self.memory.read_u8(x | (y << 4)));
+            }
+            println!("");
+        }
+    }
 }
 
 const CYCLES_PER_FRAME: u32 = 70224;
@@ -138,12 +147,6 @@ impl Emulator for GameBoy {
         println!("Exiting Wyrm");
 
         // Dump memory (for debugging)
-        for y in 0..=0xFFF {
-            print!("{:#06X}:   ", y<<4);
-            for x in 0..=0xF {
-                print!("{:02X} ", self.memory.read_u8(x | (y << 4)));
-            }
-            println!("");
-        }
+        self.dump_mem();
     }
 }
