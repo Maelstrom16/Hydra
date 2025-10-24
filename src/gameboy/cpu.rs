@@ -447,7 +447,6 @@ impl CPU {
     #[inline(always)]
     fn xor<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
         let result = self.af[1] ^ operand.get(self, memory);
-        println!("{}", result);
         set_flags!(self;
             z=(result == 0),
             n=(false),
