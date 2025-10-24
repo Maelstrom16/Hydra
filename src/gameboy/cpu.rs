@@ -659,7 +659,8 @@ impl CPU {
 
     #[inline(always)]
     fn jr<O: IntOperand<i8>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
-        let addr = self.pc.wrapping_add_signed(operand.get(self, memory).into());
+        let e = operand.get(self, memory) as i8;
+        let addr = self.pc.wrapping_add_signed(e.into());
         if condition.evaluate(self) {
             
             self.pc = addr;

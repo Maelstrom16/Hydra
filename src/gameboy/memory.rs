@@ -1,7 +1,9 @@
 mod cartmbc;
 mod consmbc;
 pub mod io;
-use crate::{common::errors::HydraIOError, gameboy::{cpu::CPU, memory::io::IO, ppu::PPU, Model}};
+mod oam;
+
+use crate::{common::errors::HydraIOError, gameboy::{cpu::CPU, memory::{io::IO, oam::OAM}, ppu::PPU, Model}};
 use std::{cell::{Cell, RefCell}, fs, ops::Index, rc::Rc, sync::RwLock};
 
 // Header Registers
@@ -16,8 +18,10 @@ pub const HEADER_CHECKSUM_ADDRESS: usize = 0x014D;
 pub struct Memory {
     cartridge: Option<Box<dyn cartmbc::CartMemoryBankController>>, // ROM, SRAM
     console: Box<dyn consmbc::ConsMemoryBankController>, // VRAM, WRAM/Echo RAM
-    hram: Box<[u8]>,
+    hram: [u8; 0x7F],
     io: IO,
+    oam: OAM,
+
     data_bus: Cell<u8>,
 }
 
@@ -26,8 +30,9 @@ impl Memory {
         let result_cart = Memory {
             cartridge: Some(cartmbc::from_rom(rom)?),
             console: consmbc::from_model(model),
-            hram: Box::new([0; 0x7F]),
+            hram: [0; 0x7F],
             io,
+            oam: OAM::new(),
             data_bus: Cell::new(0),
         };
         Ok(result_cart)
@@ -57,7 +62,7 @@ impl Memory {
             }
             0xC000..=0xDFFF => self.console.read_wram_u8((address - 0xC000) as usize),
             0xE000..=0xFDFF => self.console.read_wram_u8((address - 0xE000) as usize), // Echo RAM mirrors WRAM
-            0xFE00..=0xFEFF => panic!("OAM not yet implemented"),
+            0xFE00..=0xFEFF => self.oam.read(address as usize - oam::ADDRESS_OFFSET),
             0xFF00..=0xFF7F => Ok(self.io[address as usize - io::ADDRESS_OFFSET].get()),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             0xFFFF => Ok(self.io[io::IE].get()),
@@ -93,7 +98,7 @@ impl Memory {
             }
             0xC000..=0xDFFF => self.console.write_wram_u8(value, (address - 0xC000) as usize),
             0xE000..=0xFDFF => self.console.write_wram_u8(value, (address - 0xE000) as usize), // Echo RAM mirrors WRAM
-            0xFE00..=0xFEFF => panic!("OAM not yet implemented"),
+            0xFE00..=0xFEFF => self.oam.write(address as usize - oam::ADDRESS_OFFSET, value),
             0xFF00..=0xFF7F => Ok(self.io[address as usize - io::ADDRESS_OFFSET].set(value)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
             0xFFFF => Ok(self.io[io::IE].set(value)),
