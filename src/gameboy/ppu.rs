@@ -1,12 +1,15 @@
+mod fifo;
+
 use std::{cell::Cell, ops::Div, rc::Rc, sync::{Arc, MutexGuard, RwLock}, thread::{self, JoinHandle}};
 
 use futures::lock::Mutex;
 use rand::Rng;
 use winit::window::Window;
 
-use crate::{gameboy::memory::{io::{self, IO}, Memory}, graphics::{self, Graphics}};
+use crate::{gameboy::{memory::{io::{self, IO}, Memory}, ppu::fifo::RenderQueue}, graphics::{self, Graphics}};
 
 pub struct PPU {
+    fifo: RenderQueue,
     mode: Mode,
     screen_buffer: Box<[u8]>,
 
@@ -39,6 +42,7 @@ impl PPU {
     pub fn new(io: &IO, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
         let mut result = PPU { 
+            fifo: RenderQueue::new(),
             mode: Mode::OAMScan,
             screen_buffer, 
 
