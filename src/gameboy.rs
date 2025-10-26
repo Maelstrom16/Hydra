@@ -5,13 +5,22 @@ mod ppu;
 use winit::window::Window;
 
 use crate::{
-    common::{emulator::{EmuMessage, Emulator}, errors::HydraIOError}, config::Config, gameboy::memory::io::IO, graphics::Graphics
+    common::{
+        emulator::{EmuMessage, Emulator},
+        errors::HydraIOError,
+    },
+    config::Config,
+    gameboy::memory::io::IO,
+    graphics::Graphics,
 };
 use std::{
     ffi::OsStr,
     fmt, fs,
     path::Path,
-    sync::{mpsc::{channel, Receiver, Sender}, Arc, Barrier, Condvar, Mutex, RwLock, Weak},
+    sync::{
+        Arc, Barrier, Condvar, Mutex, RwLock, Weak,
+        mpsc::{Receiver, Sender, channel},
+    },
     thread,
 };
 
@@ -79,7 +88,7 @@ pub struct GameBoy {
     ppu: ppu::PPU,
     clock: u32,
 
-    channel: Receiver<EmuMessage>
+    channel: Receiver<EmuMessage>,
 }
 
 impl GameBoy {
@@ -97,8 +106,9 @@ impl GameBoy {
                 memory,
                 ppu,
                 clock: 0,
-                channel: recv
-            }.main_thread();
+                channel: recv,
+            }
+            .main_thread();
         });
         Ok(send)
     }
@@ -106,16 +116,26 @@ impl GameBoy {
         // If file extension is valid for the given model, initialize the emulator
         // Otherwise, return an InvalidExtension error
         match (path.extension().and_then(OsStr::to_str), model) {
-            (Some("gb") | Some("gbc"), Model::GameBoy(revision)) => 
-                Ok(Self::from_revision(path, Model::GameBoy(Some(revision.unwrap_or(config.gb.default_models.dmg))), window, graphics)?),
-            (Some("gb") | Some("gbc"), Model::SuperGameBoy(revision)) => 
-                Ok(Self::from_revision(path, Model::SuperGameBoy(Some(revision.unwrap_or(config.gb.default_models.sgb))), window, graphics)?),
-            (Some("gb") | Some("gbc"), Model::GameBoyColor(revision)) => 
-                Ok(Self::from_revision(path, Model::GameBoyColor(Some(revision.unwrap_or(config.gb.default_models.cgb))), window, graphics)?),
-            (Some("gb") | Some("gbc") | Some("gba"), Model::GameBoyAdvance(revision)) => 
-                Ok(Self::from_revision(path, Model::GameBoyAdvance(Some(revision.unwrap_or(config.gb.default_models.agb))), window, graphics)?),
-            (ext, model) => 
-                Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string))),
+            (Some("gb") | Some("gbc"), Model::GameBoy(revision)) => Ok(Self::from_revision(path, Model::GameBoy(Some(revision.unwrap_or(config.gb.default_models.dmg))), window, graphics)?),
+            (Some("gb") | Some("gbc"), Model::SuperGameBoy(revision)) => Ok(Self::from_revision(
+                path,
+                Model::SuperGameBoy(Some(revision.unwrap_or(config.gb.default_models.sgb))),
+                window,
+                graphics,
+            )?),
+            (Some("gb") | Some("gbc"), Model::GameBoyColor(revision)) => Ok(Self::from_revision(
+                path,
+                Model::GameBoyColor(Some(revision.unwrap_or(config.gb.default_models.cgb))),
+                window,
+                graphics,
+            )?),
+            (Some("gb") | Some("gbc") | Some("gba"), Model::GameBoyAdvance(revision)) => Ok(Self::from_revision(
+                path,
+                Model::GameBoyAdvance(Some(revision.unwrap_or(config.gb.default_models.agb))),
+                window,
+                graphics,
+            )?),
+            (ext, model) => Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string))),
         }
     }
     fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
@@ -124,7 +144,7 @@ impl GameBoy {
     }
     fn dump_mem(&self) {
         for y in 0..=0xFFF {
-            print!("{:#06X}:   ", y<<4);
+            print!("{:#06X}:   ", y << 4);
             for x in 0..=0xF {
                 print!("{:02X} ", self.memory.read_u8(x | (y << 4)));
             }
@@ -143,6 +163,9 @@ impl Emulator for GameBoy {
             self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
             self.cpu.step(&mut self.memory);
             self.ppu.step(&self.clock);
+            // if self.clock % 456 == 0 {
+            //     self.dump_mem();
+            // }
         }
         println!("Exiting Wyrm");
 

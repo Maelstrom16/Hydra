@@ -3,8 +3,22 @@ mod consmbc;
 pub mod io;
 mod oam;
 
-use crate::{common::errors::HydraIOError, gameboy::{cpu::CPU, memory::{io::IO, oam::OAM}, ppu::PPU, Model}};
-use std::{cell::{Cell, RefCell}, fs, ops::Index, rc::Rc, sync::RwLock};
+use crate::{
+    common::errors::HydraIOError,
+    gameboy::{
+        Model,
+        cpu::CPU,
+        memory::{io::IO, oam::OAM},
+        ppu::PPU,
+    },
+};
+use std::{
+    cell::{Cell, RefCell},
+    fs,
+    ops::Index,
+    rc::Rc,
+    sync::RwLock,
+};
 
 // Header Registers
 pub const TITLE_ADDRESS: usize = 0x0134;
@@ -17,7 +31,7 @@ pub const HEADER_CHECKSUM_ADDRESS: usize = 0x014D;
 
 pub struct Memory {
     cartridge: Option<Box<dyn cartmbc::CartMemoryBankController>>, // ROM, SRAM
-    console: Box<dyn consmbc::ConsMemoryBankController>, // VRAM, WRAM/Echo RAM
+    console: Box<dyn consmbc::ConsMemoryBankController>,           // VRAM, WRAM/Echo RAM
     hram: [u8; 0x7F],
     io: IO,
     oam: OAM,

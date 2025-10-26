@@ -1,6 +1,9 @@
 use std::sync::MutexGuard;
 
-use crate::gameboy::{cpu::{self, CPU}, memory::Memory};
+use crate::gameboy::{
+    cpu::{self, CPU},
+    memory::Memory,
+};
 
 pub trait IntOperand<T> {
     fn get(&self, cpu: &mut CPU, memory: &mut Memory) -> T;
@@ -19,7 +22,7 @@ impl IntOperand<u8> for RegisterOperand8 {
             cpu::Register8::D => cpu.de[1],
             cpu::Register8::E => cpu.de[0],
             cpu::Register8::H => cpu.hl[1],
-            cpu::Register8::L => cpu.hl[0]
+            cpu::Register8::L => cpu.hl[0],
         }
     }
     #[inline(always)]
@@ -32,7 +35,7 @@ impl IntOperand<u8> for RegisterOperand8 {
             cpu::Register8::D => cpu.de[1] = value,
             cpu::Register8::E => cpu.de[0] = value,
             cpu::Register8::H => cpu.hl[1] = value,
-            cpu::Register8::L => cpu.hl[0] = value
+            cpu::Register8::L => cpu.hl[0] = value,
         };
     }
 }
@@ -79,13 +82,13 @@ impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
     #[inline(always)]
     fn get(&self, cpu: &mut CPU, memory: &mut Memory) -> u8 {
         let address = self.0.get(cpu, memory);
-        self.0.set(address+1, cpu, memory);
+        self.0.set(address + 1, cpu, memory);
         cpu.read_u8_and_wait(memory, address)
     }
     #[inline(always)]
     fn set(&self, value: u8, cpu: &mut CPU, memory: &mut Memory) {
         let address = self.0.get(cpu, memory);
-        self.0.set(address+1, cpu, memory);
+        self.0.set(address + 1, cpu, memory);
         cpu.write_u8_and_wait(memory, address, value);
     }
 }
@@ -94,13 +97,13 @@ impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
     #[inline(always)]
     fn get(&self, cpu: &mut CPU, memory: &mut Memory) -> u8 {
         let address = self.0.get(cpu, memory);
-        self.0.set(address-1, cpu, memory);
+        self.0.set(address - 1, cpu, memory);
         cpu.read_u8_and_wait(memory, address)
     }
     #[inline(always)]
     fn set(&self, value: u8, cpu: &mut CPU, memory: &mut Memory) {
         let address = self.0.get(cpu, memory);
-        self.0.set(address-1, cpu, memory);
+        self.0.set(addres - 1, cpu, memory);
         cpu.write_u8_and_wait(memory, address, value);
     }
 }
@@ -128,14 +131,14 @@ impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
     #[inline(always)]
     fn get(&self, cpu: &mut CPU, memory: &mut Memory) -> u16 {
         let address = self.0.get(cpu, memory);
-        u16::from_le_bytes([cpu.read_u8_and_wait(memory, address), cpu.read_u8_and_wait(memory, address+1)])
+        u16::from_le_bytes([cpu.read_u8_and_wait(memory, address), cpu.read_u8_and_wait(memory, address + 1)])
     }
     #[inline(always)]
     fn set(&self, value: u16, cpu: &mut CPU, memory: &mut Memory) {
         let address = self.0.get(cpu, memory);
         let bytes = u16::to_le_bytes(value);
         cpu.write_u8_and_wait(memory, address, bytes[0]);
-        cpu.write_u8_and_wait(memory, address+1, bytes[1]);
+        cpu.write_u8_and_wait(memory, address + 1, bytes[1]);
     }
 }
 
@@ -194,7 +197,7 @@ pub enum CondOperand {
     NZ,
     Z,
     NC,
-    C
+    C,
 }
 impl CondOperand {
     #[inline(always)]
@@ -204,7 +207,7 @@ impl CondOperand {
             Self::NZ => cpu.af[0] & 0b10000000 == 0,
             Self::Z => cpu.af[0] & 0b10000000 != 0,
             Self::NC => cpu.af[0] & 0b00010000 == 0,
-            Self::C => cpu.af[0] & 0b00010000 != 0
+            Self::C => cpu.af[0] & 0b00010000 != 0,
         }
     }
 }
@@ -212,7 +215,7 @@ impl CondOperand {
 
 // Table definitions
 type OpHandler = fn(&mut CPU, memory: &mut Memory);
-static OP_UNINIT: OpHandler = |_, _| {panic!("Unknown opcode")};
+static OP_UNINIT: OpHandler = |_, _| panic!("Unknown opcode");
 
 pub static OPCODE_FUNCTIONS: [OpHandler; 0x100] = init_opcode_table();
 static CB_FUNCTIONS: [OpHandler; 0x100] = init_cb_table();

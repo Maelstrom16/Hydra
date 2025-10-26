@@ -15,9 +15,9 @@ use winit::window::{Window, WindowId};
 use crate::common::emulator::{self, EmuMessage, Emulator};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
-use crate::{gameboy, graphics};
 use crate::graphics::Graphics;
 use crate::ui::UserInterface;
+use crate::{gameboy, graphics};
 
 #[derive(Default)]
 pub struct HydraApp {
@@ -35,10 +35,7 @@ impl HydraApp {
     fn init_app(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes().with_title("Hydra");
         self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
-        self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(
-            self.window.clone().unwrap(),
-            None,
-        )))));
+        self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(self.window.clone().unwrap(), None)))));
 
         self.config = Some(Config::from_toml());
         self.ui = Some(UserInterface::from_config(self.config.as_ref().unwrap()));
@@ -52,7 +49,12 @@ impl HydraApp {
         println!("Loading ROM.");
         let file_dialog = filters.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
         match file_dialog.pick_file() {
-            Some(path) => match func(&path, Arc::clone(self.window.as_ref().unwrap()), Arc::clone(self.graphics.as_ref().unwrap()), self.config.as_ref().unwrap()) {
+            Some(path) => match func(
+                &path,
+                Arc::clone(self.window.as_ref().unwrap()),
+                Arc::clone(self.graphics.as_ref().unwrap()),
+                self.config.as_ref().unwrap(),
+            ) {
                 // If a file was selected, try to initialize Emulator
                 Ok(mut emu) => {
                     // If Emulator construction succeeds, save communication channel to app state
@@ -96,7 +98,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             }
             WindowEvent::RedrawRequested => {
                 self.graphics.as_ref().unwrap().read().unwrap().render();
-                
+
                 if let Some(graphics) = &self.graphics {
                     self._temp_counter += 1;
                     let now = std::time::Instant::now();
@@ -108,14 +110,12 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     }
                 }
             }
-            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
-                match event.state {
-                    ElementState::Pressed => match event.physical_key {
-                        _ => println!("{:?}", event.physical_key),
-                    },
-                    ElementState::Released => {}
-                }
-            }
+            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => match event.state {
+                ElementState::Pressed => match event.physical_key {
+                    _ => println!("{:?}", event.physical_key),
+                },
+                ElementState::Released => {}
+            },
             WindowEvent::Resized(_) => {
                 if let Some(graphics) = &self.graphics {
                     graphics.read().unwrap().resize();
@@ -129,7 +129,9 @@ impl ApplicationHandler<UserEvent> for HydraApp {
         match event {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
-                    "load_rom" => self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, window, graphics, config| emulator::init_from_file(path, window, graphics, config)),
+                    "load_rom" => self.try_init_emulator(&[("Game Boy (Color)", &["gb", "gbc"])], |path, window, graphics, config| {
+                        emulator::init_from_file(path, window, graphics, config)
+                    }),
                     "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(None)),
                     "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
                     "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),

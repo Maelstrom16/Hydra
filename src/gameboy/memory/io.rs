@@ -1,4 +1,9 @@
-use std::{array, cell::Cell, ops::{Index, IndexMut}, rc::Rc};
+use std::{
+    array,
+    cell::Cell,
+    ops::{Index, IndexMut},
+    rc::Rc,
+};
 
 use crate::gameboy::{GBRevision, Model};
 
@@ -82,7 +87,7 @@ pub const PCM34: usize = 0xFF77 - ADDRESS_OFFSET;
 pub const IE: usize = 0xFFFF - ADDRESS_OFFSET - 0x7F; // To compensate for HRAM
 
 pub struct IO {
-    registers: [Rc<Cell<u8>>; 0x80 + 1]
+    registers: [Rc<Cell<u8>>; 0x80 + 1],
 }
 
 impl IO {
@@ -192,7 +197,7 @@ impl IO {
                 registers[KEY0].set(rand::random()); // TODO: Number is supposed to be based on boot rom cycles
             }
         }
-        
+
         // Build IO object
         IO { registers }
     }

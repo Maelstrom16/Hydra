@@ -152,7 +152,7 @@ impl Graphics {
         render_pass.draw(0..3, 0..1);
 
         drop(render_pass);
-        
+
         // Present to screen
         self.queue.submit([command_encoder.finish()]);
         self.window.pre_present_notify();

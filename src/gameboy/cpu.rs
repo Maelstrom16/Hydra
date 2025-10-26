@@ -1,17 +1,25 @@
 mod opcode;
 
 use std::{
-    cell::Cell, rc::Rc, sync::{Arc, Barrier, MutexGuard, RwLock}, thread::{self, JoinHandle, ScopedJoinHandle, Thread}
+    cell::Cell,
+    rc::Rc,
+    sync::{Arc, Barrier, MutexGuard, RwLock},
+    thread::{self, JoinHandle, ScopedJoinHandle, Thread},
 };
 
 use futures::lock::Mutex;
 
 use crate::gameboy::{
-        cpu::{
-            self,
-            opcode::{CondOperand, IntOperand, RegisterOperand8},
-        }, memory::{self, io::{self, IO}, Memory, TITLE_ADDRESS}, AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision
-    };
+    AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision,
+    cpu::{
+        self,
+        opcode::{CondOperand, IntOperand, RegisterOperand8},
+    },
+    memory::{
+        self, Memory, TITLE_ADDRESS,
+        io::{self, IO},
+    },
+};
 
 /// A Game Boy CPU.
 ///
@@ -181,19 +189,17 @@ impl CPU {
     fn step_u8_and_wait(&mut self, memory: &Memory) -> u8 {
         let result = memory.read_u8(self.pc);
         self.pc += 1;
-        
+
         result
     }
 
     #[inline(always)]
     fn read_u8_and_wait(&self, memory: &Memory, address: u16) -> u8 {
-        
         memory.read_u8(address)
     }
 
     #[inline(always)]
     fn write_u8_and_wait(&self, memory: &mut Memory, address: u16, value: u8) -> () {
-        
         memory.write_u8(value, address);
     }
 
@@ -279,7 +285,7 @@ impl CPU {
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
-        let lsb_half = if e.signum() == 1 {lsb | 0xF0} else {lsb & 0x0F};
+        let lsb_half = if e.signum() == 1 { lsb | 0xF0 } else { lsb & 0x0F };
         let (_, half_carry) = lsb_half.overflowing_add_signed(e);
         set_flags!(self;
             z=(false),
@@ -287,7 +293,7 @@ impl CPU {
             h=(half_carry),
             c=(carry)
         );
-        
+
         self.hl = u16::to_le_bytes(result);
     }
 
@@ -307,7 +313,7 @@ impl CPU {
     fn inc16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
         let o = operand.get(self, memory);
         let result = o.wrapping_add(1);
-        
+
         operand.set(result, self, memory);
     }
 
@@ -327,7 +333,7 @@ impl CPU {
     fn dec16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
         let o = operand.get(self, memory);
         let result = o.wrapping_sub(1);
-        
+
         operand.set(result, self, memory);
     }
 
@@ -365,7 +371,7 @@ impl CPU {
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
-        let lsb_half = if e.signum() == 1 {lsb | 0xF0} else {lsb & 0x0F};
+        let lsb_half = if e.signum() == 1 { lsb | 0xF0 } else { lsb & 0x0F };
         let (_, half_carry) = lsb_half.overflowing_add_signed(e);
         set_flags!(self;
             z=(false),
@@ -373,8 +379,7 @@ impl CPU {
             h=(half_carry),
             c=(carry)
         );
-        
-        
+
         self.sp = result;
     }
 
@@ -472,7 +477,7 @@ impl CPU {
     #[inline(always)]
     fn push<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
         let bytes = u16::to_le_bytes(operand.get(self, memory));
-        
+
         self.sp -= 1;
         self.write_u8_and_wait(memory, self.sp, bytes[1]);
         self.sp -= 1;
@@ -651,7 +656,6 @@ impl CPU {
     fn jp<O: IntOperand<u16>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
         let addr = operand.get(self, memory);
         if condition.evaluate(self) {
-            
             self.pc = addr;
         }
     }
@@ -661,7 +665,6 @@ impl CPU {
         let e = operand.get(self, memory) as i8;
         let addr = self.pc.wrapping_add_signed(e.into());
         if condition.evaluate(self) {
-            
             self.pc = addr;
         }
     }
@@ -677,10 +680,8 @@ impl CPU {
 
     #[inline(always)]
     fn ret(&mut self, memory: &mut Memory, condition: CondOperand) {
-        
         if condition.evaluate(self) {
             self.pop(memory, opcode::RegisterOperand16(Register16::PC));
-            
         }
     }
 
