@@ -103,7 +103,7 @@ impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
     #[inline(always)]
     fn set(&self, value: u8, cpu: &mut CPU, memory: &mut Memory) {
         let address = self.0.get(cpu, memory);
-        self.0.set(addres - 1, cpu, memory);
+        self.0.set(address - 1, cpu, memory);
         cpu.write_u8_and_wait(memory, address, value);
     }
 }
