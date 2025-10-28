@@ -242,7 +242,7 @@ impl Graphics {
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &new_buffer,
+            new_buffer,
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * self.screen_texture.size().width),

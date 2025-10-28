@@ -5,7 +5,7 @@ use std::{
     ops::Div,
     rc::Rc,
     sync::{Arc, MutexGuard, RwLock},
-    thread::{self, JoinHandle},
+    thread::{self, JoinHandle}, time::Instant,
 };
 
 use futures::lock::Mutex;
@@ -116,9 +116,14 @@ impl PPU {
 
         // Update and render
         if *clock == 0 {
+            let t1 = Instant::now();
             let graphics = self.graphics.read().unwrap();
+            let t2 = Instant::now();
             graphics.update_screen_texture(&self.screen_buffer);
-            self.window.request_redraw();
+            let t3 = Instant::now();
+            let winclone = self.window.clone();
+            thread::spawn(move || winclone.request_redraw());
+            let t4 = Instant::now();
         }
     }
 }

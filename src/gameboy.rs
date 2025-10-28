@@ -18,10 +18,9 @@ use std::{
     fmt, fs,
     path::Path,
     sync::{
-        Arc, Barrier, Condvar, Mutex, RwLock, Weak,
-        mpsc::{Receiver, Sender, channel},
+        mpsc::{channel, Receiver, Sender}, Arc, Barrier, Condvar, Mutex, RwLock, Weak
     },
-    thread,
+    thread, time::Instant,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -159,13 +158,21 @@ impl Emulator for GameBoy {
     fn main_thread(mut self) {
         println!("Launching Wyrm");
         // Main loop
+        let mut durs = [0.0f64, 0.0f64, 0.0f64];
         loop {
+            let start = Instant::now();
             self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
+            let clktime = Instant::now();
             self.cpu.step(&mut self.memory);
+            let cputime = Instant::now();
             self.ppu.step(&self.clock);
-            // if self.clock % 456 == 0 {
-            //     self.dump_mem();
-            // }
+            let pputime = Instant::now();
+            durs[0] = ((clktime - start).as_secs_f64() + durs[0]) / 2.0f64;
+            durs[1] = ((cputime - clktime).as_secs_f64() + durs[1]) / 2.0f64;
+            durs[2] = ((pputime - cputime).as_secs_f64() + durs[2]) / 2.0f64;
+            if self.clock % 456 == 0 {
+                println!("CLK: {}; CPU: {}; PPU: {}", durs[0], durs[1], durs[2]);
+            }
         }
         println!("Exiting Wyrm");
 

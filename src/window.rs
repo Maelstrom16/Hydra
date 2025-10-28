@@ -97,9 +97,8 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                self.graphics.as_ref().unwrap().read().unwrap().render();
-
                 if let Some(graphics) = &self.graphics {
+                    graphics.read().unwrap().render();
                     self._temp_counter += 1;
                     let now = std::time::Instant::now();
                     let diff = (now - self._temp_time.unwrap()).as_secs_f64();
