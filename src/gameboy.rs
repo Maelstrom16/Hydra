@@ -16,12 +16,14 @@ use crate::{
 };
 use std::{
     ffi::OsStr,
-    fmt, fs,
+    fs,
     path::Path,
     sync::{
-        mpsc::{channel, Receiver, Sender}, Arc, Barrier, Condvar, Mutex, RwLock, Weak
+        Arc, RwLock,
+        mpsc::{Receiver, Sender, channel},
     },
-    thread, time::Instant,
+    thread,
+    time::Instant,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

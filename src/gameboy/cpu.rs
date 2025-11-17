@@ -1,23 +1,20 @@
 mod opcode;
 
-use std::{
-    any::Any, cell::Cell, rc::Rc, sync::{Arc, Barrier, MutexGuard, RwLock}, thread::{self, JoinHandle, ScopedJoinHandle, Thread}
+use std::{cell::Cell, rc::Rc};
+
+use genawaiter::stack::Co;
+
+use crate::{
+    gameboy::{
+        AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
+        cpu::opcode::{CondOperand, IntOperand},
+        memory::{
+            self, Memory, TITLE_ADDRESS,
+            io::{self, IO},
+        },
+    },
+    gen_all,
 };
-
-use futures::lock::Mutex;
-use genawaiter::{GeneratorState, stack::{Co, Gen, Shelf, let_gen_using}};
-
-use crate::{gameboy::{
-    AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision,
-    cpu::{
-        self,
-        opcode::{CondOperand, IntOperand, RegisterOperand8},
-    },
-    memory::{
-        self, Memory, TITLE_ADDRESS,
-        io::{self, IO},
-    },
-}, gen_all};
 
 /// A Game Boy CPU.
 ///
@@ -208,7 +205,16 @@ impl CPU {
         loop {
             print!("{:#06X}: ", self.pc);
             self.ir = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner));
-            println!("{:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}", self.ir, self.af[1], self.af[0], u16::from_le_bytes(self.bc), u16::from_le_bytes(self.de), u16::from_le_bytes(self.hl), self.sp);
+            println!(
+                "{:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
+                self.ir,
+                self.af[1],
+                self.af[0],
+                u16::from_le_bytes(self.bc),
+                u16::from_le_bytes(self.de),
+                u16::from_le_bytes(self.hl),
+                self.sp
+            );
             if self.ime_queued {
                 self.ime = true;
                 self.ime_queued = false;

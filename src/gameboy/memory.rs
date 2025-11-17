@@ -7,18 +7,10 @@ use crate::{
     common::errors::HydraIOError,
     gameboy::{
         Model,
-        cpu::CPU,
         memory::{io::IO, oam::OAM},
-        ppu::PPU,
     },
 };
-use std::{
-    cell::{Cell, RefCell},
-    fs,
-    ops::Index,
-    rc::Rc,
-    sync::RwLock,
-};
+use std::cell::Cell;
 
 // Header Registers
 pub const TITLE_ADDRESS: usize = 0x0134;

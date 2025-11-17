@@ -2,22 +2,21 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 
+use muda::MenuEvent;
 use muda::accelerator::{Accelerator, Code, Modifiers};
-use muda::{AboutMetadata, AboutMetadataBuilder, CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
-use rand::Rng;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 
-use crate::common::emulator::{self, EmuMessage, Emulator};
+use crate::common::emulator::{self, EmuMessage};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
+use crate::gameboy;
 use crate::graphics::Graphics;
 use crate::ui::UserInterface;
-use crate::{gameboy, graphics};
 
 #[derive(Default)]
 pub struct HydraApp {

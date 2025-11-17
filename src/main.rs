@@ -6,16 +6,10 @@ mod graphics;
 mod ui;
 mod window;
 
-use std::fs;
-
 use muda::MenuEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 
-use crate::{
-    common::errors::{self, HydraIOError},
-    config::Config,
-    window::{HydraApp, UserEvent},
-};
+use crate::window::{HydraApp, UserEvent};
 
 pub fn main() {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();

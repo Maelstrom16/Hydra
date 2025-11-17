@@ -2,25 +2,21 @@ mod fifo;
 
 use std::{
     cell::Cell,
-    ops::Div,
     rc::Rc,
-    sync::{Arc, MutexGuard, RwLock},
-    thread::{self, JoinHandle}, time::Instant,
+    sync::{Arc, RwLock},
+    thread,
+    time::Instant,
 };
 
-use futures::lock::Mutex;
 use rand::Rng;
 use winit::window::Window;
 
 use crate::{
     gameboy::{
-        memory::{
-            Memory,
-            io::{self, IO},
-        },
+        memory::io::{self, IO},
         ppu::fifo::RenderQueue,
     },
-    graphics::{self, Graphics},
+    graphics::Graphics,
 };
 
 pub struct PPU {

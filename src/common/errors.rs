@@ -1,9 +1,4 @@
-use std::{
-    ffi::{OsStr, OsString},
-    fmt, io,
-};
-
-use crate::common::emulator::Emulator;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum HydraIOError {
