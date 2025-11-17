@@ -1,15 +1,13 @@
 mod opcode;
 
 use std::{
-    cell::Cell,
-    rc::Rc,
-    sync::{Arc, Barrier, MutexGuard, RwLock},
-    thread::{self, JoinHandle, ScopedJoinHandle, Thread},
+    any::Any, cell::Cell, rc::Rc, sync::{Arc, Barrier, MutexGuard, RwLock}, thread::{self, JoinHandle, ScopedJoinHandle, Thread}
 };
 
 use futures::lock::Mutex;
+use genawaiter::{GeneratorState, stack::{Co, Gen, Shelf, let_gen_using}};
 
-use crate::gameboy::{
+use crate::{gameboy::{
     AGBRevision, CGBRevision, GBRevision, GameBoy, Model, SGBRevision,
     cpu::{
         self,
@@ -19,7 +17,7 @@ use crate::gameboy::{
         self, Memory, TITLE_ADDRESS,
         io::{self, IO},
     },
-};
+}, gen_all};
 
 /// A Game Boy CPU.
 ///
@@ -186,35 +184,39 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn step_u8_and_wait(&mut self, memory: &Memory) -> u8 {
+    async fn step_u8(&mut self, memory: &Memory, co: Co<'_, ()>) -> u8 {
         let result = memory.read_u8(self.pc);
         self.pc += 1;
-
+        co.yield_(()).await;
         result
     }
 
     #[inline(always)]
-    fn read_u8_and_wait(&self, memory: &Memory, address: u16) -> u8 {
+    async fn read_u8(&self, address: u16, memory: &Memory, co: Co<'_, ()>) -> u8 {
+        co.yield_(()).await;
         memory.read_u8(address)
     }
 
     #[inline(always)]
-    fn write_u8_and_wait(&self, memory: &mut Memory, address: u16, value: u8) -> () {
+    async fn write_u8(&self, address: u16, value: u8, memory: &mut Memory, co: Co<'_, ()>) -> () {
+        co.yield_(()).await;
         memory.write_u8(value, address);
     }
 
-    pub fn step(&mut self, memory: &mut Memory) {
+    pub async fn coro(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         // Fetch cycle
-        // print!("{:#06X}: ", self.pc);
-        self.ir = self.step_u8_and_wait(memory);
-        // println!("{:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}", self.ir, self.af[1], self.af[0], u16::from_le_bytes(self.bc), u16::from_le_bytes(self.de), u16::from_le_bytes(self.hl), self.sp);
-        if self.ime_queued {
-            self.ime = true;
-            self.ime_queued = false;
-        }
+        loop {
+            print!("{:#06X}: ", self.pc);
+            self.ir = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner));
+            println!("{:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}", self.ir, self.af[1], self.af[0], u16::from_le_bytes(self.bc), u16::from_le_bytes(self.de), u16::from_le_bytes(self.hl), self.sp);
+            if self.ime_queued {
+                self.ime = true;
+                self.ime_queued = false;
+            }
 
-        // Execute cycle(s)
-        opcode::OPCODE_FUNCTIONS[self.ir as usize](self, memory);
+            // Execute cycle(s)
+            gen_all!(&co, |co_inner| self.opcode_gen(memory, co_inner));
+        }
     }
 }
 
@@ -276,12 +278,13 @@ macro_rules! get_flag {
 
 impl CPU {
     #[inline(always)]
-    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, memory: &mut Memory, dest: O1, src: O2) {
-        dest.set(src.get(self, memory), self, memory);
+    async fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, dest: O1, src: O2) {
+        let value = gen_all!(co, |co_inner| src.get(self, memory, co_inner));
+        gen_all!(co, |co_inner| dest.set(value, self, memory, co_inner));
     }
     #[inline(always)]
-    fn ld_hlspe(&mut self, memory: &mut Memory) {
-        let e = self.step_u8_and_wait(memory) as i8;
+    async fn ld_hlspe(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
+        let e = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner)) as i8;
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
@@ -293,13 +296,13 @@ impl CPU {
             h=(half_carry),
             c=(carry)
         );
-
+        co.yield_(()).await;
         self.hl = u16::to_le_bytes(result);
     }
 
     #[inline(always)]
-    fn inc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn inc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, _) = o.overflowing_add(1);
         let (_, half_carry) = (o | 0xF0).overflowing_add(1);
         set_flags!(self;
@@ -307,19 +310,19 @@ impl CPU {
             n=(false),
             h=(half_carry)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
     #[inline(always)]
-    fn inc16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn inc16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.wrapping_add(1);
-
-        operand.set(result, self, memory);
+        co.yield_(()).await;
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn dec<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn dec<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, _) = o.overflowing_sub(1);
         let (_, half_carry) = (o & 0x0F).overflowing_sub(1);
         set_flags!(self;
@@ -327,19 +330,19 @@ impl CPU {
             n=(false),
             h=(half_carry)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
     #[inline(always)]
-    fn dec16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn dec16<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.wrapping_sub(1);
-
-        operand.set(result, self, memory);
+        co.yield_(()).await;
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn add<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self, memory));
+    async fn add<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
         set_flags!(self;
@@ -351,8 +354,8 @@ impl CPU {
         self.af[1] = result;
     }
     #[inline(always)]
-    fn add_hl<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
-        let (hl, operand) = (u16::from_le_bytes(self.hl), operand.get(self, memory));
+    async fn add_hl<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let (hl, operand) = (u16::from_le_bytes(self.hl), gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let result = hl.wrapping_add(operand);
         let [_, h] = self.hl;
         let [_, oph] = u16::to_le_bytes(operand);
@@ -366,8 +369,8 @@ impl CPU {
         self.hl = u16::to_le_bytes(result);
     }
     #[inline(always)]
-    fn add_spe(&mut self, memory: &mut Memory) {
-        let e = self.step_u8_and_wait(memory) as i8;
+    async fn add_spe(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
+        let e = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner)) as i8;
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
@@ -379,13 +382,14 @@ impl CPU {
             h=(half_carry),
             c=(carry)
         );
-
+        co.yield_(()).await;
+        co.yield_(()).await;
         self.sp = result;
     }
 
     #[inline(always)]
-    fn adc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self, memory) + get_flag!(self; c) as u8);
+    async fn adc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
         set_flags!(self;
@@ -398,8 +402,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn sub<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self, memory));
+    async fn sub<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
         set_flags!(self;
@@ -412,8 +416,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn sbc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self, memory) + get_flag!(self; c) as u8);
+    async fn sbc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
         set_flags!(self;
@@ -426,8 +430,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn and<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let result = self.af[1] & operand.get(self, memory);
+    async fn and<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let result = self.af[1] & gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -438,8 +442,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn or<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let result = self.af[1] | operand.get(self, memory);
+    async fn or<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let result = self.af[1] | gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -450,8 +454,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn xor<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let result = self.af[1] ^ operand.get(self, memory);
+    async fn xor<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let result = self.af[1] ^ gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -462,8 +466,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn cp<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let (a, operand) = (self.af[1], operand.get(self, memory));
+    async fn cp<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
         set_flags!(self;
@@ -475,27 +479,27 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn push<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
-        let bytes = u16::to_le_bytes(operand.get(self, memory));
-
+    async fn push<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let bytes = u16::to_le_bytes(gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
+        co.yield_(()).await;
         self.sp -= 1;
-        self.write_u8_and_wait(memory, self.sp, bytes[1]);
+        gen_all!(&co, |co_inner| self.write_u8(self.sp, bytes[1], memory, co_inner));
         self.sp -= 1;
-        self.write_u8_and_wait(memory, self.sp, bytes[0]);
+        gen_all!(&co, |co_inner| self.write_u8(self.sp, bytes[0], memory, co_inner));
     }
 
     #[inline(always)]
-    fn pop<O: IntOperand<u16>>(&mut self, memory: &mut Memory, operand: O) {
+    async fn pop<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
         let mut bytes = [0; 2];
-        bytes[0] = self.read_u8_and_wait(memory, self.sp);
+        bytes[0] = gen_all!(&co, |co_inner| self.read_u8(self.sp, memory, co_inner));
         self.sp += 1;
-        bytes[1] = self.read_u8_and_wait(memory, self.sp);
+        bytes[1] = gen_all!(&co, |co_inner| self.read_u8(self.sp, memory, co_inner));
         self.sp += 1;
-        operand.set(u16::from_le_bytes(bytes), self, memory);
+        gen_all!(co, |co_inner| operand.set(u16::from_le_bytes(bytes), self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn ccf(&mut self, memory: &mut Memory) {
+    async fn ccf(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         set_flags!(self;
             n=(false),
             h=(false)
@@ -504,7 +508,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn scf(&mut self, memory: &mut Memory) {
+    async fn scf(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         set_flags!(self;
             n=(false),
             h=(false),
@@ -513,12 +517,12 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn daa(&mut self, memory: &mut Memory) {
+    async fn daa(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    fn cpl(&mut self, memory: &mut Memory) {
+    async fn cpl(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         self.af[1] ^= 0xFF;
         set_flags!(self;
             n=(true),
@@ -527,8 +531,8 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn rlc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn rlc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.rotate_left(1);
         set_flags!(self;
             z=(false),
@@ -536,12 +540,12 @@ impl CPU {
             h=(false),
             c=(result & 0b00000001 != 0)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn rrc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn rrc<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.rotate_right(1);
         set_flags!(self;
             z=(false),
@@ -549,12 +553,12 @@ impl CPU {
             h=(false),
             c=(result & 0b10000000 != 0)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn rl<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn rl<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shl(1);
         set_flags!(self;
             z=(false),
@@ -562,12 +566,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result | get_flag!(self; c) as u8, self, memory);
+        gen_all!(co, |co_inner| operand.set(result | get_flag!(self; c) as u8, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn rr<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn rr<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
             z=(false),
@@ -575,12 +579,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result | (get_flag!(self; c) as u8) << 7, self, memory);
+        gen_all!(co, |co_inner| operand.set(result | (get_flag!(self; c) as u8) << 7, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn sla<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn sla<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shl(1);
         set_flags!(self;
             z=(result == 0),
@@ -588,12 +592,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn sra<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory) as i8;
+    async fn sra<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) as i8;
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
             z=(result == 0),
@@ -601,12 +605,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result as u8, self, memory);
+        gen_all!(co, |co_inner| operand.set(result as u8, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn swap<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn swap<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = (o & 0x0F) << 4 | (o & 0xF0) >> 4;
         set_flags!(self;
             z=(result == 0),
@@ -614,12 +618,12 @@ impl CPU {
             h=(false),
             c=(false)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn srl<O: IntOperand<u8>>(&mut self, memory: &mut Memory, operand: O) {
-        let o = operand.get(self, memory);
+    async fn srl<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
             z=(result == 0),
@@ -627,12 +631,12 @@ impl CPU {
             h=(false),
             c=(carry)
         );
-        operand.set(result, self, memory);
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn bit<O: IntOperand<u8>>(&mut self, memory: &mut Memory, index: u8, operand: O) {
-        let o = operand.get(self, memory);
+    async fn bit<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, index: u8, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(o & (1 << index) != 0),
             n=(false),
@@ -641,73 +645,82 @@ impl CPU {
     }
 
     #[inline(always)]
-    fn res<O: IntOperand<u8>>(&mut self, memory: &mut Memory, index: u8, operand: O) {
-        let o = operand.get(self, memory);
-        operand.set(o & ((1 << index) ^ 0b11111111), self, memory);
+    async fn res<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, index: u8, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
+        gen_all!(co, |co_inner| operand.set(o & ((1 << index) ^ 0b11111111), self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn set<O: IntOperand<u8>>(&mut self, memory: &mut Memory, index: u8, operand: O) {
-        let o = operand.get(self, memory);
-        operand.set(o | (1 << index), self, memory);
+    async fn set<O: IntOperand<u8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, index: u8, operand: O) {
+        let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
+        gen_all!(co, |co_inner| operand.set(o | (1 << index), self, memory, co_inner));
     }
 
     #[inline(always)]
-    fn jp<O: IntOperand<u16>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
-        let addr = operand.get(self, memory);
+    async fn jp<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, condition: CondOperand, operand: O) {
+        let addr = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         if condition.evaluate(self) {
+            co.yield_(()).await;
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    fn jr<O: IntOperand<i8>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
-        let e = operand.get(self, memory) as i8;
+    async fn jr<O: IntOperand<i8>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, condition: CondOperand, operand: O) {
+        let e = gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) as i8;
         let addr = self.pc.wrapping_add_signed(e.into());
         if condition.evaluate(self) {
+            co.yield_(()).await;
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    fn call<O: IntOperand<u16>>(&mut self, memory: &mut Memory, condition: CondOperand, operand: O) {
-        let addr = operand.get(self, memory);
+    async fn call<O: IntOperand<u16>>(&mut self, memory: &mut Memory, co: Co<'_, ()>, condition: CondOperand, operand: O) {
+        let addr = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         if condition.evaluate(self) {
-            self.push(memory, opcode::RegisterOperand16(Register16::PC));
+            gen_all!(&co, |co_inner| self.push(memory, co_inner, opcode::RegisterOperand16(Register16::PC)));
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    fn ret(&mut self, memory: &mut Memory, condition: CondOperand) {
+    async fn ret(&mut self, memory: &mut Memory, co: Co<'_, ()>, condition: CondOperand) {
+        co.yield_(()).await;
         if condition.evaluate(self) {
-            self.pop(memory, opcode::RegisterOperand16(Register16::PC));
+            gen_all!(&co, |co_inner| self.pop(memory, co_inner, opcode::RegisterOperand16(Register16::PC)));
+            co.yield_(()).await;
         }
     }
 
     #[inline(always)]
-    fn reti(&mut self, memory: &mut Memory) {
-        self.ret(memory, CondOperand::Unconditional);
+    async fn reti(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
+        gen_all!(&co, |co_inner| self.ret(memory, co_inner, CondOperand::Unconditional));
         self.ime = true;
     }
 
     #[inline(always)]
-    fn ei(&mut self, memory: &mut Memory) {
+    async fn ei(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         self.ime_queued = true;
     }
 
     #[inline(always)]
-    fn di(&mut self, memory: &mut Memory) {
+    async fn di(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         self.ime = false;
     }
 
     #[inline(always)]
-    fn halt(&mut self, memory: &mut Memory) {
+    async fn halt(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    fn stop(&mut self, memory: &mut Memory) {
+    async fn stop(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
         todo!() //TODO
+    }
+
+    #[inline(always)]
+    async fn inavlidop(&mut self, memory: &mut Memory, co: Co<'_, ()>) {
+        panic!("Unknown opcode")
     }
 }

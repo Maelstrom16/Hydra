@@ -2,6 +2,7 @@ mod cpu;
 mod memory;
 mod ppu;
 
+use genawaiter::stack::let_gen_using;
 use winit::window::Window;
 
 use crate::{
@@ -157,13 +158,16 @@ const CYCLES_PER_FRAME: u32 = 70224;
 impl Emulator for GameBoy {
     fn main_thread(mut self) {
         println!("Launching Wyrm");
+        // Generate Coroutines
+        let_gen_using!(cpu, |co| self.cpu.coro(&mut self.memory, co));
+
         // Main loop
         let mut durs = [0.0f64, 0.0f64, 0.0f64];
         loop {
             let start = Instant::now();
             self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
             let clktime = Instant::now();
-            self.cpu.step(&mut self.memory);
+            cpu.resume();
             let cputime = Instant::now();
             self.ppu.step(&self.clock);
             let pputime = Instant::now();
