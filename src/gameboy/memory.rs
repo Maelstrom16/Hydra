@@ -10,7 +10,7 @@ use crate::{
         memory::{io::IO, oam::OAM},
     },
 };
-use std::cell::Cell;
+use std::{cell::Cell, fs, path::Path};
 
 // Header Registers
 pub const TITLE_ADDRESS: usize = 0x0134;
@@ -44,7 +44,8 @@ impl Memory {
         Ok(result_cart)
     }
 
-    pub fn hot_swap_rom(&mut self, rom: Box<[u8]>) -> Result<(), HydraIOError> {
+    pub fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
+        let rom: Box<[u8]> = fs::read(path)?.into_boxed_slice();
         self.cartridge = Some(cartmbc::from_rom(rom)?);
         Ok(())
     }

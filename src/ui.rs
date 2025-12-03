@@ -76,6 +76,7 @@ impl UserInterface {
                 &MenuItem::new("Load State", true, None),
                 &PredefinedMenuItem::separator(),
                 &MenuItem::new("Reset", true, None),
+                &MenuItem::with_id("stop_emulation", "Stop", true, None),
                 &PredefinedMenuItem::separator(),
                 &MenuItem::new("Exit", true, None),
             ],

@@ -9,14 +9,14 @@ use std::{
 };
 
 use rand::Rng;
-use winit::window::Window;
+use winit::{event_loop::EventLoopProxy, window::Window};
 
 use crate::{
     gameboy::{
         memory::io::{self, IO},
         ppu::fifo::RenderQueue,
     },
-    graphics::Graphics,
+    graphics::Graphics, window::UserEvent,
 };
 
 pub struct PPU {
@@ -34,6 +34,7 @@ pub struct PPU {
 
     window: Arc<Window>,
     graphics: Arc<RwLock<Graphics>>,
+    proxy: EventLoopProxy<UserEvent>
 }
 
 pub enum Mode {
@@ -43,14 +44,14 @@ pub enum Mode {
     Render,
 }
 
-const DOTS: u32 = 456;
+pub const DOTS: u32 = 456;
 const SCANLINES: u32 = 154;
 const SCREEN_X: u8 = 160;
 const SCREEN_Y: u8 = 144;
 const BUFFER_SIZE: usize = SCREEN_X as usize * SCREEN_Y as usize * 4;
 
 impl PPU {
-    pub fn new(io: &IO, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>) -> Self {
+    pub fn new(io: &IO, window: Arc<Window>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
         let mut result = PPU {
             fifo: RenderQueue::new(),
@@ -67,6 +68,7 @@ impl PPU {
 
             window,
             graphics,
+            proxy,
         };
         result.init_graphics();
         result
@@ -117,8 +119,7 @@ impl PPU {
             let t2 = Instant::now();
             graphics.update_screen_texture(&self.screen_buffer);
             let t3 = Instant::now();
-            let winclone = self.window.clone();
-            thread::spawn(move || winclone.request_redraw());
+            self.proxy.send_event(UserEvent::RedrawRequest);
             let t4 = Instant::now();
         }
     }

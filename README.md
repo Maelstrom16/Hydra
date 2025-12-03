@@ -7,6 +7,8 @@ An emulator for a number of retro game systems, written mostly to play around wi
         * **emulator.rs** - *Defines the Emulator trait and other related types.*
         * **errors.rs** - *Defines HydraIOError and conversions from other error types.*
     * **config.rs** - *Handles serialization/deserialization of user configurations.*
+    * **ext.rs** - *Holds macros for easily interfacing with external crates (currently, only genawaiter).*
+        * **genawaiter.rs** - *Defines the `gen_all!` macro, used for nesting coroutines*
     * **gameboy.rs** - *Organizes the data necessary to construct a Game Boy emulator.*
         * **cpu.rs** - *Emulates the Game Boy's Sharp LR35902 processor.*
             * **opcode.rs** - *Holds the instruction set as a pair of function tables, as well as operand definitions*

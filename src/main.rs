@@ -16,14 +16,15 @@ pub fn main() {
 
     // Forward muda::MenuEvent to winit::EventLoop
     let proxy = event_loop.create_proxy();
+    let menu_proxy = proxy.clone();
     MenuEvent::set_event_handler(Some(move |event| {
-        proxy.send_event(UserEvent::MenuEvent(event));
+        menu_proxy.send_event(UserEvent::MenuEvent(event));
     }));
 
     // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
     // dispatched any events. This is ideal for games and similar applications.
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = HydraApp::default();
+    let mut app = HydraApp::new(proxy);
     event_loop.run_app(&mut app);
 }
