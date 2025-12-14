@@ -187,6 +187,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
     }
 }
 
+#[derive(Debug)]
 pub enum UserEvent {
     MenuEvent(MenuEvent),
     RedrawRequest

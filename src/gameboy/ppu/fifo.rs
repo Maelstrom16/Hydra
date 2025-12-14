@@ -20,8 +20,20 @@ impl RenderQueue {
             obj_interrupts: Vec::with_capacity(10),
         }
     }
+
+    pub fn push(&mut self, pixel: Pixel) {
+        self.fifo.push_back(pixel)
+    }
+
+    pub fn pop(&mut self) -> Pixel {
+        self.fifo.pop_front().expect("Attempted to pop from the pixel FIFO while it was empty")
+    }
+
+    pub fn length(&self) -> usize {
+        self.fifo.len()
+    }
 }
 
-struct Pixel {
+pub struct Pixel {
     color: u8,
 }

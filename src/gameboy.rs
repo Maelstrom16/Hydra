@@ -92,7 +92,6 @@ impl GameBoy {
     fn from_revision(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let rom = fs::read(path)?.into_boxed_slice();
         let (send, recv) = channel();
-        let window = app.get_window();
         let graphics = app.get_graphics();
         let proxy = app.get_proxy();
 
@@ -100,8 +99,8 @@ impl GameBoy {
         thread::spawn(move || {
             let io = IO::new(model);
             let cpu = cpu::CPU::new(&rom, &io, model);
-            let ppu = ppu::PPU::new(&io, window, graphics, proxy);
             let memory = Rc::new(RefCell::new(memory::Memory::from_rom_and_model(rom, model, io).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let ppu = ppu::PPU::new(memory.clone(), graphics, proxy);
             GameBoy {
                 cpu,
                 memory,

@@ -14,14 +14,14 @@ mod mbc0;
 use crate::common::errors::HydraIOError;
 use crate::gameboy::memory;
 
-pub trait CartMemoryBankController: Send + Sync + 'static {
+pub trait MemoryBankController: Send + Sync + 'static {
     fn read_rom_u8(&self, address: usize) -> Result<u8, HydraIOError>;
     fn read_ram_u8(&self, address: usize) -> Result<u8, HydraIOError>;
     fn write_rom_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
     fn write_ram_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
 }
 
-pub fn from_rom(rom: Box<[u8]>) -> Result<Box<dyn CartMemoryBankController>, HydraIOError> {
+pub fn from_rom(rom: Box<[u8]>) -> Result<Box<dyn MemoryBankController>, HydraIOError> {
     match rom[memory::HARDWARE_ADDRESS] {
         0x00 | 0x08..=0x09 => Ok(Box::new(mbc0::MBC0::from_rom(rom)?)),
         0x01..=0x03 => panic!("MBC1 not yet supported"),
