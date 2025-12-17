@@ -86,13 +86,13 @@ pub const PCM12: usize = 0xFF76 - ADDRESS_OFFSET;
 pub const PCM34: usize = 0xFF77 - ADDRESS_OFFSET;
 pub const IE: usize = 0xFFFF - ADDRESS_OFFSET - 0x7F; // To compensate for HRAM
 
-pub struct IO {
-    registers: [Rc<Cell<u8>>; 0x80 + 1],
+pub struct IOMap {
+    registers: [Rc<IOReg>; 0x80 + 1],
 }
 
-impl IO {
+impl IOMap {
     pub fn new(model: Model) -> Self {
-        let registers = array::from_fn(|_| Rc::new(Cell::new(0x00)));
+        let registers = array::from_fn(|_| Rc::new(IOReg::new(0x00, 0b11111111, 0b11111111)));
         // Define default values for all variables (DMG/MGB)
         registers[P1].set(0xCF);
         registers[SB].set(0x00);
@@ -199,18 +199,60 @@ impl IO {
         }
 
         // Build IO object
-        IO { registers }
+        IOMap { registers }
     }
 }
 
-impl Index<usize> for IO {
-    type Output = Rc<Cell<u8>>;
+impl Index<usize> for IOMap {
+    type Output = Rc<IOReg>;
     fn index(&self, index: usize) -> &Self::Output {
         &self.registers[index]
     }
 }
-impl IndexMut<usize> for IO {
+impl IndexMut<usize> for IOMap {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.registers[index]
+    }
+}
+
+
+pub struct IOReg {
+    value: Cell<u8>,
+    read_mask: u8,
+    write_mask: u8
+}
+
+impl IOReg {
+    pub fn new(value: u8, read_mask: u8, write_mask: u8) -> Self {
+        IOReg { value: Cell::new(value), read_mask, write_mask }
+    }
+
+    /// Returns a copy of the contained value.
+    pub fn get(&self) -> u8 {
+        self.value.get()
+    }
+
+    /// Sets the contained value.
+    pub fn set(&self, val: u8) {
+        self.value.set(val)
+    }
+
+    /// Returns a copy of the contained value, with write-only
+    /// and unimplemented bits replaced by a 1.
+    pub fn read(&self) -> u8 {
+        self.value.get() & self.read_mask
+    }
+
+    /// Sets the contained value, with read-only
+    /// and unimplemented bits ignored.
+    pub fn write(&self, val: u8) {
+        self.value.set((self.value.get() & !self.write_mask) | (val & self.write_mask))
+    }
+
+    /// Redefines which bits of this register are
+    /// readable and/or writable. 
+    pub fn change_masks(&mut self, read_mask: u8, write_mask: u8) {
+        self.read_mask = read_mask;
+        self.write_mask = write_mask;
     }
 }

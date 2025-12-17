@@ -7,12 +7,13 @@ use std::{
     time::Instant,
 };
 
+use genawaiter::stack::Co;
 use rand::Rng;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
     common::bit::BitSet, gameboy::{
-        memory::{Memory, io, vram::Vram},
+        memory::{Memory, io::{self, IOReg}, vram::Vram},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
@@ -23,14 +24,14 @@ pub struct PPU {
     screen_buffer: Box<[u8]>,
 
     vram: Rc<RefCell<Vram>>,
-    lcdc: Rc<Cell<u8>>,
-    stat: Rc<Cell<u8>>,
-    scy: Rc<Cell<u8>>,
-    scx: Rc<Cell<u8>>,
-    ly: Rc<Cell<u8>>,
-    lyc: Rc<Cell<u8>>,
-    wy: Rc<Cell<u8>>,
-    wx: Rc<Cell<u8>>,
+    lcdc: Rc<IOReg>,
+    stat: Rc<IOReg>,
+    scy: Rc<IOReg>,
+    scx: Rc<IOReg>,
+    ly: Rc<IOReg>,
+    lyc: Rc<IOReg>,
+    wy: Rc<IOReg>,
+    wx: Rc<IOReg>,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -81,12 +82,13 @@ impl PPU {
     }
 
     #[inline(always)]
-    pub fn step(&mut self, clock: &u32) {
+    pub async fn coro(&mut self, clock: Rc<Cell<u32>>, co: Co<'_, ()>) {
         loop {
             // Update screen position
-            let ly = (clock / DOTS) as u8;
+            let clk = clock.get();
+            let ly = (clk / DOTS) as u8;
             self.ly.set(ly);
-            let lx = (clock % DOTS) as u8;
+            let lx = (clk % DOTS) as u8;
 
             // Perform mode-specific behavior
             match self.mode {
@@ -118,11 +120,16 @@ impl PPU {
                     let bg_map_addr = if lcdc.bit(3) {0x9C00} else {0x9800}; 
                     let win_map_addr = if lcdc.bit(6) {0x9C00} else {0x9800}; 
 
-                    // self.vram.borrow().unchecked_read_u8(address, bank);
+                    // Slight delay in rendering depending on horizontal scroll
+                    for _ in 0..(self.scx.get() % 8) {
+                        co.yield_(()).await;
+                    }
+                    self.vram.borrow().unbound_read_u8(0x1000, 0);
                     let bg_tile_addr = bg_map_addr;
                     self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
                 }
             }
+            co.yield_(()).await;
         }
     }
 

@@ -11,11 +11,11 @@ use crate::{
         errors::HydraIOError,
     },
     config::Config,
-    gameboy::memory::io::IO,
+    gameboy::memory::io::IOMap,
     graphics::Graphics, window::{HydraApp, UserEvent},
 };
 use std::{
-    cell::RefCell, ffi::OsStr, fs, path::Path, rc::Rc, sync::{
+    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::{
         Arc, RwLock,
         mpsc::{Receiver, Sender, channel},
     }, thread, time::Instant
@@ -83,7 +83,7 @@ pub struct GameBoy {
     cpu: cpu::CPU,
     memory: Rc<RefCell<memory::Memory>>,
     ppu: ppu::PPU,
-    clock: u32,
+    clock: Rc<Cell<u32>>,
 
     channel: Receiver<EmuMessage>,
 }
@@ -97,15 +97,16 @@ impl GameBoy {
 
         // Build Game Boy on a new thread
         thread::spawn(move || {
-            let io = IO::new(model);
+            let io = IOMap::new(model);
             let cpu = cpu::CPU::new(&rom, &io, model);
             let memory = Rc::new(RefCell::new(memory::Memory::from_rom_and_model(rom, model, io).unwrap())); // TODO: Error should be handled rather than unwrapped
             let ppu = ppu::PPU::new(memory.clone(), graphics, proxy);
+            let clock = Rc::new(Cell::new(0));
             GameBoy {
                 cpu,
                 memory,
                 ppu,
-                clock: 0,
+                clock,
                 channel: recv,
             }
             .main_thread();
@@ -146,23 +147,24 @@ impl Emulator for GameBoy {
         {
             // Generate Coroutines
             let_gen_using!(cpu_coro, |co| self.cpu.coro(self.memory.clone(), co));
+            let_gen_using!(ppu_coro, |co| self.ppu.coro(self.clock.clone(), co));
 
             // Main loop
             // let mut durs = [0.0f64, 0.0f64, 0.0f64];
             'main: loop {
                 // let start = Instant::now();
-                self.clock = (self.clock + 1) % CYCLES_PER_FRAME;
+                self.clock.set((self.clock.get() + 1) % CYCLES_PER_FRAME);
                 // let clktime = Instant::now();
                 cpu_coro.resume();
                 // let cputime = Instant::now();
-                self.ppu.step(&self.clock);
+                ppu_coro.resume();
                 // let pputime = Instant::now();
                 // durs[0] = ((clktime - start).as_secs_f64() + durs[0]) / 2.0f64;
                 // durs[1] = ((cputime - clktime).as_secs_f64() + durs[1]) / 2.0f64;
                 // durs[2] = ((pputime - cputime).as_secs_f64() + durs[2]) / 2.0f64;
 
                 // Every frame
-                if self.clock == 0 {
+                if self.clock.get() == 0 {
                     // Display diagnostic information
                     // println!("CLK: {}; CPU: {}; PPU: {}", durs[0], durs[1], durs[2]);
 

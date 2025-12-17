@@ -1,14 +1,14 @@
 use std::{cell::Cell, rc::Rc};
 
-use crate::{gameboy::{Model, memory::io::{self, IO}}};
+use crate::gameboy::{Model, memory::io::{self, IOMap, IOReg}};
 
 pub struct Wram {
     wram: Box<[[u8; 0x2000]]>,
-    wbk: Rc<Cell<u8>>,
+    wbk: Rc<IOReg>,
 }
 
 impl Wram {
-    pub fn new(model: Model, io: &IO) -> Self {
+    pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Wram {
             wram: Box::new([[0; 0x2000]; 1]),
             wbk: io[io::SVBK].clone()

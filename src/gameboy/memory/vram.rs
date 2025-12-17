@@ -3,16 +3,16 @@ use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
-use crate::gameboy::memory::io::{self, IO};
+use crate::gameboy::memory::io::{self, IOMap, IOReg};
 
 pub struct Vram {
     vram: Box<[[u8; 0x2000]]>,
-    vbk: Rc<Cell<u8>>,
-    stat: Rc<Cell<u8>>,
+    vbk: Rc<IOReg>,
+    stat: Rc<IOReg>,
 }
 
 impl Vram {
-    pub fn new(model: Model, io: &IO) -> Self {
+    pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Vram {
             vram: Box::new([[0; 0x2000]; 1]),
             vbk: io[io::VBK].clone(),
