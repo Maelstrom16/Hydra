@@ -46,8 +46,8 @@ impl Vram {
         }
     }
 
-    pub fn unbound_read_u8(&self, address: usize, bank: u8) -> u8 {
-        self.vram[bank as usize][address]
+    pub fn unbound_read_u8(&self, local_address: usize, bank: u8) -> u8 {
+        self.vram[bank as usize][local_address]
     }
 
     fn is_accessible(&self) -> bool {
