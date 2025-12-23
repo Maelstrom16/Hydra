@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
@@ -24,25 +23,24 @@ impl Vram {
     }
 
     pub fn change_model(&mut self, model: Model) {
-        let bank_count = self.vram.len();
-        match (bank_count, model) {
-            (2, Model::GameBoy(_) | Model::SuperGameBoy(_)) => self.vram = Box::new([self.vram[0]]),
-            (1, Model::GameBoyColor(_) | Model::GameBoyAdvance(_)) => self.vram = Box::new([self.vram[0], [0; 0x2000]]),
+        match (self.is_monochrome(), model.is_monochrome()) {
+            (false, true) => self.vram = Box::from(&self.vram[0..1]),
+            (true, false) => self.vram = Box::new([self.vram[0], [0; 0x2000]]),
             _ => {}
         }
     }
 
-    pub fn read_u8(&self, address: usize) -> Result<u8, HydraIOError> {
+    pub fn read_u8(&self, local_address: usize) -> Result<u8, HydraIOError> {
         if self.is_accessible() {
-            Ok(self.vram[self.vbk.get() as usize][address])
+            Ok(self.vram[self.get_bank_id() as usize][local_address])
         } else {
             Err(HydraIOError::OpenBusAccess)
         }
     }
 
-    pub fn write_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError> {
+    pub fn write_u8(&mut self, value: u8, local_address: usize) -> Result<(), HydraIOError> {
         if self.is_accessible() {
-            Ok(self.vram[self.vbk.get() as usize][address] = value)
+            Ok(self.vram[self.get_bank_id() as usize][local_address] = value)
         } else {
             Err(HydraIOError::OpenBusAccess)
         }
@@ -55,5 +53,21 @@ impl Vram {
     fn is_accessible(&self) -> bool {
         // VRAM is inaccessible during PPU mode 3
         (self.stat.get() & 0b00000011) != 3
+    }
+
+    fn is_monochrome(&self) -> bool {
+        let bank_count = self.vram.len();
+
+        bank_count == 1
+    }
+
+    fn is_color(&self) -> bool {
+        let bank_count = self.vram.len();
+
+        bank_count == 2
+    }
+
+    fn get_bank_id(&self) -> u8 {
+        if self.is_monochrome() {0} else {self.vbk.get() & 0b00000001}
     }
 }

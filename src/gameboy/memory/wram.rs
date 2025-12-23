@@ -1,16 +1,16 @@
-use std::{cell::Cell, rc::Rc};
+use std::rc::Rc;
 
 use crate::gameboy::{Model, memory::io::{self, IOMap, IOReg}};
 
 pub struct Wram {
-    wram: Box<[[u8; 0x2000]]>,
+    wram: Box<[[u8; 0x1000]]>,
     wbk: Rc<IOReg>,
 }
 
 impl Wram {
     pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Wram {
-            wram: Box::new([[0; 0x2000]; 1]),
+            wram: Box::new([[0; 0x1000]; 2]),
             wbk: io[io::SVBK].clone()
         };
         result.change_model(model);
@@ -19,19 +19,37 @@ impl Wram {
     }
 
     pub fn change_model(&mut self, model: Model) {
-        let bank_count = self.wram.len();
-        match (bank_count, model) {
-            (2, Model::GameBoy(_) | Model::SuperGameBoy(_)) => self.wram = Box::new([self.wram[0]]),
-            (1, Model::GameBoyColor(_) | Model::GameBoyAdvance(_)) => self.wram = [[self.wram[0]].as_slice(), [[0; 0x2000]; 7].as_slice()].concat().into_boxed_slice(),
+        match (self.is_monochrome(), model.is_monochrome()) {
+            (false, true) => self.wram = Box::from(&self.wram[0..2]),
+            (true, false) => self.wram = [&self.wram[0..2], &[[0; 0x1000]; 6]].concat().into_boxed_slice(),
             _ => {}
         }
     }
 
-    pub fn read_u8(&self, address: usize) -> u8 {
-        self.wram[self.wbk.get() as usize][address]
+    pub fn read_u8(&self, local_address: usize) -> u8 {
+        self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000]
     }
 
-    pub fn write_u8(&mut self, value: u8, address: usize) {
-        self.wram[self.wbk.get() as usize][address] = value
+    pub fn write_u8(&mut self, value: u8, local_address: usize) {
+        self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000] = value
+    }
+
+    fn is_monochrome(&self) -> bool {
+        let bank_count = self.wram.len();
+
+        bank_count == 2
+    }
+
+    fn is_color(&self) -> bool {
+        let bank_count = self.wram.len();
+
+        bank_count == 8
+    }
+
+    fn get_bank_id(&self, address: usize) -> u8 {
+        match address {
+            0..0x1000 => 0,
+            _ => if self.is_monochrome() {1} else {(self.wbk.get() & 0b00000111).max(1)}
+        }
     }
 }

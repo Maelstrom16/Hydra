@@ -49,6 +49,14 @@ impl Model {
             Model::GameBoyAdvance(None) => "Game Boy Advance",
         }
     }
+
+    const fn is_monochrome(&self) -> bool {
+        matches!(self, Model::GameBoy(_) | Model::SuperGameBoy(_))
+    }
+
+    const fn is_color(&self) -> bool {
+        matches!(self, Model::GameBoyColor(_) | Model::GameBoyAdvance(_))
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
