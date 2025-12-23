@@ -2,6 +2,8 @@ use std::rc::Rc;
 
 use crate::gameboy::{Model, memory::io::{self, IOMap, IOReg}};
 
+pub const ADDRESS_OFFSET: usize = 0xC000;
+
 pub struct Wram {
     wram: Box<[[u8; 0x1000]]>,
     wbk: Rc<IOReg>,
@@ -26,11 +28,15 @@ impl Wram {
         }
     }
 
-    pub fn read_u8(&self, local_address: usize) -> u8 {
+    pub fn read_u8(&self, address: usize) -> u8 {
+        let local_address = Wram::localize_address(address);
+
         self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000]
     }
 
-    pub fn write_u8(&mut self, value: u8, local_address: usize) {
+    pub fn write_u8(&mut self, value: u8, address: usize) {
+        let local_address = Wram::localize_address(address);
+
         self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000] = value
     }
 
@@ -51,5 +57,9 @@ impl Wram {
             0..0x1000 => 0,
             _ => if self.is_monochrome() {1} else {(self.wbk.get() & 0b00000111).max(1)}
         }
+    }
+
+    const fn localize_address(address: usize) -> usize {
+        address - ADDRESS_OFFSET
     }
 }

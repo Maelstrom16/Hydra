@@ -4,6 +4,8 @@ use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
 use crate::gameboy::memory::io::{self, IOMap, IOReg};
 
+pub const ADDRESS_OFFSET: usize = 0x8000;
+
 pub struct Vram {
     vram: Box<[[u8; 0x2000]]>,
     vbk: Rc<IOReg>,
@@ -30,24 +32,24 @@ impl Vram {
         }
     }
 
-    pub fn read_u8(&self, local_address: usize) -> Result<u8, HydraIOError> {
+    pub fn read_u8(&self, address: usize) -> Result<u8, HydraIOError> {
         if self.is_accessible() {
-            Ok(self.vram[self.get_bank_id() as usize][local_address])
+            Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)])
         } else {
             Err(HydraIOError::OpenBusAccess)
         }
     }
 
-    pub fn write_u8(&mut self, value: u8, local_address: usize) -> Result<(), HydraIOError> {
+    pub fn write_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError> {
         if self.is_accessible() {
-            Ok(self.vram[self.get_bank_id() as usize][local_address] = value)
+            Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)] = value)
         } else {
             Err(HydraIOError::OpenBusAccess)
         }
     }
 
-    pub fn unbound_read_u8(&self, local_address: usize, bank: u8) -> u8 {
-        self.vram[bank as usize][local_address]
+    pub fn unbound_read_u8(&self, address: usize, bank: u8) -> u8 {
+        self.vram[bank as usize][Vram::localize_address(address)]
     }
 
     fn is_accessible(&self) -> bool {
@@ -69,5 +71,9 @@ impl Vram {
 
     fn get_bank_id(&self) -> u8 {
         if self.is_monochrome() {0} else {self.vbk.get() & 0b00000001}
+    }
+
+    const fn localize_address(address: usize) -> usize {
+        address - ADDRESS_OFFSET
     }
 }
