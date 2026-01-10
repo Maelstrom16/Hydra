@@ -1,0 +1,12 @@
+[package]
+name = "hydra_macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+funty = "2.0.0"
+quote = "1.0.42"
+syn = "2.0.113"

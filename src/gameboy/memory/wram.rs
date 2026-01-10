@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use crate::gameboy::{Model, memory::io::{self, IOMap, IOReg}};
+use crate::gameboy::{Model, memory::io::{self, GBReg, IOMap}};
 
 pub const ADDRESS_OFFSET: usize = 0xC000;
 
 pub struct Wram {
     wram: Box<[[u8; 0x1000]]>,
-    wbk: Rc<IOReg>,
+    wbk: Rc<GBReg>,
 }
 
 impl Wram {

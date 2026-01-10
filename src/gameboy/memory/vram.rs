@@ -1,15 +1,17 @@
+mod deserialized;
+
 use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
-use crate::gameboy::memory::io::{self, IOMap, IOReg};
+use crate::gameboy::memory::io::{self, GBReg, IOMap};
 
 pub const ADDRESS_OFFSET: usize = 0x8000;
 
 pub struct Vram {
     vram: Box<[[u8; 0x2000]]>,
-    vbk: Rc<IOReg>,
-    stat: Rc<IOReg>,
+    vbk: Rc<GBReg>,
+    stat: Rc<GBReg>,
 }
 
 impl Vram {

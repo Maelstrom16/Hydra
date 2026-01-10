@@ -12,8 +12,8 @@ use rand::Rng;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
-    common::bit::BitSet, gameboy::{
-        memory::{Memory, io::{self, IOReg}, vram::Vram},
+    common::bit::MaskedBitSet, gameboy::{
+        memory::{Memory, io::{self, GBReg}, vram::Vram},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
@@ -24,14 +24,14 @@ pub struct PPU {
     screen_buffer: Box<[u8]>,
 
     vram: Rc<RefCell<Vram>>,
-    lcdc: Rc<IOReg>,
-    stat: Rc<IOReg>,
-    scy: Rc<IOReg>,
-    scx: Rc<IOReg>,
-    ly: Rc<IOReg>,
-    lyc: Rc<IOReg>,
-    wy: Rc<IOReg>,
-    wx: Rc<IOReg>,
+    lcdc: Rc<GBReg>,
+    stat: Rc<GBReg>,
+    scy: Rc<GBReg>,
+    scx: Rc<GBReg>,
+    ly: Rc<GBReg>,
+    lyc: Rc<GBReg>,
+    wy: Rc<GBReg>,
+    wx: Rc<GBReg>,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -46,9 +46,9 @@ pub enum Mode {
 
 pub const DOTS: u32 = 456;
 const SCANLINES: u32 = 154;
-const SCREEN_X: u8 = 160;
-const SCREEN_Y: u8 = 144;
-const BUFFER_SIZE: usize = SCREEN_X as usize * SCREEN_Y as usize * 4;
+const SCREEN_WIDTH: u8 = 160;
+const SCREEN_HEIGHT: u8 = 144;
+const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl PPU {
     pub fn new(memory: Rc<RefCell<Memory>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
@@ -78,7 +78,7 @@ impl PPU {
     }
 
     fn init_graphics(&mut self) {
-        self.graphics.write().unwrap().resize_screen_texture(SCREEN_X as u32, SCREEN_Y as u32);
+        self.graphics.write().unwrap().resize_screen_texture(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
     }
 
     #[inline(always)]
@@ -93,7 +93,7 @@ impl PPU {
             // Perform mode-specific behavior
             match self.mode {
                 Mode::HBlank => {
-                    if ly == SCREEN_Y {
+                    if ly == SCREEN_HEIGHT {
                         self.mode = Mode::VBlank;
                         self.push_to_viewport();
                     } else if lx == 0 {
@@ -114,19 +114,41 @@ impl PPU {
                 }
                 Mode::Render => {
                     // Screen texture generation
-                    
-                    // Check whether rendering is enabled (LCDC bit 7)
-                    let lcdc = self.lcdc.get();
-                    let bg_map_addr = if lcdc.bit(3) {0x9C00} else {0x9800}; 
-                    let win_map_addr = if lcdc.bit(6) {0x9C00} else {0x9800}; 
 
                     // Slight delay in rendering depending on horizontal scroll
                     for _ in 0..(self.scx.get() % 8) {
                         co.yield_(()).await;
                     }
-                    self.vram.borrow().unbound_read_u8(0x1000, 0);
-                    let bg_tile_addr = bg_map_addr;
+
+                    // Begin rendering at 
+                    for screen_x in 0..SCREEN_WIDTH {
+                        let lcdc = self.lcdc.get();
+                        // Only render if LCD is enabled (LCDC bit 7)
+                        // if lcdc.bit(7) {
+                        //     let bg_map_address = if lcdc.bit(3) {0x9C00} else {0x9800}; 
+                        //     let win_map_address = if lcdc.bit(6) {0x9C00} else {0x9800};
+
+                        //     let map_x = u8::wrapping_add(screen_x, self.scx.get());
+                        //     let tile_x = map_x / 8;
+                        //     let map_y = u8::wrapping_add(self.ly.get(), self.scy.get());
+                        //     let tile_y = map_y / 8;
+                        //     let tile_map_address = bg_map_address + tile_x + (tile_y * 0x10);
+                        //     let tile_data_index = self.vram.borrow().unbound_read_u8(tile_map_address, 0);
+                        //     let tile_attributes = self.vram.borrow().unbound_read_u8(tile_map_address, 1);
+                        //     let tile_data = self.vram.borrow().unbound_read_u8(address, bank);
+                            
+                        //     starting_bit_mask = starting_bit_mask.rotate_right(1);
+                        // }
+
+                        co.yield_(()).await;
+                    }
+
+                    // self.vram.borrow().unbound_read_u8(bg_map_addr, 0);
+                    // let bg_tile_addr = bg_map_addr;
                     self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
+
+                    // Return to HBlank upon completion of the scanline
+                    self.mode = Mode::HBlank
                 }
             }
             co.yield_(()).await;
@@ -134,12 +156,8 @@ impl PPU {
     }
 
     fn push_to_viewport(&self) {
-        let t1 = Instant::now();
         let graphics = self.graphics.read().unwrap();
-        let t2 = Instant::now();
         graphics.update_screen_texture(&self.screen_buffer);
-        let t3 = Instant::now();
         self.proxy.send_event(UserEvent::RedrawRequest).expect("Unable to render Game Boy graphics: Main event loop closed unexpectedly");
-        let t4 = Instant::now();
     }
 }

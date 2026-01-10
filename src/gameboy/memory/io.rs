@@ -1,8 +1,10 @@
+mod deserialized;
+
 use std::{
-    array, cell::Cell, mem::MaybeUninit, ops::{Index, IndexMut}, rc::Rc
+    array, ops::{Index, IndexMut}, rc::Rc
 };
 
-use crate::gameboy::{GBRevision, Model};
+use crate::{common::bit::{MaskedBitSet, WriteBehavior}, gameboy::{GBRevision, Model}};
 
 pub const ADDRESS_OFFSET: usize = 0xFF00;
 // I/O Register Addresses
@@ -83,178 +85,180 @@ pub const PCM12: usize = 0xFF76 - ADDRESS_OFFSET;
 pub const PCM34: usize = 0xFF77 - ADDRESS_OFFSET;
 pub const IE: usize = 0xFFFF - ADDRESS_OFFSET - 0x7F; // To compensate for HRAM
 
+pub type GBReg = MaskedBitSet<u8>;
+
 pub struct IOMap {
-    registers: [Rc<IOReg>; 0x80 + 1],
+    registers: [Rc<GBReg>; 0x80 + 1],
 }
 
 impl IOMap {
     pub fn new(model: Model) -> Self {
         IOMap { registers: array::from_fn(|i| match i {
             // Define default values for all registers and models
-            P1 => IOReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
-            SB => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            P1 => GBReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
+            SB => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
             SC => match model {
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new(0x7E, 0b10000001, 0b10000001, WriteBehavior::Standard),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0x7F, 0b10000011, 0b10000011, WriteBehavior::Standard),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0x7E, 0b10000001, 0b10000001, WriteBehavior::Standard),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x7F, 0b10000011, 0b10000011, WriteBehavior::Standard),
             },
-            DIV => IOReg::new(match model { 
+            DIV => GBReg::new(match model { 
                 Model::GameBoy(Some(GBRevision::DMG0)) => 0x18,
                 Model::GameBoy(_) => 0xAB,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
             }, 0b11111111, 0b11111111, WriteBehavior::ResetOnWrite),
-            TIMA => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            TMA => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            TAC => IOReg::new(0xF8, 0b00000111, 0b00000111, WriteBehavior::Standard),
-            IF => IOReg::new(0xE1, 0b00011111, 0b00011111, WriteBehavior::Standard),
-            NR10 => IOReg::new(0x80, 0b01111111, 0b01111111, WriteBehavior::Standard),
-            NR11 => IOReg::new(0xBF, 0b11000000, 0b11111111, WriteBehavior::Standard),
-            NR12 => IOReg::new(0xF3, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR13 => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-            NR14 => IOReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
-            NR21 => IOReg::new(0x3F, 0b11000000, 0b11111111, WriteBehavior::Standard),
-            NR22 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR23 => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-            NR24 => IOReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
-            NR30 => IOReg::new(0x7F, 0b10000000, 0b10000000, WriteBehavior::Standard),
-            NR31 => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-            NR32 => IOReg::new(0x9F, 0b01100000, 0b01100000, WriteBehavior::Standard),
-            NR33 => IOReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR34 => IOReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
-            NR41 => IOReg::new(0xFF, 0b00000000, 0b00111111, WriteBehavior::Standard),
-            NR42 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR43 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR44 => IOReg::new(0xBF, 0b01000000, 0b11000000, WriteBehavior::Standard),
-            NR50 => IOReg::new(0x77, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR51 => IOReg::new(0xF3, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            NR52 => IOReg::new(match model {
+            TIMA => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            TMA => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            TAC => GBReg::new(0xF8, 0b00000111, 0b00000111, WriteBehavior::Standard),
+            IF => GBReg::new(0xE1, 0b00011111, 0b00011111, WriteBehavior::Standard),
+            NR10 => GBReg::new(0x80, 0b01111111, 0b01111111, WriteBehavior::Standard),
+            NR11 => GBReg::new(0xBF, 0b11000000, 0b11111111, WriteBehavior::Standard),
+            NR12 => GBReg::new(0xF3, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR13 => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
+            NR14 => GBReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
+            NR21 => GBReg::new(0x3F, 0b11000000, 0b11111111, WriteBehavior::Standard),
+            NR22 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR23 => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
+            NR24 => GBReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
+            NR30 => GBReg::new(0x7F, 0b10000000, 0b10000000, WriteBehavior::Standard),
+            NR31 => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
+            NR32 => GBReg::new(0x9F, 0b01100000, 0b01100000, WriteBehavior::Standard),
+            NR33 => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR34 => GBReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
+            NR41 => GBReg::new(0xFF, 0b00000000, 0b00111111, WriteBehavior::Standard),
+            NR42 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR43 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR44 => GBReg::new(0xBF, 0b01000000, 0b11000000, WriteBehavior::Standard),
+            NR50 => GBReg::new(0x77, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR51 => GBReg::new(0xF3, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            NR52 => GBReg::new(match model {
                 Model::GameBoy(_) => 0xF1,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0xF0,
             }, 0b10001111, 0b00001111, WriteBehavior::Standard),
-            WAV00 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV01 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV02 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV03 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV04 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV05 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV06 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV07 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV08 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV09 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV10 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV11 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV12 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV13 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV14 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WAV15 => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            LCDC => IOReg::new(0x91, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            STAT => IOReg::new(match model {
+            WAV00 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV01 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV02 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV03 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV04 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV05 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV06 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV07 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV08 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV09 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV10 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV11 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV12 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV13 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV14 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WAV15 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            LCDC => GBReg::new(0x91, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            STAT => GBReg::new(match model {
                 Model::GameBoy(Some(GBRevision::DMG0)) => 0x81,
                 Model::GameBoy(_) => 0x85,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
             }, 0b01111111, 0b01111000, WriteBehavior::Standard),
-            SCY => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            SCX => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            LY => IOReg::new(match model {
+            SCY => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            SCX => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            LY => GBReg::new(match model {
                 Model::GameBoy(Some(GBRevision::DMG0)) => 0x91,
                 Model::GameBoy(_) => 0x00,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
             }, 0b11111111, 0b00000000, WriteBehavior::Standard),
-            LYC => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            DMA => IOReg::new(match model {
+            LYC => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            DMA => GBReg::new(match model {
                 Model::GameBoy(_) | Model::SuperGameBoy(_) => 0xFF,
                 Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0x00,
             }, 0b11111111, 0b11111111, WriteBehavior::Standard),
             BGP => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new(0xFC, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new_unimplemented(),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFC, 0b11111111, 0b11111111, WriteBehavior::Standard),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
             },
             OBP0 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // Unitialized, but 0xFF is a common value
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new_unimplemented(),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // Unitialized, but 0xFF is a common value
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
             },
             OBP1 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // Unitialized, but 0xFF is a common value
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new_unimplemented(),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // Unitialized, but 0xFF is a common value
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
             },
-            WY => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-            WX => IOReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WY => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
+            WX => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
             KEY0 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(rand::random(), 0b00000100, 0b00000000, WriteBehavior::Standard), // TODO: Value is supposed to be based on header contents, Allow writing during boot ROM if included
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(rand::random(), 0b00000100, 0b00000000, WriteBehavior::Standard), // TODO: Value is supposed to be based on header contents, Allow writing during boot ROM if included
             }, 
             KEY1 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0x7E, 0b10000001, 0b00000001, WriteBehavior::Standard),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x7E, 0b10000001, 0b00000001, WriteBehavior::Standard),
             }, 
             VBK => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFE, 0b00000001, 0b00000001, WriteBehavior::Standard),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFE, 0b00000001, 0b00000001, WriteBehavior::Standard),
             }, 
-            BOOT => IOReg::new(0xFF, 0b00000000, 0b00000001, WriteBehavior::UnmapBootRom), // TODO: Verify write behavior
+            BOOT => GBReg::new(0xFF, 0b00000000, 0b00000001, WriteBehavior::UnmapBootRom), // TODO: Verify write behavior
             HDMA1 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
             }, 
             HDMA2 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure lower four bits are ignored
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure lower four bits are ignored
             }, 
             HDMA3 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure upper three bits are ignored
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure upper three bits are ignored
             }, 
             HDMA4 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure lower four bits are ignored
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure lower four bits are ignored
             }, 
             HDMA5 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Ensure proper read behavior
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Ensure proper read behavior
             }, 
             RP => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0x3E, 0b11000011, 0b00000010, WriteBehavior::Standard),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x3E, 0b11000011, 0b00000010, WriteBehavior::Standard),
             },
             BCPS => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b10111111, 0b10111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b10111111, 0b10111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles
             },
             BCPD => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
             },
             OCPS => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b10111111, 0b10111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b10111111, 0b10111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles
             },
             OCPD => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
             },
             OPRI => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b00000001, 0b00000001, WriteBehavior::Standard), // TODO: Verify startup value and masks
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000001, 0b00000001, WriteBehavior::Standard), // TODO: Verify startup value and masks
             },
             SVBK => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xF8, 0b00000111, 0b00000111, WriteBehavior::Standard),
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xF8, 0b00000111, 0b00000111, WriteBehavior::Standard),
             },
             PCM12 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
             },
             PCM34 => match model { 
-                Model::GameBoy(_) | Model::SuperGameBoy(_) => IOReg::new_unimplemented(),
-                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => IOReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
+                Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+                Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
             },
-            IE => IOReg::new(0x00, 0b00011111, 0b00011111, WriteBehavior::Standard),
-            _ => IOReg::new_unimplemented()
+            IE => GBReg::new(0x00, 0b00011111, 0b00011111, WriteBehavior::Standard),
+            _ => GBReg::new_unimplemented()
         })}
     }
 }
 
 impl Index<usize> for IOMap {
-    type Output = Rc<IOReg>;
+    type Output = Rc<GBReg>;
     fn index(&self, index: usize) -> &Self::Output {
         &self.registers[index]
     }
@@ -263,75 +267,4 @@ impl IndexMut<usize> for IOMap {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.registers[index]
     }
-}
-
-pub struct IOReg {
-    value: Cell<u8>,
-    read_mask: Cell<u8>,
-    write_mask: Cell<u8>,
-    write_fn: fn(&IOReg, val: u8)
-}
-
-impl IOReg {
-    pub(self) fn new(value: u8, read_mask: u8, write_mask: u8, reg_type: WriteBehavior) -> Rc<Self> {
-        let write_fn = match reg_type {
-            WriteBehavior::Standard => IOReg::write_standard,
-            WriteBehavior::ResetOnWrite => IOReg::write_reset,
-            WriteBehavior::UnmapBootRom => IOReg::write_boot,
-        };
-
-        Rc::new(IOReg { value: Cell::new(value), read_mask: Cell::new(read_mask), write_mask: Cell::new(write_mask), write_fn})
-    }
-
-    pub(self) fn new_unimplemented() -> Rc<Self> {
-        IOReg::new(0xFF, 0x00, 0x00, WriteBehavior::Standard)
-    }
-
-    /// Returns a copy of the contained value.
-    pub fn get(&self) -> u8 {
-        self.value.get()
-    }
-
-    /// Sets the contained value.
-    pub fn set(&self, val: u8) {
-        self.value.set(val)
-    }
-
-    /// Returns a copy of the contained value, with write-only
-    /// and unimplemented bits replaced by a 1.
-    pub fn read(&self) -> u8 {
-        self.value.get() | !self.read_mask.get()
-    }
-
-    /// Sets the contained value, with read-only
-    /// and unimplemented bits ignored.
-    pub fn write(&self, val: u8) {
-        (self.write_fn)(self, val)
-    }
-
-    fn write_standard(&self, val: u8) {
-        let write_mask = self.write_mask.get();
-        self.value.set((self.value.get() & !write_mask) | (val & write_mask))
-    }
-
-    fn write_reset(&self, _val: u8) {
-        self.value.set(0x00);
-    }
-
-    fn write_boot(&self, _val: u8) {
-        todo!("BANK register write behavior is not yet implemented")
-    }
-
-    /// Redefines which bits of this register are
-    /// readable and/or writable. 
-    pub fn change_masks(&self, read_mask: u8, write_mask: u8) {
-        self.read_mask.set(read_mask);
-        self.write_mask.set(write_mask);
-    }
-}
-
-enum WriteBehavior {
-    Standard,
-    ResetOnWrite,
-    UnmapBootRom
 }
