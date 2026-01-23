@@ -4,9 +4,10 @@ use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
+use crate::gameboy::memory::io::deserialized::{RegStat, RegVbk};
 use crate::gameboy::memory::io::{self, GBReg, IOMap};
 
-pub const ADDRESS_OFFSET: usize = 0x8000;
+pub const ADDRESS_OFFSET: u16 = 0x8000;
 
 pub struct Vram {
     vram: Box<[[u8; 0x2000]]>,
@@ -18,8 +19,8 @@ impl Vram {
     pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Vram {
             vram: Box::new([[0; 0x2000]; 1]),
-            vbk: io[io::VBK].clone(),
-            stat: io[io::STAT].clone()
+            vbk: io.clone_pointer(io::MMIO::VBK),
+            stat: io.clone_pointer(io::MMIO::STAT),
         };
         result.change_model(model);
 
@@ -34,7 +35,7 @@ impl Vram {
         }
     }
 
-    pub fn read_u8(&self, address: usize) -> Result<u8, HydraIOError> {
+    pub fn read_u8(&self, address: u16) -> Result<u8, HydraIOError> {
         if self.is_accessible() {
             Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)])
         } else {
@@ -42,7 +43,7 @@ impl Vram {
         }
     }
 
-    pub fn write_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError> {
+    pub fn write_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
         if self.is_accessible() {
             Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)] = value)
         } else {
@@ -50,7 +51,7 @@ impl Vram {
         }
     }
 
-    pub fn unbound_read_u8(&self, address: usize, bank: u8) -> u8 {
+    pub fn unbound_read_u8(&self, address: u16, bank: u8) -> u8 {
         self.vram[bank as usize][Vram::localize_address(address)]
     }
 
@@ -75,7 +76,7 @@ impl Vram {
         if self.is_monochrome() {0} else {self.vbk.get() & 0b00000001}
     }
 
-    const fn localize_address(address: usize) -> usize {
-        address - ADDRESS_OFFSET
+    const fn localize_address(address: u16) -> usize {
+        (address - ADDRESS_OFFSET) as usize
     }
 }

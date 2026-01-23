@@ -56,15 +56,15 @@ impl Memory {
 
     pub fn read_u8(&self, address: u16) -> u8 {
         let read_result = match address {
-            0x0000..=0x7FFF => self.cartridge.as_ref().map(|this| this.read_rom_u8(address as usize)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0x8000..=0x9FFF => self.vram.borrow().read_u8(address as usize),
-            0xA000..=0xBFFF => self.cartridge.as_ref().map(|this| this.read_ram_u8(address as usize)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0xC000..=0xDFFF => Ok(self.wram.read_u8(address as usize)),
-            0xE000..=0xFDFF => Ok(self.wram.read_u8((address - 0x2000) as usize)), // Treat exactly like WRAM
-            0xFE00..=0xFEFF => self.oam.read(address as usize - oam::ADDRESS_OFFSET),
-            0xFF00..=0xFF7F => Ok(self.io[address as usize - io::ADDRESS_OFFSET].get()),
+            0x0000..=0x7FFF => self.cartridge.as_ref().map(|this| this.read_rom_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
+            0x8000..=0x9FFF => self.vram.borrow().read_u8(address),
+            0xA000..=0xBFFF => self.cartridge.as_ref().map(|this| this.read_ram_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
+            0xC000..=0xDFFF => Ok(self.wram.read_u8(address)),
+            0xE000..=0xFDFF => Ok(self.wram.read_u8(address - 0x2000)), // Treat exactly like WRAM
+            0xFE00..=0xFEFF => self.oam.read(address - oam::ADDRESS_OFFSET),
+            0xFF00..=0xFF7F => Ok(self.io.read(address)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
-            0xFFFF => Ok(self.io[io::IE].get()),
+            0xFFFF => Ok(self.io.read(address)), // Same as MMIO case, kept separate for clarity
         };
         match read_result {
             Ok(value) => self.data_bus.set(value),
@@ -80,15 +80,15 @@ impl Memory {
     pub fn write_u8(&mut self, value: u8, address: u16) -> () {
         self.data_bus.set(value);
         let write_result = match address {
-            0x0000..=0x7FFF => self.cartridge.as_mut().map(|this| this.write_rom_u8(value, address as usize)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0x8000..=0x9FFF => self.vram.borrow_mut().write_u8(value, address as usize),
-            0xA000..=0xBFFF => self.cartridge.as_mut().map(|this| this.write_ram_u8(value, address as usize)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0xC000..=0xDFFF => Ok(self.wram.write_u8(value, address as usize)),
-            0xE000..=0xFDFF => Ok(self.wram.write_u8(value, (address - 0x2000) as usize)), // Treat exactly like WRAM
-            0xFE00..=0xFEFF => self.oam.write(address as usize - oam::ADDRESS_OFFSET, value),
-            0xFF00..=0xFF7F => Ok(self.io[address as usize - io::ADDRESS_OFFSET].set(value)),
+            0x0000..=0x7FFF => self.cartridge.as_mut().map(|this| this.write_rom_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
+            0x8000..=0x9FFF => self.vram.borrow_mut().write_u8(value, address),
+            0xA000..=0xBFFF => self.cartridge.as_mut().map(|this| this.write_ram_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
+            0xC000..=0xDFFF => Ok(self.wram.write_u8(value, address)),
+            0xE000..=0xFDFF => Ok(self.wram.write_u8(value, address - 0x2000)), // Treat exactly like WRAM
+            0xFE00..=0xFEFF => self.oam.write(address - oam::ADDRESS_OFFSET, value),
+            0xFF00..=0xFF7F => Ok(self.io.write(value, address)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
-            0xFFFF => Ok(self.io[io::IE].set(value)),
+            0xFFFF => Ok(self.io.write(value, address)), // Same as MMIO case, kept separate for clarity
         };
         if let Err(e) = write_result {
             panic!("Error writing to memory.\n{}", e);

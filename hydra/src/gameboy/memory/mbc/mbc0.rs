@@ -16,28 +16,28 @@ impl MBC0 {
 }
 
 impl mbc::MemoryBankController for MBC0 {
-    fn read_rom_u8(&self, address: usize) -> Result<u8, HydraIOError> {
-        Ok(self.rom[address])
+    fn read_rom_u8(&self, address: u16) -> Result<u8, HydraIOError> {
+        Ok(self.rom[address as usize])
     }
-    fn read_ram_u8(&self, address: usize) -> Result<u8, HydraIOError> {
+    fn read_ram_u8(&self, address: u16) -> Result<u8, HydraIOError> {
         match mbc::get_ram_size(&self.rom)? {
             0x000 => Err(HydraIOError::OpenBusAccess),
-            0x800 => Ok(self.ram[(address - 0xA000) % 0x800]),
-            _ => Ok(self.ram[address - 0xA000]),
+            0x800 => Ok(self.ram[(address - 0xA000) as usize % 0x800]),
+            _ => Ok(self.ram[address as usize - 0xA000]),
         }
     }
-    fn write_rom_u8(&mut self, _value: u8, _address: usize) -> Result<(), HydraIOError> {
+    fn write_rom_u8(&mut self, _value: u8, _address: u16) -> Result<(), HydraIOError> {
         Ok(())
     }
-    fn write_ram_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError> {
+    fn write_ram_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
         match mbc::get_ram_size(&self.rom)? {
             0x000 => Ok(()),
             0x800 => {
-                self.ram[(address - 0xA000) % 0x800] = value;
+                self.ram[(address - 0xA000) as usize % 0x800] = value;
                 Ok(())
             }
             _ => {
-                self.ram[address - 0xA000] = value;
+                self.ram[address as usize - 0xA000] = value;
                 Ok(())
             }
         }

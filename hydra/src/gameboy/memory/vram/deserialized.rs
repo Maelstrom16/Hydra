@@ -6,6 +6,6 @@ pub struct TileAttributes {
     #[width(1)] pub y_flip: bool,
     #[width(1)] pub x_flip: bool,
     #[width(1)] _padding: (),
-    #[width(1)] pub bank: bool,
+    #[width(1)] pub bank_index: u8,
     #[width(3)] pub palette: u8,
 }

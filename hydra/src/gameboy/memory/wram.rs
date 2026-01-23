@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
-use crate::gameboy::{Model, memory::io::{self, GBReg, IOMap}};
+use crate::gameboy::{Model, memory::io::{self, GBReg, IOMap, deserialized::RegSvbk}};
 
-pub const ADDRESS_OFFSET: usize = 0xC000;
+pub const ADDRESS_OFFSET: u16 = 0xC000;
 
 pub struct Wram {
     wram: Box<[[u8; 0x1000]]>,
@@ -13,7 +13,7 @@ impl Wram {
     pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Wram {
             wram: Box::new([[0; 0x1000]; 2]),
-            wbk: io[io::SVBK].clone()
+            wbk: io.clone_pointer(io::MMIO::SVBK)
         };
         result.change_model(model);
 
@@ -28,13 +28,13 @@ impl Wram {
         }
     }
 
-    pub fn read_u8(&self, address: usize) -> u8 {
+    pub fn read_u8(&self, address: u16) -> u8 {
         let local_address = Wram::localize_address(address);
 
         self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000]
     }
 
-    pub fn write_u8(&mut self, value: u8, address: usize) {
+    pub fn write_u8(&mut self, value: u8, address: u16) {
         let local_address = Wram::localize_address(address);
 
         self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000] = value
@@ -59,7 +59,7 @@ impl Wram {
         }
     }
 
-    const fn localize_address(address: usize) -> usize {
-        address - ADDRESS_OFFSET
+    const fn localize_address(address: u16) -> usize {
+        (address - ADDRESS_OFFSET) as usize
     }
 }

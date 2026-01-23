@@ -15,10 +15,10 @@ use crate::common::errors::HydraIOError;
 use crate::gameboy::memory;
 
 pub trait MemoryBankController: Send + Sync + 'static {
-    fn read_rom_u8(&self, address: usize) -> Result<u8, HydraIOError>;
-    fn read_ram_u8(&self, address: usize) -> Result<u8, HydraIOError>;
-    fn write_rom_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
-    fn write_ram_u8(&mut self, value: u8, address: usize) -> Result<(), HydraIOError>;
+    fn read_rom_u8(&self, address: u16) -> Result<u8, HydraIOError>;
+    fn read_ram_u8(&self, address: u16) -> Result<u8, HydraIOError>;
+    fn write_rom_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError>;
+    fn write_ram_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError>;
 }
 
 pub fn from_rom(rom: Box<[u8]>) -> Result<Box<dyn MemoryBankController>, HydraIOError> {

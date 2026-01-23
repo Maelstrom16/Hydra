@@ -13,7 +13,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     common::bit::MaskedBitSet, gameboy::{
-        memory::{Memory, io::{self, GBReg}, vram::Vram},
+        memory::{Memory, io::{self, GBReg, deserialized::{RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
@@ -61,14 +61,14 @@ impl PPU {
             screen_buffer,
 
             vram: memguard.get_vram(),
-            lcdc: io[io::LCDC].clone(),
-            stat: io[io::STAT].clone(),
-            scy: io[io::SCY].clone(),
-            scx: io[io::SCX].clone(),
-            ly: io[io::LY].clone(),
-            lyc: io[io::LYC].clone(),
-            wy: io[io::WY].clone(),
-            wx: io[io::WX].clone(),
+            lcdc: io.clone_pointer(io::MMIO::LCDC),
+            stat: io.clone_pointer(io::MMIO::STAT),
+            scy: io.clone_pointer(io::MMIO::SCY),
+            scx: io.clone_pointer(io::MMIO::SCX),
+            ly: io.clone_pointer(io::MMIO::LY),
+            lyc: io.clone_pointer(io::MMIO::LYC),
+            wy: io.clone_pointer(io::MMIO::WY),
+            wx: io.clone_pointer(io::MMIO::WX),
 
             graphics,
             proxy,
@@ -122,23 +122,21 @@ impl PPU {
 
                     // Begin rendering at 
                     for screen_x in 0..SCREEN_WIDTH {
-                        let lcdc = self.lcdc.get();
+                        let lcdc = self.lcdc.deserialize::<RegLcdc>();
                         // Only render if LCD is enabled (LCDC bit 7)
-                        // if lcdc.bit(7) {
-                        //     let bg_map_address = if lcdc.bit(3) {0x9C00} else {0x9800}; 
-                        //     let win_map_address = if lcdc.bit(6) {0x9C00} else {0x9800};
+                        if lcdc.ppu_enabled {
+                            let bg_map_address = if lcdc.bg_map_index == 0 {0x9800} else {0x9C00};
+                            let win_map_address = if lcdc.win_map_index == 0 {0x9800} else {0x9C00};
 
-                        //     let map_x = u8::wrapping_add(screen_x, self.scx.get());
-                        //     let tile_x = map_x / 8;
-                        //     let map_y = u8::wrapping_add(self.ly.get(), self.scy.get());
-                        //     let tile_y = map_y / 8;
-                        //     let tile_map_address = bg_map_address + tile_x + (tile_y * 0x10);
-                        //     let tile_data_index = self.vram.borrow().unbound_read_u8(tile_map_address, 0);
-                        //     let tile_attributes = self.vram.borrow().unbound_read_u8(tile_map_address, 1);
-                        //     let tile_data = self.vram.borrow().unbound_read_u8(address, bank);
-                            
-                        //     starting_bit_mask = starting_bit_mask.rotate_right(1);
-                        // }
+                            let map_x = u8::wrapping_add(screen_x, self.scx.get());
+                            let map_y = u8::wrapping_add(self.ly.get(), self.scy.get());
+                            let map_index_x = (map_x / 8) as u16;
+                            let map_index_y = (map_y / 8) as u16;
+                            let data_pointer_address = bg_map_address + map_index_x + (map_index_y * 0x10);
+
+                            let data_index = self.vram.borrow().unbound_read_u8(data_pointer_address, 0);
+                            let tile_attributes = self.vram.borrow().unbound_read_u8(data_pointer_address, 1); //TODO: Disable on DMG
+                        }
 
                         co.yield_(()).await;
                     }

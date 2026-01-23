@@ -1,17 +1,21 @@
-use std::{cell::Cell, ops::{RangeInclusive, Shl}, rc::Rc};
+use std::{cell::Cell, marker::PhantomData, ops::{RangeInclusive, Shl}, rc::Rc};
 
-use funty::Integral;
+use funty::Unsigned;
 
 // TODO: Move GB specific behavior out
 
+/// A type representing an unsigned collection of bits with read/write masks.
+/// Generic type `U` represents the unsigned primitive type, and generic type
+/// `I` is the type of a `DeserializedRegister<U>` into which this `MaskedBitSet`
+/// may be deserialized into.
 pub struct MaskedBitSet<T> {
     value: Cell<T>,
     read_mask: Cell<T>,
     write_mask: Cell<T>,
-    write_fn: fn(&MaskedBitSet<T>, val: T)
+    write_fn: fn(&MaskedBitSet<T>, val: T),
 }
 
-impl<T> MaskedBitSet<T> where T: Integral {
+impl<T> MaskedBitSet<T> where T: Unsigned {
     pub fn new(value: T, read_mask: T, write_mask: T, reg_type: WriteBehavior) -> Rc<MaskedBitSet<T>> {
         let write_fn = match reg_type {
             WriteBehavior::Standard => MaskedBitSet::write_standard,
@@ -19,7 +23,12 @@ impl<T> MaskedBitSet<T> where T: Integral {
             WriteBehavior::UnmapBootRom => MaskedBitSet::write_boot,
         };
 
-        Rc::new(MaskedBitSet { value: Cell::new(value), read_mask: Cell::new(read_mask), write_mask: Cell::new(write_mask), write_fn})
+        Rc::new(MaskedBitSet { 
+            value: Cell::new(value), 
+            read_mask: Cell::new(read_mask), 
+            write_mask: Cell::new(write_mask), 
+            write_fn,
+        })
     }
 
     pub fn new_unimplemented() -> Rc<MaskedBitSet<T>> {
@@ -67,10 +76,29 @@ impl<T> MaskedBitSet<T> where T: Integral {
         self.read_mask.set(read_mask);
         self.write_mask.set(write_mask);
     }
+
+    /// Deserializes this register's value into
+    /// an instance of its associated struct.
+    pub fn deserialize<D>(&self) -> D where D: DeserializedRegister<T> {
+        D::deserialize(self.get())
+    }
 }
 
 pub enum WriteBehavior {
     Standard,
     ResetOnWrite,
     UnmapBootRom
+}
+
+/// A dummy struct used to represent a `MaskedBitSet`
+/// that does not deserialize to any meaningful data.
+pub struct UnimplementedBitSet {}
+impl<T> DeserializedRegister<T> for UnimplementedBitSet where T: Unsigned {
+    fn deserialize(_value: T) -> Self {
+        UnimplementedBitSet {}
+    }
+}
+
+pub trait DeserializedRegister<T: Sized> {
+    fn deserialize(value: T) -> Self where Self: Sized;
 }

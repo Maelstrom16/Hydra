@@ -10,7 +10,7 @@ use crate::{
         cpu::opcode::{CondOperand, IntOperand},
         memory::{
             self, Memory, TITLE_ADDRESS,
-            io::{self, IOMap, GBReg},
+            io::{self, GBReg, IOMap, deserialized::RegIe},
         },
     },
     gen_all,
@@ -74,7 +74,7 @@ impl CPU {
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
         const ir: u8 = 0x00;
-        let ie: Rc<GBReg> = io[io::IE].clone();
+        let ie = io.clone_pointer(io::MMIO::IE);
         const ime: bool = false;
         const ime_queued: bool = false;
         match model {

@@ -4,25 +4,25 @@ pub struct OAM {
     inner: [u8; 0x100],
 }
 
-pub const ADDRESS_OFFSET: usize = 0xFE00;
+pub const ADDRESS_OFFSET: u16 = 0xFE00;
 
 impl OAM {
     pub fn new() -> Self {
         OAM { inner: [0; 0x100] }
     }
 
-    pub fn read(&self, address: usize) -> Result<u8, HydraIOError> {
-        Ok(self.inner[address])
+    pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        Ok(self.inner[address as usize])
     }
 
-    pub fn write(&mut self, address: usize, value: u8) -> Result<(), HydraIOError> {
-        Ok(self.inner[address] = value)
+    pub fn write(&mut self, address: u16, value: u8) -> Result<(), HydraIOError> {
+        Ok(self.inner[address as usize] = value)
     }
 
-    fn corruption(&mut self, line: usize) {
-        // TODO: implement
+    /// TODO: implement
+    fn corruption(&mut self, line: u16) {
         // Corrupt first value in line
-        let index = line - ADDRESS_OFFSET;
+        let index = (line - ADDRESS_OFFSET) as usize;
         let a = self.inner[index]; // Current first value
         let b = self.inner[index - 0x8]; // First value from preceding line
         let c = self.inner[index - 0x6]; // Third value from preceding line
