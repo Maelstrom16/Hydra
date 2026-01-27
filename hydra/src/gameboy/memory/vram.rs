@@ -11,16 +11,16 @@ pub const ADDRESS_OFFSET: u16 = 0x8000;
 
 pub struct Vram {
     vram: Box<[[u8; 0x2000]]>,
-    vbk: Rc<GBReg>,
-    stat: Rc<GBReg>,
+    vbk: RegVbk,
+    stat: RegStat,
 }
 
 impl Vram {
     pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Vram {
             vram: Box::new([[0; 0x2000]; 1]),
-            vbk: io.clone_pointer(io::MMIO::VBK),
-            stat: io.clone_pointer(io::MMIO::STAT),
+            vbk: RegVbk::wrap(io.clone_pointer(io::MMIO::VBK)),
+            stat: RegStat::wrap(io.clone_pointer(io::MMIO::STAT)),
         };
         result.change_model(model);
 
@@ -57,7 +57,7 @@ impl Vram {
 
     fn is_accessible(&self) -> bool {
         // VRAM is inaccessible during PPU mode 3
-        (self.stat.get() & 0b00000011) != 3
+        self.stat.get_ppu_mode() != 3
     }
 
     fn is_monochrome(&self) -> bool {
@@ -73,7 +73,7 @@ impl Vram {
     }
 
     fn get_bank_id(&self) -> u8 {
-        if self.is_monochrome() {0} else {self.vbk.get() & 0b00000001}
+        if self.is_monochrome() {0} else {self.vbk.get_vbk()}
     }
 
     const fn localize_address(address: u16) -> usize {

@@ -8,5 +8,6 @@ proc-macro = true
 
 [dependencies]
 funty = "2.0.0"
+proc-macro2 = "1.0.106"
 quote = "1.0.42"
 syn = "2.0.113"

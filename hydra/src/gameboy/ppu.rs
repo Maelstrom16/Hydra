@@ -4,7 +4,6 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::{Arc, RwLock},
-    time::Instant,
 };
 
 use genawaiter::stack::Co;
@@ -12,8 +11,8 @@ use rand::Rng;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
-    common::bit::MaskedBitSet, gameboy::{
-        memory::{Memory, io::{self, GBReg, deserialized::{RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
+    gameboy::{
+        memory::{Memory, io::{self, deserialized::{RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
@@ -24,14 +23,14 @@ pub struct PPU {
     screen_buffer: Box<[u8]>,
 
     vram: Rc<RefCell<Vram>>,
-    lcdc: Rc<GBReg>,
-    stat: Rc<GBReg>,
-    scy: Rc<GBReg>,
-    scx: Rc<GBReg>,
-    ly: Rc<GBReg>,
-    lyc: Rc<GBReg>,
-    wy: Rc<GBReg>,
-    wx: Rc<GBReg>,
+    lcdc: RegLcdc,
+    stat: RegStat,
+    scy: RegScy,
+    scx: RegScx,
+    ly: RegLy,
+    lyc: RegLyc,
+    wy: RegWy,
+    wx: RegWx,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -61,14 +60,14 @@ impl PPU {
             screen_buffer,
 
             vram: memguard.get_vram(),
-            lcdc: io.clone_pointer(io::MMIO::LCDC),
-            stat: io.clone_pointer(io::MMIO::STAT),
-            scy: io.clone_pointer(io::MMIO::SCY),
-            scx: io.clone_pointer(io::MMIO::SCX),
-            ly: io.clone_pointer(io::MMIO::LY),
-            lyc: io.clone_pointer(io::MMIO::LYC),
-            wy: io.clone_pointer(io::MMIO::WY),
-            wx: io.clone_pointer(io::MMIO::WX),
+            lcdc: RegLcdc::wrap(io.clone_pointer(io::MMIO::LCDC)),
+            stat: RegStat::wrap(io.clone_pointer(io::MMIO::STAT)),
+            scy: RegScy::wrap(io.clone_pointer(io::MMIO::SCY)),
+            scx: RegScx::wrap(io.clone_pointer(io::MMIO::SCX)),
+            ly: RegLy::wrap(io.clone_pointer(io::MMIO::LY)),
+            lyc: RegLyc::wrap(io.clone_pointer(io::MMIO::LYC)),
+            wy: RegWy::wrap(io.clone_pointer(io::MMIO::WY)),
+            wx: RegWx::wrap(io.clone_pointer(io::MMIO::WX)),
 
             graphics,
             proxy,
@@ -122,11 +121,10 @@ impl PPU {
 
                     // Begin rendering at 
                     for screen_x in 0..SCREEN_WIDTH {
-                        let lcdc = self.lcdc.deserialize::<RegLcdc>();
                         // Only render if LCD is enabled (LCDC bit 7)
-                        if lcdc.ppu_enabled {
-                            let bg_map_address = if lcdc.bg_map_index == 0 {0x9800} else {0x9C00};
-                            let win_map_address = if lcdc.win_map_index == 0 {0x9800} else {0x9C00};
+                        if self.lcdc.get_ppu_enabled() {
+                            let bg_map_address = if self.lcdc.get_bg_map_index() == 0 {0x9800} else {0x9C00};
+                            let win_map_address = if self.lcdc.get_win_map_index() == 0 {0x9800} else {0x9C00};
 
                             let map_x = u8::wrapping_add(screen_x, self.scx.get());
                             let map_y = u8::wrapping_add(self.ly.get(), self.scy.get());

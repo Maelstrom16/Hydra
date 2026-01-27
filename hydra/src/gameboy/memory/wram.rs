@@ -1,19 +1,19 @@
 use std::rc::Rc;
 
-use crate::gameboy::{Model, memory::io::{self, GBReg, IOMap, deserialized::RegSvbk}};
+use crate::gameboy::{Model, memory::io::{self, IOMap, deserialized::RegSvbk}};
 
 pub const ADDRESS_OFFSET: u16 = 0xC000;
 
 pub struct Wram {
     wram: Box<[[u8; 0x1000]]>,
-    wbk: Rc<GBReg>,
+    wbk: RegSvbk,
 }
 
 impl Wram {
     pub fn new(model: Model, io: &IOMap) -> Self {
         let mut result = Wram {
             wram: Box::new([[0; 0x1000]; 2]),
-            wbk: io.clone_pointer(io::MMIO::SVBK)
+            wbk: RegSvbk::wrap(io.clone_pointer(io::MMIO::SVBK))
         };
         result.change_model(model);
 
@@ -55,7 +55,7 @@ impl Wram {
     fn get_bank_id(&self, address: usize) -> u8 {
         match address {
             0..0x1000 => 0,
-            _ => if self.is_monochrome() {1} else {(self.wbk.get() & 0b00000111).max(1)}
+            _ => if self.is_monochrome() {1} else {self.wbk.get_svbk().max(1)}
         }
     }
 

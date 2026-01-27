@@ -1,4 +1,4 @@
-use std::{cell::Cell, marker::PhantomData, ops::{RangeInclusive, Shl}, rc::Rc};
+use std::{cell::Cell, marker::PhantomData, ops::{Deref, RangeInclusive, Shl}, rc::Rc};
 
 use funty::Unsigned;
 
@@ -76,12 +76,6 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
         self.read_mask.set(read_mask);
         self.write_mask.set(write_mask);
     }
-
-    /// Deserializes this register's value into
-    /// an instance of its associated struct.
-    pub fn deserialize<D>(&self) -> D where D: DeserializedRegister<T> {
-        D::deserialize(self.get())
-    }
 }
 
 pub enum WriteBehavior {
@@ -93,12 +87,12 @@ pub enum WriteBehavior {
 /// A dummy struct used to represent a `MaskedBitSet`
 /// that does not deserialize to any meaningful data.
 pub struct UnimplementedBitSet {}
-impl<T> DeserializedRegister<T> for UnimplementedBitSet where T: Unsigned {
+impl<T> FieldMap<T> for UnimplementedBitSet where T: Unsigned {
     fn deserialize(_value: T) -> Self {
         UnimplementedBitSet {}
     }
 }
 
-pub trait DeserializedRegister<T: Sized> {
+pub trait FieldMap<T: Sized> {
     fn deserialize(value: T) -> Self where Self: Sized;
 }
