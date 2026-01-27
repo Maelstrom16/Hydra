@@ -73,7 +73,7 @@ impl Vram {
     }
 
     fn get_bank_id(&self) -> u8 {
-        if self.is_monochrome() {0} else {self.vbk.get_vbk()}
+        if self.is_monochrome() {0} else {self.vbk.get()}
     }
 
     const fn localize_address(address: u16) -> usize {

@@ -4,7 +4,7 @@ use funty::Integral;
 use proc_macro::*;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{ToTokens, quote};
-use syn::{Error, Expr, Fields, Ident, ItemEnum, ItemImpl, ItemStruct, LitInt, Type, parse_macro_input, parse_quote, parse_str};
+use syn::{Error, Expr, ExprLit, Fields, Ident, ItemEnum, ItemImpl, ItemStruct, Lit, RangeLimits, Type, parse_macro_input, parse_quote, parse_str,};
 
 /// Attribute for structs which can be deserialized from an int register.
 #[proc_macro_attribute]
@@ -45,20 +45,43 @@ pub fn field_map(attr: TokenStream, item: TokenStream) -> TokenStream {
 fn field_map_impl_helper<RegT>(item_struct: &ItemStruct) -> Result<ItemImpl, Error> where RegT: Integral + ToTokens, <RegT as FromStr>::Err: Display{
     let mut final_output = TokenStream2::new();
 
-    let mut cumulative_width: RegT = RegT::ZERO;
+    let mut cumulative_width = 0;
     for field in item_struct.fields.iter().rev() {
-        let width = field.attrs.iter()
-            .find(|attr| attr.path().is_ident("width"))
-            .ok_or(Error::new_spanned(&field, "no `#[width(N)]` attribute found"))
-            .and_then(|attr| attr.parse_args::<LitInt>())
-            .and_then(|lit_int| lit_int.base10_parse::<RegT>())?;
+        let attr_arg = field.attrs.iter()
+            .find(|attr| attr.path().is_ident("range"))
+            .ok_or(Error::new_spanned(&field, "no `#[range(R)]` attribute found"))
+            .and_then(|attr| attr.parse_args::<Expr>())?;
+        let (range_start, range_end) = match attr_arg {
+            Expr::Lit(ExprLit { lit: Lit::Int(lit_int) , ..}) => {
+                let int = lit_int.base10_parse::<u32>()?;
+                (int, int)
+            }
+            Expr::Range(range) => {
+                let parse_fn = |expr: &Box<Expr>| match **expr {
+                    Expr::Lit(ExprLit { lit: Lit::Int(ref int), .. }) => int.base10_parse::<u32>(),
+                    _ => Err(Error::new_spanned(&expr, "invalid expression\nrange bounds must be integer literals"))};
+
+                let start = range.start.as_ref().map_or(Ok(RegT::BITS - 1), parse_fn)?;
+                let end = range.end.as_ref().map_or(Ok(0), |expr| parse_fn(expr)
+                    .map(|num| if let RangeLimits::HalfOpen(_) = range.limits {num + 1} else {num} ))?;
+
+                if start < end {
+                    return Err(Error::new_spanned(&range, "start bound must be higher than end bound\nbounds correspond to bit indices"));
+                }
+
+                (start, end)
+            }
+            _ => return Err(Error::new_spanned(&attr_arg, "invalid expression\nrange bounds must be integer literals"))
+        };
+            
+        let width = (range_start - range_end) + 1;
         cumulative_width += width;
 
         let reg_ty = parse_str::<Type>(std::any::type_name::<RegT>()).unwrap();
         let field_ty = &field.ty;
         let (get_expr, set_expr): (Expr, Expr) = match field_ty {
             Type::Path(path) => {
-                let bitmask = RegT::ONE.checked_shl(width.as_u32()).unwrap_or(RegT::ZERO).wrapping_sub(RegT::ONE);
+                let bitmask = RegT::ONE.checked_shl(width).unwrap_or(RegT::ZERO).wrapping_sub(RegT::ONE);
                 let shift_width = cumulative_width - width;
                 let (bool_ineq, bool_cast) = if path.path.is_ident("bool") {
                     (quote! {!= 0}, quote! {as #reg_ty})
@@ -71,7 +94,6 @@ fn field_map_impl_helper<RegT>(item_struct: &ItemStruct) -> Result<ItemImpl, Err
                     parse_quote! {self.inner.set((self.inner.get() & !(#bitmask << #shift_width)) | ((val #bool_cast & #bitmask) << #shift_width))}
                 )
             }
-            Type::Never(_) => continue, // No further processing required for padding
             _ => return Err(Error::new_spanned(field_ty, "unsupported type"))
         };
         

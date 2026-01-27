@@ -55,7 +55,7 @@ impl Wram {
     fn get_bank_id(&self, address: usize) -> u8 {
         match address {
             0..0x1000 => 0,
-            _ => if self.is_monochrome() {1} else {self.wbk.get_svbk().max(1)}
+            _ => if self.is_monochrome() {1} else {self.wbk.get().max(1)}
         }
     }
 

@@ -2,268 +2,264 @@ use hydra_macros::field_map;
 
 #[field_map(u8)]
 pub struct RegP1 {
-    #[width(2)] _padding: !,
-    #[width(1)] polling_buttons: bool,
-    #[width(1)] polling_dpad: bool,
-    #[width(1)] start_or_down: bool,
-    #[width(1)] select_or_up: bool,
-    #[width(1)] b_or_left: bool,
-    #[width(1)] a_or_right: bool,
+    #[range(5)] polling_buttons: bool,
+    #[range(4)] polling_dpad: bool,
+    #[range(3)] start_or_down: bool,
+    #[range(2)] select_or_up: bool,
+    #[range(1)] b_or_left: bool,
+    #[range(0)] a_or_right: bool,
 }
 
 // TODO: Define layouts for stubs
 #[field_map(u8)]
-pub struct RegSb { #[width(8)] _stub: ! }
+pub struct RegSb { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegSc { #[width(8)] _stub: ! }
+pub struct RegSc { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegDiv { #[width(8)] _stub: ! }
+pub struct RegDiv { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegTima { #[width(8)] _stub: ! }
+pub struct RegTima { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegTma { #[width(8)] _stub: ! }
+pub struct RegTma { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegTac { #[width(8)] _stub: ! }
+pub struct RegTac { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegIf { #[width(8)] _stub: ! }
+pub struct RegIf { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr10 { #[width(8)] _stub: ! }
+pub struct RegNr10 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr11 { #[width(8)] _stub: ! }
+pub struct RegNr11 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr12 { #[width(8)] _stub: ! }
+pub struct RegNr12 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr13 { #[width(8)] _stub: ! }
+pub struct RegNr13 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr14 { #[width(8)] _stub: ! }
+pub struct RegNr14 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr21 { #[width(8)] _stub: ! }
+pub struct RegNr21 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr22 { #[width(8)] _stub: ! }
+pub struct RegNr22 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr23 { #[width(8)] _stub: ! }
+pub struct RegNr23 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr24 { #[width(8)] _stub: ! }
+pub struct RegNr24 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr30 { #[width(8)] _stub: ! }
+pub struct RegNr30 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr31 { #[width(8)] _stub: ! }
+pub struct RegNr31 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr32 { #[width(8)] _stub: ! }
+pub struct RegNr32 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr33 { #[width(8)] _stub: ! }
+pub struct RegNr33 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr34 { #[width(8)] _stub: ! }
+pub struct RegNr34 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr41 { #[width(8)] _stub: ! }
+pub struct RegNr41 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr42 { #[width(8)] _stub: ! }
+pub struct RegNr42 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr43 { #[width(8)] _stub: ! }
+pub struct RegNr43 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr44 { #[width(8)] _stub: ! }
+pub struct RegNr44 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr50 { #[width(8)] _stub: ! }
+pub struct RegNr50 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr51 { #[width(8)] _stub: ! }
+pub struct RegNr51 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegNr52 { #[width(8)] _stub: ! }
+pub struct RegNr52 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav00 { #[width(8)] _stub: ! }
+pub struct RegWav00 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav01 { #[width(8)] _stub: ! }
+pub struct RegWav01 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav02 { #[width(8)] _stub: ! }
+pub struct RegWav02 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav03 { #[width(8)] _stub: ! }
+pub struct RegWav03 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav04 { #[width(8)] _stub: ! }
+pub struct RegWav04 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav05 { #[width(8)] _stub: ! }
+pub struct RegWav05 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav06 { #[width(8)] _stub: ! }
+pub struct RegWav06 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav07 { #[width(8)] _stub: ! }
+pub struct RegWav07 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav08 { #[width(8)] _stub: ! }
+pub struct RegWav08 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav09 { #[width(8)] _stub: ! }
+pub struct RegWav09 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav10 { #[width(8)] _stub: ! }
+pub struct RegWav10 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav11 { #[width(8)] _stub: ! }
+pub struct RegWav11 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav12 { #[width(8)] _stub: ! }
+pub struct RegWav12 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav13 { #[width(8)] _stub: ! }
+pub struct RegWav13 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav14 { #[width(8)] _stub: ! }
+pub struct RegWav14 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWav15 { #[width(8)] _stub: ! }
+pub struct RegWav15 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
 pub struct RegLcdc {
-    #[width(1)] ppu_enabled: bool,
-    #[width(1)] win_map_index: u8,
-    #[width(1)] win_enabled: bool,
-    #[width(1)] tile_data_index: u8,
-    #[width(1)] bg_map_index: u8,
-    #[width(1)] obj_size: u8,
-    #[width(1)] obj_enabled: bool,
-    #[width(1)] tile_enabled_priority: bool,
+    #[range(7)] ppu_enabled: bool,
+    #[range(6)] win_map_index: u8,
+    #[range(5)] win_enabled: bool,
+    #[range(4)] tile_data_index: u8,
+    #[range(3)] bg_map_index: u8,
+    #[range(2)] obj_size: u8,
+    #[range(1)] obj_enabled: bool,
+    #[range(0)] tile_enabled_priority: bool,
 }
 
 #[field_map(u8)]
 pub struct RegStat { 
-    #[width(1)] _padding: !,
-    #[width(1)] lyc_int: bool,
-    #[width(1)] mode_2_int: bool,
-    #[width(1)] mode_1_int: bool,
-    #[width(1)] mode_0_int: bool,
-    #[width(1)] ly_equals_lyc: bool,
-    #[width(2)] ppu_mode: u8,
+    #[range(6)] lyc_int: bool,
+    #[range(5)] mode_2_int: bool,
+    #[range(4)] mode_1_int: bool,
+    #[range(3)] mode_0_int: bool,
+    #[range(2)] ly_equals_lyc: bool,
+    #[range(1..=0)] ppu_mode: u8,
 }
 
 #[field_map(u8)]
 pub struct RegScy { 
-    #[width(8)] scy: u8
+    #[range(..)] scy: u8
 }
 
 #[field_map(u8)]
 pub struct RegScx { 
-    #[width(8)] scx: u8
+    #[range(..)] scx: u8
 }
 
 #[field_map(u8)]
 pub struct RegLy { 
-    #[width(8)] ly: u8
+    #[range(..)] ly: u8
 }
 
 #[field_map(u8)]
 pub struct RegLyc { 
-    #[width(8)] lyc: u8
+    #[range(..)] lyc: u8
 }
 
 #[field_map(u8)]
-pub struct RegDma { #[width(8)] _stub: ! }
+pub struct RegDma { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegBgp { #[width(8)] _stub: ! }
+pub struct RegBgp { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegObp0 { #[width(8)] _stub: ! }
+pub struct RegObp0 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegObp1 { #[width(8)] _stub: ! }
+pub struct RegObp1 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWy { #[width(8)] _stub: ! }
+pub struct RegWy { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegWx { #[width(8)] _stub: ! }
+pub struct RegWx { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegKey0 { #[width(8)] _stub: ! }
+pub struct RegKey0 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegKey1 { #[width(8)] _stub: ! }
+pub struct RegKey1 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
 pub struct RegVbk { 
-    #[width(7)] _padding: !,
-    #[width(1)] vbk: u8
+    #[range(0)] vbk: u8
 }
 
 #[field_map(u8)]
-pub struct RegBoot { #[width(8)] _stub: ! }
+pub struct RegBoot { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegHdma1 { #[width(8)] _stub: ! }
+pub struct RegHdma1 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegHdma2 { #[width(8)] _stub: ! }
+pub struct RegHdma2 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegHdma3 { #[width(8)] _stub: ! }
+pub struct RegHdma3 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegHdma4 { #[width(8)] _stub: ! }
+pub struct RegHdma4 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegHdma5 { #[width(8)] _stub: ! }
+pub struct RegHdma5 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegRp { #[width(8)] _stub: ! }
+pub struct RegRp { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegBcps { #[width(8)] _stub: ! }
+pub struct RegBcps { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegBcpd { #[width(8)] _stub: ! }
+pub struct RegBcpd { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegOcps { #[width(8)] _stub: ! }
+pub struct RegOcps { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegOcpd { #[width(8)] _stub: ! }
+pub struct RegOcpd { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegOpri { #[width(8)] _stub: ! }
+pub struct RegOpri { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
 pub struct RegSvbk { 
-    #[width(5)] _padding: !,
-    #[width(3)] svbk: u8
+    #[range(2..=0)] svbk: u8
 }
 
 #[field_map(u8)]
-pub struct RegPcm12 { #[width(8)] _stub: ! }
+pub struct RegPcm12 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegPcm34 { #[width(8)] _stub: ! }
+pub struct RegPcm34 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegIe { #[width(8)] _stub: ! }
+pub struct RegIe { #[range(..)] _stub: u8 }
