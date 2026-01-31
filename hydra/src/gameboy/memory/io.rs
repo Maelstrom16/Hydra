@@ -264,11 +264,11 @@ impl IOMap {
 
 impl IOMap {
     pub fn read(&self, address: u16) -> u8 {
-        self.registers[address as usize].read()
+        self.registers[Self::localize_address(address)].read()
     }
 
     pub fn write(&mut self, value: u8, address: u16) {
-        self.registers[address as usize].write(value)
+        self.registers[Self::localize_address(address)].write(value)
     }
 
     pub fn clone_pointer(&self, mmio: MMIO) -> Rc<GBReg> {
