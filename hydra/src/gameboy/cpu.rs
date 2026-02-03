@@ -213,7 +213,7 @@ impl CPU {
                     self.ime.set(false);
                     self.r#if.set_entire(self.r#if.get_entire() ^ bitmask);
                     let jump_addr = (shift_width * 0x8) + 0x40;
-                    gen_all!(&co, |co_inner| self.call(&memory, co_inner, CondOperand::Unconditional, ConstOperand16(jump_addr)));
+                    gen_all!(&co, |co_inner| self.call(&memory, co_inner, CondOperand::Unconditional, ConstOperand16(jump_addr))); // TODO: Verify cycle accuracy
                     break;
                 }
             }
