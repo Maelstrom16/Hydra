@@ -163,7 +163,6 @@ pub fn trijective_mmio(item: TokenStream) -> TokenStream {
 
     // Initialize a few more necessary variables
     let variant_count = item_enum.variants.iter().count();
-    let global_panic = format!("global address does not correspond to any {} variant", item_enum_string);
     let local_panic = format!("local address is out of bounds for {}", item_enum_string);
 
     // Final output
@@ -183,10 +182,10 @@ pub fn trijective_mmio(item: TokenStream) -> TokenStream {
                 }
             }
 
-            pub const fn from_global(global: #repr_type) -> Self {
+            pub const fn from_global(global: #repr_type) -> Option<Self> {
                 match global {
-                    #(#discriminants => Self::#variants,)*
-                    invalid => panic!(#global_panic)
+                    #(#discriminants => Some(Self::#variants),)*
+                    invalid => None
                 }
             }
 
@@ -197,10 +196,10 @@ pub fn trijective_mmio(item: TokenStream) -> TokenStream {
                 }
             }
 
-            pub const fn global_to_local(global: #repr_type) -> usize {
+            pub const fn global_to_local(global: #repr_type) -> Option<usize> {
                 match global {
-                    #(#discriminants => #indices,)*
-                    invalid => panic!(#global_panic)
+                    #(#discriminants => Some(#indices),)*
+                    invalid => None
                 }
             }
 

@@ -4,7 +4,7 @@ use std::{array, rc::Rc};
 
 use hydra_macros::TrijectiveMMIO;
 
-use crate::{common::bit::{MaskedBitSet, WriteBehavior}, gameboy::{GBRevision, Model}};
+use crate::{common::{bit::{MaskedBitSet, WriteBehavior}, errors::HydraIOError}, gameboy::{GBRevision, Model}};
 
 pub const ADDRESS_OFFSET: u16 = 0xFF00;
 
@@ -263,19 +263,22 @@ impl IOMap {
 }
 
 impl IOMap {
-    pub fn read(&self, address: u16) -> u8 {
-        self.registers[Self::localize_address(address)].read()
+    pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        Ok(self.registers[Self::localize_address(address)?].read())
     }
 
-    pub fn write(&mut self, value: u8, address: u16) {
-        self.registers[Self::localize_address(address)].write(value)
+    pub fn write(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
+        Ok(self.registers[Self::localize_address(address)?].write(value))
     }
 
     pub fn clone_pointer(&self, mmio: MMIO) -> Rc<GBReg> {
         self.registers[mmio.to_local()].clone()
     }
 
-    const fn localize_address(address: u16) -> usize {
-        MMIO::global_to_local(address)
+    const fn localize_address(address: u16) -> Result<usize, HydraIOError> {
+        match MMIO::global_to_local(address) {
+            Some(addr) => Ok(addr),
+            None => Err(HydraIOError::OpenBusAccess)
+        }
     }
 }

@@ -22,7 +22,7 @@ impl fmt::Display for HydraIOError {
             HydraIOError::InvalidInstruction(value, address) => write!(f, "Attempted to execute invalid instruction {} at address {}", value, address),
             HydraIOError::MalformedROM(details) => write!(f, "Malformed ROM file: {}", details),
             HydraIOError::OpenBusAccess => {
-                write!(f, "Attempted to read from an unmapped memory block")
+                write!(f, "Attempted to access an unmapped memory block")
             }
 
             HydraIOError::IOError(error) => write!(f, "{}", error),

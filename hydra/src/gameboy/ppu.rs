@@ -133,7 +133,7 @@ impl PPU {
                             let data_pointer_address = bg_map_address + map_index_x + (map_index_y * 0x10);
 
                             let data_index = self.vram.borrow().unbound_read_u8(data_pointer_address, 0);
-                            let tile_attributes = self.vram.borrow().unbound_read_u8(data_pointer_address, 1); //TODO: Disable on DMG
+                            // let tile_attributes = self.vram.borrow().unbound_read_u8(data_pointer_address, 1); //TODO: Disable on DMG
                         }
 
                         co.yield_(()).await;
