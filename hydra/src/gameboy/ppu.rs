@@ -154,28 +154,15 @@ impl PPU {
                                 self.vram.borrow().unbound_read_u8(byte_address + 1, 0)]; //TODO: Switch bank based on attributes
 
                             let tile_x = map_x % 8;
-                            let color_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
-                            let color = color_bits[1] << 1 
-                                          | color_bits[0];
+                            let color_index_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
+                            let color_index = color_index_bits[1] << 1 
+                                          | color_index_bits[0];
 
-                            let color = match color {
-                                0b00 => self.bgp.get_color0(),
-                                0b01 => self.bgp.get_color1(),
-                                0b10 => self.bgp.get_color2(),
-                                0b11 => self.bgp.get_color3(),
-                                _ => panic!("Invalid color")
-                            };
-
-                            let color = match color {
-                                0b00 => [255, 255, 255, 255],
-                                0b01 => [170, 170, 170, 255],
-                                0b10 => [85, 85, 85, 255],
-                                0b11 => [0, 0, 0, 255],
-                                _ => panic!("Invalid color")
-                            };
+                            // TODO: allow colors to be configured by user
+                            let color = self.bgp.get_color(color_index);
 
                             let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
-                            self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color.as_slice());
+                            self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color);
                         }
 
                         co.yield_(()).await;

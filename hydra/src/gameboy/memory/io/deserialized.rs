@@ -196,6 +196,27 @@ pub struct RegBgp {
     #[range(1..=0)] color0: u8,
 }
 
+impl RegBgp {
+    pub fn get_color(&self, index: u8) -> &'static [u8] {
+        let new_index = match index {
+            0 => self.get_color0(),
+            1 => self.get_color1(),
+            2 => self.get_color2(),
+            3 => self.get_color3(),
+            _ => panic!("Invalid color index {} requested from BGP register", index)
+        };
+
+        // TODO: allow colors to be configured by user
+        match new_index {
+            0 => &[255, 255, 255, 255],
+            1 => &[170, 170, 170, 255],
+            2 => &[85, 85, 85, 255],
+            3 => &[0, 0, 0, 255],
+            _ => panic!("Invalid color index {} requested from BGP register", index)
+        }
+    }
+}
+
 #[field_map(u8)]
 pub struct RegObp0 { #[range(..)] _stub: u8 }
 
