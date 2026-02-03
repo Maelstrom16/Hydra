@@ -68,7 +68,7 @@ impl Memory {
         };
         match read_result {
             Ok(value) => self.data_bus.set(value),
-            Err(HydraIOError::OpenBusAccess) => println!("Warning: Write to open bus at address {:#06X}", address),
+            Err(HydraIOError::OpenBusAccess) => println!("Warning: Read from open bus at address {:#06X}", address),
             Err(e) => panic!("Error reading from memory.\n{}", e),
         }
 

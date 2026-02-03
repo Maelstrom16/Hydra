@@ -12,14 +12,13 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        memory::{Memory, io::{self, deserialized::{RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
+        memory::{Memory, io::{self, deserialized::{RegBgp, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::{self, Vram}},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
 
 pub struct PPU {
     fifo: RenderQueue,
-    mode: Mode,
     screen_buffer: Box<[u8]>,
 
     vram: Rc<RefCell<Vram>>,
@@ -31,6 +30,7 @@ pub struct PPU {
     lyc: RegLyc,
     wy: RegWy,
     wx: RegWx,
+    bgp: RegBgp,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -47,6 +47,8 @@ pub const DOTS: u32 = 456;
 const SCANLINES: u32 = 154;
 const SCREEN_WIDTH: u8 = 160;
 const SCREEN_HEIGHT: u8 = 144;
+const MAP_WIDTH: u8 = 32;
+const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl PPU {
@@ -56,7 +58,6 @@ impl PPU {
         let io = memguard.get_io();
         let mut result = PPU {
             fifo: RenderQueue::new(),
-            mode: Mode::OAMScan,
             screen_buffer,
 
             vram: memguard.get_vram(),
@@ -68,6 +69,7 @@ impl PPU {
             lyc: RegLyc::wrap(io.clone_pointer(io::MMIO::LYC)),
             wy: RegWy::wrap(io.clone_pointer(io::MMIO::WY)),
             wx: RegWx::wrap(io.clone_pointer(io::MMIO::WX)),
+            bgp: RegBgp::wrap(io.clone_pointer(io::MMIO::BGP)),
 
             graphics,
             proxy,
@@ -90,28 +92,32 @@ impl PPU {
             let lx = (clk % DOTS) as u8;
 
             // Perform mode-specific behavior
-            match self.mode {
-                Mode::HBlank => {
+            match self.stat.get_ppu_mode() {
+                // HBlank
+                0 => {
                     if ly == SCREEN_HEIGHT {
-                        self.mode = Mode::VBlank;
+                        self.stat.set_ppu_mode(Mode::VBlank as u8);
                         self.push_to_viewport();
                     } else if lx == 0 {
-                        self.mode = Mode::OAMScan;
+                        self.stat.set_ppu_mode(Mode::OAMScan as u8);
                     }
                 }
-                Mode::VBlank => {
+                // VBlank
+                1 => {
                     if ly == 0 {
-                        self.mode = Mode::OAMScan
+                        self.stat.set_ppu_mode(Mode::OAMScan as u8);
                     }
                 }
-                Mode::OAMScan => {
+                // OAM scan
+                2 => {
                     if lx == 80 {
-                        self.mode = Mode::Render;
+                        self.stat.set_ppu_mode(Mode::Render as u8);
                     } else {
                         // TODO: Whatever OAM Scan is supposed to do
                     }
                 }
-                Mode::Render => {
+                // Render
+                3 => {
                     // Screen texture generation
 
                     // Slight delay in rendering depending on horizontal scroll
@@ -120,32 +126,65 @@ impl PPU {
                     }
 
                     // Begin rendering at 
+                    let screen_y = self.ly.get();
                     for screen_x in 0..SCREEN_WIDTH {
                         // Only render if LCD is enabled (LCDC bit 7)
                         if self.lcdc.get_ppu_enabled() {
+                            let data_low_address = if self.lcdc.get_tile_data_index() == 1 {0x8000} else {0x9000};
                             let bg_map_address = if self.lcdc.get_bg_map_index() == 0 {0x9800} else {0x9C00};
                             let win_map_address = if self.lcdc.get_win_map_index() == 0 {0x9800} else {0x9C00};
 
                             let map_x = u8::wrapping_add(screen_x, self.scx.get());
-                            let map_y = u8::wrapping_add(self.ly.get(), self.scy.get());
+                            let map_y = u8::wrapping_add(screen_y, self.scy.get());
                             let map_index_x = (map_x / 8) as u16;
                             let map_index_y = (map_y / 8) as u16;
-                            let data_pointer_address = bg_map_address + map_index_x + (map_index_y * 0x10);
+                            let data_index_address = bg_map_address + map_index_x + (map_index_y * MAP_WIDTH as u16);
 
-                            let data_index = self.vram.borrow().unbound_read_u8(data_pointer_address, 0);
-                            // let tile_attributes = self.vram.borrow().unbound_read_u8(data_pointer_address, 1); //TODO: Disable on DMG
+                            let data_index = self.vram.borrow().unbound_read_u8(data_index_address, 0);
+                            // let tile_attributes = self.vram.borrow().unbound_read_u8(data_index_address, 1); //TODO: Enable on CGB
+                            let data_address = if data_index < 0x80 {
+                                data_low_address + (data_index as u16 * 16)
+                            } else {
+                                0x8800 + ((data_index - 0x80) as u16 * 16)
+                            };
+
+                            let tile_y = map_y % 8;
+                            let byte_address = data_address + (tile_y as u16 * 2);
+                            let data = [self.vram.borrow().unbound_read_u8(byte_address, 0),
+                                self.vram.borrow().unbound_read_u8(byte_address + 1, 0)]; //TODO: Switch bank based on attributes
+
+                            let tile_x = map_x % 8;
+                            let color_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
+                            let color = color_bits[1] << 1 
+                                          | color_bits[0];
+
+                            let color = match color {
+                                0b00 => self.bgp.get_color0(),
+                                0b01 => self.bgp.get_color1(),
+                                0b10 => self.bgp.get_color2(),
+                                0b11 => self.bgp.get_color3(),
+                                _ => panic!("Invalid color")
+                            };
+
+                            let color = match color {
+                                0b00 => [255, 255, 255, 255],
+                                0b01 => [170, 170, 170, 255],
+                                0b10 => [85, 85, 85, 255],
+                                0b11 => [0, 0, 0, 255],
+                                _ => panic!("Invalid color")
+                            };
+
+                            let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
+                            self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color.as_slice());
                         }
 
                         co.yield_(()).await;
                     }
 
-                    // self.vram.borrow().unbound_read_u8(bg_map_addr, 0);
-                    // let bg_tile_addr = bg_map_addr;
-                    self.screen_buffer[rand::rng().random_range(0..BUFFER_SIZE)] = rand::rng().random_range(0..=255);
-
                     // Return to HBlank upon completion of the scanline
-                    self.mode = Mode::HBlank
+                    self.stat.set_ppu_mode(Mode::HBlank as u8);
                 }
+                _ => panic!("Invalid PPU mode")
             }
             co.yield_(()).await;
         }

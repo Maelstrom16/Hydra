@@ -189,7 +189,12 @@ pub struct RegLyc {
 pub struct RegDma { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegBgp { #[range(..)] _stub: u8 }
+pub struct RegBgp { 
+    #[range(7..=6)] color3: u8,
+    #[range(5..=4)] color2: u8,
+    #[range(3..=2)] color1: u8,
+    #[range(1..=0)] color0: u8,
+}
 
 #[field_map(u8)]
 pub struct RegObp0 { #[range(..)] _stub: u8 }
