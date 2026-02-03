@@ -44,9 +44,10 @@ pub fn field_map(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn field_map_impl_helper<RegT>(item_struct: &ItemStruct) -> Result<ItemImpl, Error> where RegT: Integral + ToTokens, <RegT as FromStr>::Err: Display{
     let mut final_output = TokenStream2::new();
+    
+    let reg_ty = parse_str::<Type>(std::any::type_name::<RegT>()).unwrap();
 
-    let mut cumulative_width = 0;
-    for field in item_struct.fields.iter().rev() {
+    for field in item_struct.fields.iter() {
         let attr_arg = field.attrs.iter()
             .find(|attr| attr.path().is_ident("range"))
             .ok_or(Error::new_spanned(&field, "no `#[range(R)]` attribute found"))
@@ -75,22 +76,21 @@ fn field_map_impl_helper<RegT>(item_struct: &ItemStruct) -> Result<ItemImpl, Err
         };
             
         let width = (range_start - range_end) + 1;
-        cumulative_width += width;
 
-        let reg_ty = parse_str::<Type>(std::any::type_name::<RegT>()).unwrap();
         let field_ty = &field.ty;
         let (get_expr, set_expr): (Expr, Expr) = match field_ty {
             Type::Path(path) => {
                 let bitmask = RegT::ONE.checked_shl(width).unwrap_or(RegT::ZERO).wrapping_sub(RegT::ONE);
-                let shift_width = cumulative_width - width;
-                let (bool_ineq, bool_cast) = if path.path.is_ident("bool") {
+                let shift_width = range_end;
+                let shifted_mask = bitmask << shift_width;
+                let (get_suffix, bool_cast) = if path.path.is_ident("bool") {
                     (quote! {!= 0}, quote! {as #reg_ty})
                 } else {
-                    (TokenStream2::new(), TokenStream2::new())
+                    (quote! {>> #shift_width}, TokenStream2::new())
                 };
 
                 (
-                    parse_quote! {(self.inner.get() >> #shift_width) & #bitmask #bool_ineq},
+                    parse_quote! {(self.inner.get() & #shifted_mask) #get_suffix},
                     parse_quote! {self.inner.set((self.inner.get() & !(#bitmask << #shift_width)) | ((val #bool_cast & #bitmask) << #shift_width))}
                 )
             }
@@ -117,6 +117,12 @@ fn field_map_impl_helper<RegT>(item_struct: &ItemStruct) -> Result<ItemImpl, Err
     let item_struct_ident = &item_struct.ident;
     Ok(parse_quote! {
         impl #item_struct_ident {
+            pub fn get_entire(&self) -> #reg_ty {
+                self.inner.get()
+            }
+            pub fn set_entire(&self, val: #reg_ty) {
+                self.inner.set(val)
+            }
             #final_output
         }
     })

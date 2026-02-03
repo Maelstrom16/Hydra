@@ -188,7 +188,7 @@ impl IntOperand<u16> for ImmediateOperand16 {
     }
 }
 
-pub struct ConstOperand16(u16);
+pub struct ConstOperand16(pub u16);
 impl IntOperand<u16> for ConstOperand16 {
     #[inline(always)]
     async fn get(&self, _: &mut CPU, _: &Rc<RefCell<Memory>>, _co: Co<'_, ()>) -> u16 {

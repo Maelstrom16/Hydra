@@ -12,7 +12,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        memory::{Memory, io::{self, deserialized::{RegBgp, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::{self, Vram}},
+        memory::{Memory, io::{self, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::{self, Vram}},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
@@ -31,6 +31,8 @@ pub struct PPU {
     wy: RegWy,
     wx: RegWx,
     bgp: RegBgp,
+
+    r#if: RegIf,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -71,6 +73,8 @@ impl PPU {
             wx: RegWx::wrap(io.clone_pointer(io::MMIO::WX)),
             bgp: RegBgp::wrap(io.clone_pointer(io::MMIO::BGP)),
 
+            r#if: RegIf::wrap(io.clone_pointer(io::MMIO::IF)),
+
             graphics,
             proxy,
         };
@@ -82,36 +86,60 @@ impl PPU {
         self.graphics.write().unwrap().resize_screen_texture(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
     }
 
+    fn set_ppu_mode(&mut self, mode: Mode) {
+        if let Mode::VBlank = mode {self.r#if.set_vblank(true)};
+        self.stat.set_ppu_mode(mode as u8);
+    }
+
+    fn update_ly(&mut self, clk: u32) -> u8 {
+        let ly = (clk / DOTS) as u8;
+        self.ly.set(ly);
+        self.stat.set_ly_equals_lyc(ly == self.lyc.get());
+
+        ly
+    }
+
+    fn stat_interrupt(&mut self) {
+        let ppu_mode = self.stat.get_ppu_mode();
+        if self.stat.get_mode_0_int() && ppu_mode == 0
+        || self.stat.get_mode_1_int() && ppu_mode == 1
+        || self.stat.get_mode_2_int() && ppu_mode == 2
+        || self.stat.get_lyc_int() && self.stat.get_ly_equals_lyc() {
+            self.r#if.set_stat(true);
+        }
+    }
+
     #[inline(always)]
     pub async fn coro(&mut self, clock: Rc<Cell<u32>>, co: Co<'_, ()>) {
         loop {
             // Update screen position
             let clk = clock.get();
-            let ly = (clk / DOTS) as u8;
-            self.ly.set(ly);
+            let ly = self.update_ly(clk);
             let lx = (clk % DOTS) as u8;
+
+            self.stat_interrupt(); // TODO: Verify when this needs to be called
 
             // Perform mode-specific behavior
             match self.stat.get_ppu_mode() {
                 // HBlank
                 0 => {
                     if ly == SCREEN_HEIGHT {
-                        self.stat.set_ppu_mode(Mode::VBlank as u8);
+                        self.set_ppu_mode(Mode::VBlank);
                         self.push_to_viewport();
                     } else if lx == 0 {
-                        self.stat.set_ppu_mode(Mode::OAMScan as u8);
+                        self.set_ppu_mode(Mode::OAMScan);
                     }
                 }
                 // VBlank
                 1 => {
                     if ly == 0 {
-                        self.stat.set_ppu_mode(Mode::OAMScan as u8);
+                        self.set_ppu_mode(Mode::OAMScan);
                     }
                 }
                 // OAM scan
                 2 => {
                     if lx == 80 {
-                        self.stat.set_ppu_mode(Mode::Render as u8);
+                        self.set_ppu_mode(Mode::Render);
                     } else {
                         // TODO: Whatever OAM Scan is supposed to do
                     }
@@ -169,7 +197,7 @@ impl PPU {
                     }
 
                     // Return to HBlank upon completion of the scanline
-                    self.stat.set_ppu_mode(Mode::HBlank as u8);
+                    self.set_ppu_mode(Mode::HBlank);
                 }
                 _ => panic!("Invalid PPU mode")
             }

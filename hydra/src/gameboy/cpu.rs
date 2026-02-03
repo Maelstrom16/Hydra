@@ -1,3 +1,4 @@
+mod ime;
 mod opcode;
 
 use std::{cell::{Cell, RefCell}, rc::Rc};
@@ -7,10 +8,10 @@ use genawaiter::stack::Co;
 use crate::{
     gameboy::{
         AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
-        cpu::opcode::{CondOperand, IntOperand},
+        cpu::{ime::Ime, opcode::{CondOperand, ConstOperand16, IntOperand}},
         memory::{
             self, Memory, TITLE_ADDRESS,
-            io::{self, GBReg, IOMap, deserialized::RegIe},
+            io::{self, GBReg, IOMap, deserialized::{RegIe, RegIf}},
         },
     },
     gen_all,
@@ -41,9 +42,9 @@ pub struct CPU {
     sp: u16,
     pc: u16,
     ir: u8,
-    ie: Rc<GBReg>,
-    ime: bool,
-    ime_queued: bool,
+    r#if: RegIf,
+    ie: RegIe,
+    ime: Ime,
 }
 
 pub enum Register8 {
@@ -74,9 +75,9 @@ impl CPU {
         const sp: u16 = 0xFFFE;
         const pc: u16 = 0x0100;
         const ir: u8 = 0x00;
-        let ie = io.clone_pointer(io::MMIO::IE);
-        const ime: bool = false;
-        const ime_queued: bool = false;
+        let r#if = RegIf::wrap(io.clone_pointer(io::MMIO::IF));
+        let ie = RegIe::wrap(io.clone_pointer(io::MMIO::IE));
+        let ime = Ime::default();
         match model {
             Model::GameBoy(Some(GBRevision::DMG0)) => {
                 af = [0b0000 << 4, 0x01];
@@ -174,9 +175,9 @@ impl CPU {
             sp,
             pc,
             ir,
+            r#if,
             ie,
             ime,
-            ime_queued,
         }
     }
 
@@ -201,8 +202,22 @@ impl CPU {
     }
 
     pub async fn coro(&mut self, memory: Rc<RefCell<Memory>>, co: Co<'_, ()>) {
-        // Fetch cycle
         loop {
+            // Handle interrupts
+            if self.ime.get() {
+                let composite = self.ie.get_entire() & self.r#if.get_entire();
+                for shift_width in 0..=4 {
+                    let bitmask = 1 << shift_width;
+                    if composite & bitmask == 0 {continue;}
+                    
+                    self.ime.set(false);
+                    self.r#if.set_entire(self.r#if.get_entire() ^ bitmask);
+                    let jump_addr = (shift_width * 0x8) + 0x40;
+                    gen_all!(&co, |co_inner| self.call(&memory, co_inner, CondOperand::Unconditional, ConstOperand16(jump_addr)));
+                }
+            }
+
+            // Fetch cycle
             // print!("{:#06X}: ", self.pc);
             self.ir = gen_all!(&co, |co_inner| self.step_u8(&memory, co_inner));
             // println!(
@@ -215,10 +230,7 @@ impl CPU {
             //     u16::from_le_bytes(self.hl),
             //     self.sp
             // );
-            if self.ime_queued {
-                self.ime = true;
-                self.ime_queued = false;
-            }
+            self.ime.refresh();
 
             // Execute cycle(s)
             gen_all!(&co, |co_inner| self.opcode_gen(&memory, co_inner));
@@ -702,17 +714,17 @@ impl CPU {
     #[inline(always)]
     async fn reti(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
         gen_all!(&co, |co_inner| self.ret(memory, co_inner, CondOperand::Unconditional));
-        self.ime = true;
+        self.ime.set(true);
     }
 
     #[inline(always)]
     async fn ei(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
-        self.ime_queued = true;
+        self.ime.queue();
     }
 
     #[inline(always)]
     async fn di(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
-        self.ime = false;
+        self.ime.set(false);
     }
 
     #[inline(always)]

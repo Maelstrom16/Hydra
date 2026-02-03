@@ -35,20 +35,21 @@ impl Vram {
         }
     }
 
+    // TODO: Reenable VRAM inaccessbility when timing is fixed
     pub fn read_u8(&self, address: u16) -> Result<u8, HydraIOError> {
-        if self.is_accessible() {
+        // if self.is_accessible() {
             Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)])
-        } else {
-            Err(HydraIOError::OpenBusAccess)
-        }
+        // } else {
+        //     Err(HydraIOError::OpenBusAccess)
+        // }
     }
 
     pub fn write_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
-        if self.is_accessible() {
+        // if self.is_accessible() {
             Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)] = value)
-        } else {
-            Err(HydraIOError::OpenBusAccess)
-        }
+        // } else {
+        //     Err(HydraIOError::OpenBusAccess)
+        // }
     }
 
     pub fn unbound_read_u8(&self, address: u16, bank: u8) -> u8 {

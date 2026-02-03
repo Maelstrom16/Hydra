@@ -30,7 +30,13 @@ pub struct RegTma { #[range(..)] _stub: u8 }
 pub struct RegTac { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegIf { #[range(..)] _stub: u8 }
+pub struct RegIf { 
+    #[range(4)] joypad: bool, 
+    #[range(3)] serial: bool, 
+    #[range(2)] timer: bool, 
+    #[range(1)] stat: bool, 
+    #[range(0)] vblank: bool, 
+}
 
 #[field_map(u8)]
 pub struct RegNr10 { #[range(..)] _stub: u8 }
@@ -288,4 +294,10 @@ pub struct RegPcm12 { #[range(..)] _stub: u8 }
 pub struct RegPcm34 { #[range(..)] _stub: u8 }
 
 #[field_map(u8)]
-pub struct RegIe { #[range(..)] _stub: u8 }
+pub struct RegIe { 
+    #[range(4)] joypad: bool, 
+    #[range(3)] serial: bool, 
+    #[range(2)] timer: bool, 
+    #[range(1)] stat: bool, 
+    #[range(0)] vblank: bool, 
+}
