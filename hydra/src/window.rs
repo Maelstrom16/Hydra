@@ -140,11 +140,10 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     }
                 }
             }
-            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => match event.state {
-                ElementState::Pressed => match event.physical_key {
-                    _ => println!("{:?}", event.physical_key),
-                },
-                ElementState::Released => {}
+            WindowEvent::KeyboardInput { device_id, event, is_synthetic } => {
+                if let Some(emu) = &self.emulator {
+                    emu.send(EmuMessage::KeyboardInput(event));
+                }
             },
             WindowEvent::Resized(_) => {
                 if let Some(graphics) = &self.graphics {

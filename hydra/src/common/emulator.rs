@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, RwLock, mpsc::Sender},
 };
 
-use winit::window::Window;
+use winit::{event::KeyEvent, window::Window};
 
 use crate::{common::errors::HydraIOError, config::Config, gameboy, graphics::Graphics, window::HydraApp};
 
@@ -23,5 +23,6 @@ pub fn init_from_file(path: &Path, app: &HydraApp) -> Result<Sender<EmuMessage>,
 pub enum EmuMessage {
     Start,
     Stop,
+    KeyboardInput(KeyEvent),
     HotSwap(&'static Path),
 }
