@@ -15,15 +15,11 @@ pub enum HydraIOError {
 impl fmt::Display for HydraIOError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            HydraIOError::InvalidEmulator(emulator, extension) => match extension {
-                Some(ext) => write!(f, "{} does not support ROM files with a .{} extension", emulator, ext),
-                None => write!(f, "{} does not support extensionless ROM files", emulator),
-            },
+            HydraIOError::InvalidEmulator(emulator, Some(extension)) => write!(f, "{} does not support ROM files with a .{} extension", emulator, extension),
+            HydraIOError::InvalidEmulator(emulator, None) => write!(f, "{} does not support extensionless ROM files", emulator),
             HydraIOError::InvalidInstruction(value, address) => write!(f, "Attempted to execute invalid instruction {} at address {}", value, address),
             HydraIOError::MalformedROM(details) => write!(f, "Malformed ROM file: {}", details),
-            HydraIOError::OpenBusAccess => {
-                write!(f, "Attempted to access an unmapped memory block")
-            }
+            HydraIOError::OpenBusAccess => write!(f, "Attempted to access an unmapped memory block"),
 
             HydraIOError::IOError(error) => write!(f, "{}", error),
             HydraIOError::DeserializationError(error) => write!(f, "{}", error),

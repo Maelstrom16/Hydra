@@ -10,8 +10,8 @@ use crate::{
         AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
         cpu::{ime::Ime, opcode::{CondOperand, ConstOperand16, IntOperand}},
         memory::{
-            self, Memory, TITLE_ADDRESS,
-            io::{self, GBReg, IOMap, deserialized::{RegIe, RegIf}},
+            self, Memory,
+            io::{self, GBReg, IOMap, deserialized::{RegIe, RegIf}}, rom::{HEADER_CHECKSUM_ADDRESS, Rom},
         },
     },
     gen_all,
@@ -67,7 +67,7 @@ pub enum Register16 {
 }
 
 impl CPU {
-    pub fn new(rom: &Box<[u8]>, io: &IOMap, model: Model) -> Self {
+    pub fn new(rom: &Rom, io: &IOMap, model: Model) -> Self {
         let af;
         let bc;
         let de;
@@ -86,13 +86,13 @@ impl CPU {
                 hl = [0x03, 0x84];
             }
             Model::GameBoy(Some(GBRevision::DMG)) => {
-                af = [if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
+                af = [if rom.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
                 bc = [0x13, 0x00];
                 de = [0xD8, 0x00];
                 hl = [0x4D, 0x01];
             }
             Model::GameBoy(Some(GBRevision::MGB)) => {
-                af = [if rom[memory::HEADER_CHECKSUM_ADDRESS] == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
+                af = [if rom.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
                 bc = [0x13, 0x00];
                 de = [0xD8, 0x00];
                 hl = [0x4D, 0x01];
@@ -112,11 +112,9 @@ impl CPU {
             Model::GameBoy(Some(GBRevision::CGBdmg)) => {
                 let mut b = 0x00;
                 let mut hl_bytes = [0x7C, 0x00];
-                if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01 || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33 && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01 {
-                    for offset in 0..16 {
-                        // If either licensee code is 0x01, B = sum of all title bytes
-                        b += rom[TITLE_ADDRESS + offset];
-                    }
+                if rom.has_publisher_rnd1() {
+                    // If either licensee code is 0x01, B = sum of all title bytes
+                    b = rom.get_title().iter().sum();
                     if b == 0x43 || b == 0x58 {
                         // And, check special cases for HL
                         hl_bytes = [0x1A, 0x99];
@@ -131,11 +129,9 @@ impl CPU {
                 let mut b = 0x01;
                 let mut hl_bytes = [0x7C, 0x00];
                 let mut f = 0b00000000;
-                if rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x01 || rom[memory::OLD_LICENSEE_CODE_ADDRESS] == 0x33 && rom[memory::NEW_LICENSEE_CODE_ADDRESS] == 0x01 {
-                    for offset in 0..16 {
-                        // If either licensee code is 0x01, B = sum of all title bytes
-                        b += rom[TITLE_ADDRESS + offset];
-                    }
+                if rom.has_publisher_rnd1() {
+                    // If either licensee code is 0x01, B = sum of all title bytes
+                    b = rom.get_title().iter().sum();
                     if b & 0b1111 == 0 {
                         // Last op is an INC; set h flag...
                         f |= 0b0010 << 4;

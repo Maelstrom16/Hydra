@@ -1,6 +1,8 @@
 mod mbc;
 pub mod io;
 mod oam;
+mod sram;
+pub mod rom;
 pub mod vram;
 mod wram;
 
@@ -8,19 +10,10 @@ use crate::{
     common::errors::HydraIOError,
     gameboy::{
         Model,
-        memory::{io::IOMap, oam::OAM, vram::Vram, wram::Wram},
+        memory::{io::IOMap, oam::OAM, rom::Rom, vram::Vram, wram::Wram},
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
-
-// Header Registers
-pub const TITLE_ADDRESS: usize = 0x0134;
-pub const NEW_LICENSEE_CODE_ADDRESS: usize = 0x0144;
-pub const HARDWARE_ADDRESS: usize = 0x0147;
-pub const ROM_SIZE_ADDRESS: usize = 0x0148;
-pub const RAM_SIZE_ADDRESS: usize = 0x0149;
-pub const OLD_LICENSEE_CODE_ADDRESS: usize = 0x014B;
-pub const HEADER_CHECKSUM_ADDRESS: usize = 0x014D;
 
 pub struct Memory {
     cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
@@ -34,9 +27,9 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub fn from_rom_and_model(rom: Box<[u8]>, model: Model, io: IOMap) -> Result<Memory, HydraIOError> {
+    pub fn from_rom_and_model(rom: Rom, model: Model, io: IOMap) -> Result<Memory, HydraIOError> {
         let result_cart = Memory {
-            cartridge: Some(mbc::from_rom(rom)?),
+            cartridge: Some(rom.into_mbc()?),
             vram: Rc::new(RefCell::new(Vram::new(model, &io))),
             wram: Box::new(Wram::new(model, &io)),
             oam: OAM::new(),
@@ -49,8 +42,8 @@ impl Memory {
     }
 
     pub fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
-        let rom: Box<[u8]> = fs::read(path)?.into_boxed_slice();
-        self.cartridge = Some(mbc::from_rom(rom)?);
+        let rom = fs::read(path)?;
+        self.cartridge = Some(Rom::from_vec(rom)?.into_mbc()?);
         Ok(())
     }
 
@@ -102,4 +95,8 @@ impl Memory {
     pub fn get_vram(&self) -> Rc<RefCell<Vram>> {
         return self.vram.clone();
     }
+}
+
+pub trait MemoryDevice {
+    fn localize_address(&self, address: u16) -> usize;
 }

@@ -11,7 +11,7 @@ use crate::{
         errors::HydraIOError,
     },
     config::Config,
-    gameboy::memory::io::IOMap,
+    gameboy::memory::{io::IOMap, rom::Rom},
     graphics::Graphics, window::{HydraApp, UserEvent},
 };
 use std::{
@@ -98,7 +98,7 @@ pub struct GameBoy {
 
 impl GameBoy {
     fn from_revision(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
-        let rom = fs::read(path)?.into_boxed_slice();
+        let rom = Rom::from_vec(fs::read(path)?)?;
         let (send, recv) = channel();
         let graphics = app.get_graphics();
         let proxy = app.get_proxy();
