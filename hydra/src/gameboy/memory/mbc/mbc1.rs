@@ -28,16 +28,24 @@ impl MBC1 {
     }
 
     fn localize_rom_address(&self, address: u16) -> BankedAddress<u16, usize> {
+        let bank_upper = match self.dynamic_banking {
+            true => self.ram_bank << 5,
+            false => 0
+        };
         match address {
-            0x0000..=0x3FFF => BankedAddress {address: address, bank: 0},
-            0x4000..=0x7FFF => BankedAddress {address: address - Rom::BYTES_PER_BANK as u16, bank: self.rom_bank as usize},
+            0x0000..=0x3FFF => BankedAddress {address: address, bank: (0 | bank_upper) as usize},
+            0x4000..=0x7FFF => BankedAddress {address: address - Rom::BYTES_PER_BANK as u16, bank: (self.rom_bank | bank_upper) as usize % self.rom.get_bank_count()},
             _ => panic!("Attempted to localize invalid ROM address {}", address)
         }
     }
 
     fn localize_ram_address(&self, address: u16) -> BankedAddress<u16, usize> {
+        let bank = match self.dynamic_banking {
+            true => self.ram_bank as usize % self.ram.get_bank_count(),
+            false => 0
+        };
         match address {
-            0xA000..=0xBFFF => BankedAddress {address: address - Sram::ADDRESS_OFFSET as u16, bank: self.ram_bank as usize},
+            0xA000..=0xBFFF => BankedAddress {address: address - Sram::ADDRESS_OFFSET as u16, bank},
             _ => panic!("Attempted to localize invalid RAM address {}", address)
         }
     }
@@ -49,8 +57,12 @@ impl mbc::MemoryBankController for MBC1 {
         Ok(self.rom.read_bank(address, bank))
     }
     fn read_ram_u8(&self, address: u16) -> Result<u8, HydraIOError> {
-        let BankedAddress { address, bank } = self.localize_ram_address(address);
-        Ok(self.ram.read_bank(address, bank))
+        if self.ram_enabled {
+            let BankedAddress { address, bank } = self.localize_ram_address(address);
+            Ok(self.ram.read_bank(address, bank))
+        } else {
+            Err(HydraIOError::OpenBusAccess)
+        }
     }
     fn write_rom_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
         Ok(match address {
@@ -62,7 +74,11 @@ impl mbc::MemoryBankController for MBC1 {
         })
     }
     fn write_ram_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
-        let BankedAddress { address, bank } = self.localize_ram_address(address);
-        Ok(self.ram.write_bank(value, address, bank))
+        if self.ram_enabled {
+            let BankedAddress { address, bank } = self.localize_ram_address(address);
+            Ok(self.ram.write_bank(value, address, bank))
+        } else {
+            Err(HydraIOError::OpenBusAccess)
+        }
     }
 }
