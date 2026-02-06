@@ -1,7 +1,7 @@
 use hydra_macros::field_map;
 
 #[field_map(u8)]
-pub struct RegP1 {
+pub struct RegJoyp {
     #[range(5)] polling_buttons: bool,
     #[range(4)] polling_dpad: bool,
     #[range(3)] start_or_down: bool,

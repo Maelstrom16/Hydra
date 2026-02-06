@@ -15,7 +15,7 @@ use crate::{
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
 
-pub struct Memory {
+pub struct MemoryMap {
     cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
     vram: Rc<RefCell<Vram>>,
     wram: Box<Wram>,
@@ -26,19 +26,18 @@ pub struct Memory {
     data_bus: Cell<u8>,
 }
 
-impl Memory {
-    pub fn from_rom_and_model(rom: Rom, model: Model, io: IOMap) -> Result<Memory, HydraIOError> {
-        let result_cart = Memory {
+impl MemoryMap {
+    pub fn from_rom_and_model(rom: Rom, model: Model, vram: Rc<RefCell<Vram>>, io: IOMap) -> Result<MemoryMap, HydraIOError> {
+        Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
-            vram: Rc::new(RefCell::new(Vram::new(model, &io))),
+            vram,
             wram: Box::new(Wram::new(model, &io)),
             oam: OAM::new(),
             io,
             hram: [0; 0x7F],
 
             data_bus: Cell::new(0),
-        };
-        Ok(result_cart)
+        })
     }
 
     pub fn hot_swap_rom(&mut self, path: &Path) -> Result<(), HydraIOError> {
@@ -87,16 +86,4 @@ impl Memory {
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
     }
-
-    pub fn get_io(&self) -> &IOMap {
-        return &self.io;
-    }
-
-    pub fn get_vram(&self) -> Rc<RefCell<Vram>> {
-        return self.vram.clone();
-    }
-}
-
-pub trait MemoryDevice {
-    fn localize_address(&self, address: u16) -> usize;
 }

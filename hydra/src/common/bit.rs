@@ -9,46 +9,46 @@ use funty::Unsigned;
 /// `I` is the type of a `DeserializedRegister<U>` into which this `MaskedBitSet`
 /// may be deserialized into.
 pub struct MaskedBitSet<T> {
-    value: Cell<T>,
+    inner: Cell<T>,
     read_mask: Cell<T>,
     write_mask: Cell<T>,
     write_fn: fn(&MaskedBitSet<T>, val: T),
 }
 
 impl<T> MaskedBitSet<T> where T: Unsigned {
-    pub fn new(value: T, read_mask: T, write_mask: T, reg_type: WriteBehavior) -> Rc<MaskedBitSet<T>> {
+    pub fn new(value: T, read_mask: T, write_mask: T, reg_type: WriteBehavior) -> MaskedBitSet<T> {
         let write_fn = match reg_type {
             WriteBehavior::Standard => MaskedBitSet::write_standard,
             WriteBehavior::ResetOnWrite => MaskedBitSet::write_reset,
             WriteBehavior::UnmapBootRom => MaskedBitSet::write_boot,
         };
 
-        Rc::new(MaskedBitSet { 
-            value: Cell::new(value), 
+        MaskedBitSet { 
+            inner: Cell::new(value), 
             read_mask: Cell::new(read_mask), 
             write_mask: Cell::new(write_mask), 
             write_fn,
-        })
+        }
     }
 
-    pub fn new_unimplemented() -> Rc<MaskedBitSet<T>> {
+    pub fn new_unimplemented() -> MaskedBitSet<T> {
         MaskedBitSet::new(T::ZERO.not(), T::ZERO, T::ZERO, WriteBehavior::Standard)
     }
 
     /// Returns a copy of the contained value.
     pub fn get(&self) -> T {
-        self.value.get()
+        self.inner.get()
     }
 
     /// Sets the contained value.
     pub fn set(&self, val: T) {
-        self.value.set(val)
+        self.inner.set(val)
     }
 
     /// Returns a copy of the contained value, with write-only
     /// and unimplemented bits replaced by a 1.
     pub fn read(&self) -> T {
-        self.get() | !self.read_mask.get()
+        self.inner.get() | !self.read_mask.get()
     }
 
     /// Sets the contained value, with read-only
@@ -59,11 +59,11 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
 
     fn write_standard(&self, val: T) {
         let write_mask = self.write_mask.get();
-        self.set((self.value.get() & !write_mask) | (val & write_mask))
+        self.inner.set((self.inner.get() & !write_mask) | (val & write_mask))
     }
 
     fn write_reset(&self, _val: T) {
-        self.set(T::ZERO);
+        self.inner.set(T::ZERO);
     }
 
     fn write_boot(&self, _val: T) {

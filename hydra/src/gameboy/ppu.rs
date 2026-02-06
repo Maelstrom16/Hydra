@@ -12,7 +12,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        memory::{Memory, io::{self, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::{self, Vram}},
+        memory::{MemoryMap, io::{self, IOMap, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::{self, Vram}},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
@@ -54,15 +54,13 @@ const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl PPU {
-    pub fn new(memory: Rc<RefCell<Memory>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(vram: Rc<RefCell<Vram>>, io: &IOMap, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
-        let memguard = memory.borrow();
-        let io = memguard.get_io();
         let mut result = PPU {
             fifo: RenderQueue::new(),
             screen_buffer,
 
-            vram: memguard.get_vram(),
+            vram,
             lcdc: RegLcdc::wrap(io.clone_pointer(io::MMIO::LCDC)),
             stat: RegStat::wrap(io.clone_pointer(io::MMIO::STAT)),
             scy: RegScy::wrap(io.clone_pointer(io::MMIO::SCY)),

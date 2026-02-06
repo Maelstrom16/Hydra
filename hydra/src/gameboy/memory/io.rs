@@ -11,7 +11,7 @@ pub const ADDRESS_OFFSET: u16 = 0xFF00;
 #[derive(TrijectiveMMIO)]
 #[repr(u16)]
 pub enum MMIO {
-    P1 = 0xFF00,
+    JOYP = 0xFF00,
     SB = 0xFF01,
     SC = 0xFF02,
     DIV = 0xFF04,
@@ -98,9 +98,9 @@ pub struct IOMap {
 impl IOMap {
     pub fn new(model: Model) -> Self {
         IOMap {
-            registers: array::from_fn(|index| match MMIO::from_local(index) {
+            registers: array::from_fn(|index| Rc::new(match MMIO::from_local(index) {
                 // Define default values for all registers and models
-                MMIO::P1 => GBReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
+                MMIO::JOYP => GBReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
                 MMIO::SB => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
                 MMIO::SC => match model {
                     Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0x7E, 0b10000001, 0b10000001, WriteBehavior::Standard),
@@ -257,7 +257,7 @@ impl IOMap {
                     Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
                 },
                 MMIO::IE => GBReg::new(0x00, 0b00011111, 0b00011111, WriteBehavior::Standard),
-            })
+            }))
         }
     }
 }

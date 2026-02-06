@@ -10,7 +10,7 @@ use crate::{
         AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
         cpu::{ime::Ime, opcode::{CondOperand, ConstOperand16, IntOperand}},
         memory::{
-            self, Memory,
+            self, MemoryMap,
             io::{self, GBReg, IOMap, deserialized::{RegIe, RegIf}}, rom::{HEADER_CHECKSUM_ADDRESS, Rom},
         },
     },
@@ -178,7 +178,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn step_u8(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) -> u8 {
+    async fn step_u8(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         let result = memory.borrow().read_u8(self.pc);
         self.pc += 1;
         co.yield_(()).await;
@@ -186,18 +186,18 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn read_u8(&self, address: u16, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) -> u8 {
+    async fn read_u8(&self, address: u16, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         co.yield_(()).await;
         memory.borrow().read_u8(address)
     }
 
     #[inline(always)]
-    async fn write_u8(&self, address: u16, value: u8, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) -> () {
+    async fn write_u8(&self, address: u16, value: u8, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> () {
         co.yield_(()).await;
         memory.borrow_mut().write_u8(value, address);
     }
 
-    pub async fn coro(&mut self, memory: Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    pub async fn coro(&mut self, memory: Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         loop {
             // Handle interrupts
             if self.ime.get() {
@@ -293,12 +293,12 @@ macro_rules! get_flag {
 
 impl CPU {
     #[inline(always)]
-    async fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, dest: O1, src: O2) {
+    async fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, dest: O1, src: O2) {
         let value = gen_all!(co, |co_inner| src.get(self, memory, co_inner));
         gen_all!(co, |co_inner| dest.set(value, self, memory, co_inner));
     }
     #[inline(always)]
-    async fn ld_hlspe(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn ld_hlspe(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let e = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner)) as i8;
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
@@ -316,7 +316,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn inc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn inc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, _) = o.overflowing_add(1);
         let (_, half_carry) = (o | 0xF0).overflowing_add(1);
@@ -328,7 +328,7 @@ impl CPU {
         gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
     #[inline(always)]
-    async fn inc16<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn inc16<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.wrapping_add(1);
         co.yield_(()).await;
@@ -336,7 +336,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn dec<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn dec<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, _) = o.overflowing_sub(1);
         let (_, half_carry) = (o & 0x0F).overflowing_sub(1);
@@ -348,7 +348,7 @@ impl CPU {
         gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
     #[inline(always)]
-    async fn dec16<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn dec16<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.wrapping_sub(1);
         co.yield_(()).await;
@@ -356,7 +356,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn add<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn add<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
@@ -369,7 +369,7 @@ impl CPU {
         self.af[1] = result;
     }
     #[inline(always)]
-    async fn add_hl<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn add_hl<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (hl, operand) = (u16::from_le_bytes(self.hl), gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let result = hl.wrapping_add(operand);
         let [_, h] = self.hl;
@@ -384,7 +384,7 @@ impl CPU {
         self.hl = u16::to_le_bytes(result);
     }
     #[inline(always)]
-    async fn add_spe(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn add_spe(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let e = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner)) as i8;
         let result = self.sp.wrapping_add_signed(e.into());
         let lsb = (self.sp & 0xFF) as u8;
@@ -403,7 +403,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn adc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn adc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
@@ -417,7 +417,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn sub<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn sub<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
@@ -431,7 +431,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn sbc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn sbc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
@@ -445,7 +445,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn and<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn and<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let result = self.af[1] & gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(result == 0),
@@ -457,7 +457,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn or<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn or<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let result = self.af[1] | gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(result == 0),
@@ -469,7 +469,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn xor<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn xor<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let result = self.af[1] ^ gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(result == 0),
@@ -481,7 +481,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn cp<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn cp<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
@@ -494,7 +494,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn push<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn push<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let bytes = u16::to_le_bytes(gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         co.yield_(()).await;
         self.sp -= 1;
@@ -504,7 +504,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn pop<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn pop<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let mut bytes = [0; 2];
         bytes[0] = gen_all!(&co, |co_inner| self.read_u8(self.sp, memory, co_inner));
         self.sp += 1;
@@ -514,7 +514,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn ccf(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn ccf(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         set_flags!(self;
             n=(false),
             h=(false)
@@ -523,7 +523,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn scf(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn scf(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         set_flags!(self;
             n=(false),
             h=(false),
@@ -532,12 +532,12 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn daa(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn daa(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    async fn cpl(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn cpl(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         self.af[1] ^= 0xFF;
         set_flags!(self;
             n=(true),
@@ -546,7 +546,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn rlc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn rlc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.rotate_left(1);
         set_flags!(self;
@@ -559,7 +559,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn rrc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn rrc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.rotate_right(1);
         set_flags!(self;
@@ -572,7 +572,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn rl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn rl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shl(1);
         set_flags!(self;
@@ -585,7 +585,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn rr<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn rr<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
@@ -598,7 +598,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn sla<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn sla<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shl(1);
         set_flags!(self;
@@ -611,7 +611,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn sra<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn sra<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) as i8;
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
@@ -624,7 +624,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn swap<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn swap<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = (o & 0x0F) << 4 | (o & 0xF0) >> 4;
         set_flags!(self;
@@ -637,7 +637,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn srl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, operand: O) {
+    async fn srl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let (result, carry) = o.overflowing_shr(1);
         set_flags!(self;
@@ -650,7 +650,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn bit<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, index: u8, operand: O) {
+    async fn bit<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, index: u8, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
             z=(o & (1 << index) != 0),
@@ -660,19 +660,19 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn res<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, index: u8, operand: O) {
+    async fn res<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, index: u8, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         gen_all!(co, |co_inner| operand.set(o & ((1 << index) ^ 0b11111111), self, memory, co_inner));
     }
 
     #[inline(always)]
-    async fn set<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, index: u8, operand: O) {
+    async fn set<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, index: u8, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         gen_all!(co, |co_inner| operand.set(o | (1 << index), self, memory, co_inner));
     }
 
     #[inline(always)]
-    async fn jp<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, condition: CondOperand, operand: O) {
+    async fn jp<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, condition: CondOperand, operand: O) {
         let addr = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         if condition.evaluate(self) {
             co.yield_(()).await;
@@ -681,7 +681,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn jr<O: IntOperand<i8>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, condition: CondOperand, operand: O) {
+    async fn jr<O: IntOperand<i8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, condition: CondOperand, operand: O) {
         let e = gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) as i8;
         let addr = self.pc.wrapping_add_signed(e.into());
         if condition.evaluate(self) {
@@ -691,7 +691,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn call<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, condition: CondOperand, operand: O) {
+    async fn call<O: IntOperand<u16>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, condition: CondOperand, operand: O) {
         let addr = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         if condition.evaluate(self) {
             gen_all!(&co, |co_inner| self.push(memory, co_inner, opcode::RegisterOperand16(Register16::PC)));
@@ -700,7 +700,7 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn ret(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>, condition: CondOperand) {
+    async fn ret(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, condition: CondOperand) {
         co.yield_(()).await;
         if condition.evaluate(self) {
             gen_all!(&co, |co_inner| self.pop(memory, co_inner, opcode::RegisterOperand16(Register16::PC)));
@@ -709,33 +709,33 @@ impl CPU {
     }
 
     #[inline(always)]
-    async fn reti(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn reti(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         gen_all!(&co, |co_inner| self.ret(memory, co_inner, CondOperand::Unconditional));
         self.ime.set(true);
     }
 
     #[inline(always)]
-    async fn ei(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn ei(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         self.ime.queue();
     }
 
     #[inline(always)]
-    async fn di(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn di(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         self.ime.set(false);
     }
 
     #[inline(always)]
-    async fn halt(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn halt(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    async fn stop(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn stop(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         todo!() //TODO
     }
 
     #[inline(always)]
-    async fn inavlidop(&mut self, memory: &Rc<RefCell<Memory>>, co: Co<'_, ()>) {
+    async fn inavlidop(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         panic!("Unknown opcode")
     }
 }
