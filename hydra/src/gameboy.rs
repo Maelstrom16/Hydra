@@ -3,22 +3,20 @@ mod memory;
 mod ppu;
 
 use genawaiter::stack::let_gen_using;
-use winit::{event::{ElementState, KeyEvent}, event_loop::EventLoopProxy, keyboard::{KeyCode, PhysicalKey}, window::Window};
+use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 
 use crate::{
     common::{
         emulator::{EmuMessage, Emulator},
         errors::HydraIOError,
     },
-    config::Config,
     gameboy::memory::{io::{IOMap, MMIO, deserialized::{RegIf, RegJoyp}}, rom::Rom, vram::Vram},
-    graphics::Graphics, window::{HydraApp, UserEvent},
+    window::HydraApp
 };
 use std::{
     cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::{
-        Arc, RwLock,
         mpsc::{Receiver, Sender, channel},
-    }, thread, time::Instant
+    }, thread
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

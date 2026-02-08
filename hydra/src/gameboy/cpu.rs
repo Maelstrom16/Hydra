@@ -1,18 +1,18 @@
 mod ime;
 mod opcode;
 
-use std::{cell::{Cell, RefCell}, pin::Pin, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc};
 
 use futures::FutureExt;
-use genawaiter::stack::{Co, let_gen, let_gen_using};
+use genawaiter::stack::Co;
 
 use crate::{
     gameboy::{
         AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
-        cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn, OpcodeFn, OpcodeFuture}},
+        cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}},
         memory::{
-            self, MemoryMap,
-            io::{self, IOMap, deserialized::{RegIe, RegIf}}, rom::{HEADER_CHECKSUM_ADDRESS, Rom},
+            MemoryMap,
+            io::{self, IOMap, deserialized::{RegIe, RegIf}}, rom::Rom,
         },
     },
     gen_all,
@@ -73,9 +73,9 @@ impl CPU {
         let bc;
         let de;
         let hl;
-        const sp: u16 = 0xFFFE;
-        const pc: u16 = 0x0100;
-        const ir: u8 = 0x00;
+        let sp: u16 = 0xFFFE;
+        let pc: u16 = 0x0100;
+        let ir: u8 = 0x00;
         let r#if = RegIf::wrap(io.clone_pointer(io::MMIO::IF));
         let ie = RegIe::wrap(io.clone_pointer(io::MMIO::IE));
         let interrupt_handler = InterruptHandler::default();

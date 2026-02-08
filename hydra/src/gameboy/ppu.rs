@@ -7,12 +7,11 @@ use std::{
 };
 
 use genawaiter::stack::Co;
-use rand::Rng;
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        memory::{MemoryMap, io::{self, IOMap, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::{self, Vram}},
+        memory::{io::{self, IOMap, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
