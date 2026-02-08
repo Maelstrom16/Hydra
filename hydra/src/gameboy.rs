@@ -194,7 +194,7 @@ impl Emulator for GameBoy {
             // Generate Coroutines
             let mut cpu = self.cpu.take().unwrap();
             let mut ppu = self.ppu.take().unwrap();
-            let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co));
+            let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, true));
             let_gen_using!(ppu_coro, |co| ppu.coro(self.clock.clone(), co));
 
             // Main loop

@@ -33,7 +33,7 @@ impl MBC1 {
             false => 0
         };
         match address {
-            0x0000..=0x3FFF => BankedAddress {address: address, bank: (0 | bank_upper) as usize},
+            0x0000..=0x3FFF => BankedAddress {address: address, bank: (0 | bank_upper) as usize % self.rom.get_bank_count()},
             0x4000..=0x7FFF => BankedAddress {address: address - Rom::BYTES_PER_BANK as u16, bank: (self.rom_bank | bank_upper) as usize % self.rom.get_bank_count()},
             _ => panic!("Attempted to localize invalid ROM address {}", address)
         }

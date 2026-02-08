@@ -199,7 +199,7 @@ impl IOMap {
                     Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
                     Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFE, 0b00000001, 0b00000001, WriteBehavior::Standard),
                 }, 
-                MMIO::BOOT => GBReg::new(0xFF, 0b00000000, 0b00000001, WriteBehavior::UnmapBootRom), // TODO: Verify write behavior
+                MMIO::BOOT => GBReg::new(0xFF, 0b00000000, 0b00000000, WriteBehavior::Standard), // TODO: Allow write if boot ROM is included
                 MMIO::HDMA1 => match model { 
                     Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
                     Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),

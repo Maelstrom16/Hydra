@@ -1,17 +1,18 @@
 mod ime;
 mod opcode;
 
-use std::{cell::{Cell, RefCell}, rc::Rc};
+use std::{cell::{Cell, RefCell}, pin::Pin, rc::Rc, time::Duration};
 
-use genawaiter::stack::Co;
+use futures::FutureExt;
+use genawaiter::stack::{Co, let_gen, let_gen_using};
 
 use crate::{
     gameboy::{
         AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
-        cpu::{ime::Ime, opcode::{CondOperand, ConstOperand16, IntOperand}},
+        cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn, OpcodeFn, OpcodeFuture}},
         memory::{
             self, MemoryMap,
-            io::{self, GBReg, IOMap, deserialized::{RegIe, RegIf}}, rom::{HEADER_CHECKSUM_ADDRESS, Rom},
+            io::{self, IOMap, deserialized::{RegIe, RegIf}}, rom::{HEADER_CHECKSUM_ADDRESS, Rom},
         },
     },
     gen_all,
@@ -44,7 +45,7 @@ pub struct CPU {
     ir: u8,
     r#if: RegIf,
     ie: RegIe,
-    ime: Ime,
+    interrupt_handler: InterruptHandler,
 }
 
 pub enum Register8 {
@@ -77,7 +78,7 @@ impl CPU {
         const ir: u8 = 0x00;
         let r#if = RegIf::wrap(io.clone_pointer(io::MMIO::IF));
         let ie = RegIe::wrap(io.clone_pointer(io::MMIO::IE));
-        let ime = Ime::default();
+        let interrupt_handler = InterruptHandler::default();
         match model {
             Model::GameBoy(Some(GBRevision::DMG0)) => {
                 af = [0b0000 << 4, 0x01];
@@ -173,7 +174,56 @@ impl CPU {
             ir,
             r#if,
             ie,
-            ime,
+            interrupt_handler,
+        }
+    }
+
+    fn fetch_interrupt(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, jump_addr: u16) -> impl Future<Output = ()> {
+        // TODO: Verify cycle accuracy
+        self.call(&memory, co, CondOperand::Unconditional, ConstOperand16(jump_addr))
+    }
+
+    async fn fetch_opcode(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, debug: bool) {
+        self.ir = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner));
+        if debug {println!(
+            "{:#06X}: {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
+            self.pc - 1,
+            self.ir,
+            self.af[1],
+            self.af[0],
+            u16::from_le_bytes(self.bc),
+            u16::from_le_bytes(self.de),
+            u16::from_le_bytes(self.hl),
+            self.sp
+        )}
+        gen_all!(&co, |co_inner| opcode::OP_TABLE[self.ir as usize](self, memory, co_inner));
+    }
+
+    #[inline(always)]
+    fn fetch<'a>(&mut self, debug: bool) -> LocalOpcodeFn<'a> {
+        if self.interrupt_handler.ime && self.interrupt_pending() { 
+            // Generate call instruction from handled interrupt
+            let composite = self.ie.get_entire() & self.r#if.get_entire();
+            for shift_width in 0..=4 {
+                let bitmask = 1 << shift_width;
+                if composite & bitmask == 0 {
+                    // Check next priority interrupt
+                    continue;
+                } else {
+                    // Handle interrupt and return call instruction
+                    self.interrupt_handler.ime = false;
+                    self.r#if.set_entire(self.r#if.get_entire() ^ bitmask);
+                    let jump_addr = (shift_width * 0x8) + 0x40;
+                    
+                    return Box::new(move |cpu_inner: &'a mut CPU, memory_inner, co_inner| cpu_inner.fetch_interrupt(memory_inner, co_inner, jump_addr).boxed_local())
+                        as LocalOpcodeFn<'a>;
+                }
+            }
+            unreachable!() // Interrupt should've been handled
+        } else {
+            // Fetch instruction from memory
+            return Box::new(move |cpu_inner: &'a mut CPU, memory_inner, co_inner| cpu_inner.fetch_opcode(memory_inner, co_inner, debug).boxed_local())
+                as LocalOpcodeFn<'a>;
         }
     }
 
@@ -197,40 +247,30 @@ impl CPU {
         memory.borrow_mut().write_u8(value, address);
     }
 
-    pub async fn coro(&mut self, memory: Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
+    #[inline(always)]
+    fn interrupt_pending(&self) -> bool {
+        self.ie.get_entire() & self.r#if.get_entire() != 0
+    }
+
+    pub async fn coro(&mut self, memory: Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, debug: bool) {
         loop {
-            // Handle interrupts
-            if self.ime.get() {
-                let composite = self.ie.get_entire() & self.r#if.get_entire();
-                for shift_width in 0..=4 {
-                    let bitmask = 1 << shift_width;
-                    if composite & bitmask == 0 {continue;}
-                    
-                    self.ime.set(false);
-                    self.r#if.set_entire(self.r#if.get_entire() ^ bitmask);
-                    let jump_addr = (shift_width * 0x8) + 0x40;
-                    gen_all!(&co, |co_inner| self.call(&memory, co_inner, CondOperand::Unconditional, ConstOperand16(jump_addr))); // TODO: Verify cycle accuracy
-                    break;
+            // Skip this iteration if halted and there are no interrupts pending
+            if self.interrupt_handler.halted {
+                if self.interrupt_pending() {
+                    self.interrupt_handler.halted = false;
+                } else {
+                    co.yield_(()).await;
+                    continue;  
                 }
             }
 
             // Fetch cycle
-            // print!("{:#06X}: ", self.pc);
-            self.ir = gen_all!(&co, |co_inner| self.step_u8(&memory, co_inner));
-            // println!(
-            //     "{:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
-            //     self.ir,
-            //     self.af[1],
-            //     self.af[0],
-            //     u16::from_le_bytes(self.bc),
-            //     u16::from_le_bytes(self.de),
-            //     u16::from_le_bytes(self.hl),
-            //     self.sp
-            // );
-            self.ime.refresh();
+            let pc = self.pc;
+            let next = self.fetch(debug);
 
             // Execute cycle(s)
-            gen_all!(&co, |co_inner| self.opcode_gen(&memory, co_inner));
+            gen_all!(&co, |co_inner| next(self, &memory, co_inner));
+            self.interrupt_handler.refresh(&mut self.pc, pc);
         }
     }
 }
@@ -711,22 +751,28 @@ impl CPU {
     #[inline(always)]
     async fn reti(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         gen_all!(&co, |co_inner| self.ret(memory, co_inner, CondOperand::Unconditional));
-        self.ime.set(true);
+        self.interrupt_handler.ime = true;
     }
 
     #[inline(always)]
     async fn ei(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        self.ime.queue();
+        self.interrupt_handler.queue_ime();
     }
 
     #[inline(always)]
     async fn di(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        self.ime.set(false);
+        self.interrupt_handler.ime = false;
+        self.interrupt_handler.cancel_ime();
     }
 
     #[inline(always)]
     async fn halt(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        todo!() //TODO
+        self.interrupt_handler.halted = true;
+
+        // If IME is off but an interrupt is already pending, trigger halt bug
+        if !self.interrupt_handler.ime && self.interrupt_pending() {
+            self.interrupt_handler.queue_halt_bug();
+        }
     }
 
     #[inline(always)]

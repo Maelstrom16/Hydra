@@ -20,7 +20,6 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
         let write_fn = match reg_type {
             WriteBehavior::Standard => MaskedBitSet::write_standard,
             WriteBehavior::ResetOnWrite => MaskedBitSet::write_reset,
-            WriteBehavior::UnmapBootRom => MaskedBitSet::write_boot,
         };
 
         MaskedBitSet { 
@@ -66,10 +65,6 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
         self.inner.set(T::ZERO);
     }
 
-    fn write_boot(&self, _val: T) {
-        todo!("BANK register write behavior is not yet implemented")
-    }
-
     /// Redefines which bits of this register are
     /// readable and/or writable. 
     pub fn change_masks(&self, read_mask: T, write_mask: T) {
@@ -81,7 +76,6 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
 pub enum WriteBehavior {
     Standard,
     ResetOnWrite,
-    UnmapBootRom
 }
 
 /// A dummy struct used to represent a `MaskedBitSet`
