@@ -1,14 +1,14 @@
 use crate::common::errors::HydraIOError;
 
-pub struct OAM {
+pub struct Oam {
     inner: [u8; 0x100],
 }
 
 pub const ADDRESS_OFFSET: u16 = 0xFE00;
 
-impl OAM {
+impl Oam {
     pub fn new() -> Self {
-        OAM { inner: [0; 0x100] }
+        Oam { inner: [0; 0x100] }
     }
 
     pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {

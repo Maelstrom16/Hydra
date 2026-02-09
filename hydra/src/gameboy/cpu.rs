@@ -12,7 +12,7 @@ use crate::{
         cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}},
         memory::{
             MemoryMap,
-            io::{self, IOMap, deserialized::{RegIe, RegIf}}, rom::Rom,
+            io::{self, IoMap, deserialized::{RegIe, RegIf}}, rom::Rom,
         },
     },
     gen_all,
@@ -35,7 +35,7 @@ use crate::{
 /// cpu.af[0] |= 0b00010000; // Set carry flag
 /// cpu.af[0] = ((true as u8) << 5) | (cpu.af[0] & 0b11011111) // Set/reset half-carry flag based on bool
 /// ```
-pub struct CPU {
+pub struct Cpu {
     af: [u8; 2],
     bc: [u8; 2],
     de: [u8; 2],
@@ -67,8 +67,8 @@ pub enum Register16 {
     PC,
 }
 
-impl CPU {
-    pub fn new(rom: &Rom, io: &IOMap, model: Model) -> Self {
+impl Cpu {
+    pub fn new(rom: &Rom, io: &IoMap, model: Model) -> Self {
         let af;
         let bc;
         let de;
@@ -164,7 +164,7 @@ impl CPU {
             }
             _ => panic!("Attempt to initialize Game Boy CPU without a proper revision"),
         }
-        CPU {
+        Cpu {
             af,
             bc,
             de,
@@ -215,14 +215,14 @@ impl CPU {
                     self.r#if.set_entire(self.r#if.get_entire() ^ bitmask);
                     let jump_addr = (shift_width * 0x8) + 0x40;
                     
-                    return Box::new(move |cpu_inner: &'a mut CPU, memory_inner, co_inner| cpu_inner.fetch_interrupt(memory_inner, co_inner, jump_addr).boxed_local())
+                    return Box::new(move |cpu_inner: &'a mut Cpu, memory_inner, co_inner| cpu_inner.fetch_interrupt(memory_inner, co_inner, jump_addr).boxed_local())
                         as LocalOpcodeFn<'a>;
                 }
             }
             unreachable!() // Interrupt should've been handled
         } else {
             // Fetch instruction from memory
-            return Box::new(move |cpu_inner: &'a mut CPU, memory_inner, co_inner| cpu_inner.fetch_opcode(memory_inner, co_inner, debug).boxed_local())
+            return Box::new(move |cpu_inner: &'a mut Cpu, memory_inner, co_inner| cpu_inner.fetch_opcode(memory_inner, co_inner, debug).boxed_local())
                 as LocalOpcodeFn<'a>;
         }
     }
@@ -331,7 +331,7 @@ macro_rules! get_flag {
     };
 }
 
-impl CPU {
+impl Cpu {
     #[inline(always)]
     async fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, dest: O1, src: O2) {
         let value = gen_all!(co, |co_inner| src.get(self, memory, co_inner));

@@ -10,7 +10,7 @@ use crate::{
     common::errors::HydraIOError,
     gameboy::{
         Model,
-        memory::{io::IOMap, oam::OAM, rom::Rom, vram::Vram, wram::Wram},
+        memory::{io::IoMap, oam::Oam, rom::Rom, vram::Vram, wram::Wram},
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
@@ -19,20 +19,20 @@ pub struct MemoryMap {
     cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
     vram: Rc<RefCell<Vram>>,
     wram: Box<Wram>,
-    oam: OAM,
-    io: IOMap,
+    oam: Oam,
+    io: IoMap,
     hram: [u8; 0x7F],
 
     data_bus: Cell<u8>,
 }
 
 impl MemoryMap {
-    pub fn from_rom_and_model(rom: Rom, model: Model, vram: Rc<RefCell<Vram>>, io: IOMap) -> Result<MemoryMap, HydraIOError> {
+    pub fn from_rom_and_model(rom: Rom, model: Model, vram: Rc<RefCell<Vram>>, io: IoMap) -> Result<MemoryMap, HydraIOError> {
         Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
             vram,
             wram: Box::new(Wram::new(model, &io)),
-            oam: OAM::new(),
+            oam: Oam::new(),
             io,
             hram: [0; 0x7F],
 

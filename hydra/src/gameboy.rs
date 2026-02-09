@@ -10,7 +10,7 @@ use crate::{
         emulator::{EmuMessage, Emulator},
         errors::HydraIOError,
     },
-    gameboy::memory::{io::{IOMap, MMIO, deserialized::{RegIf, RegJoyp}}, rom::Rom, vram::Vram},
+    gameboy::memory::{io::{IoMap, MMIO, deserialized::{RegIf, RegJoyp}}, rom::Rom, vram::Vram},
     window::HydraApp
 };
 use std::{
@@ -84,9 +84,9 @@ pub enum AGBRevision {
 
 pub struct GameBoy {
     //apu: apu::APU,
-    cpu: Option<cpu::CPU>,
+    cpu: Option<cpu::Cpu>,
     memory: Rc<RefCell<memory::MemoryMap>>,
-    ppu: Option<ppu::PPU>,
+    ppu: Option<ppu::Ppu>,
     clock: Rc<Cell<u32>>,
 
     buttons: PressedButtons,
@@ -105,12 +105,12 @@ impl GameBoy {
 
         // Build Game Boy on a new thread
         thread::spawn(move || {
-            let io = IOMap::new(model);
+            let io = IoMap::new(model);
             let joyp = RegJoyp::wrap(io.clone_pointer(MMIO::JOYP));
             let r#if = RegIf::wrap(io.clone_pointer(MMIO::IF));
-            let cpu = Some(cpu::CPU::new(&rom, &io, model));
+            let cpu = Some(cpu::Cpu::new(&rom, &io, model));
             let vram = Rc::new(RefCell::new(Vram::new(model, &io)));
-            let ppu = Some(ppu::PPU::new(vram.clone(), &io, graphics, proxy));
+            let ppu = Some(ppu::Ppu::new(vram.clone(), &io, graphics, proxy));
             let memory = Rc::new(RefCell::new(memory::MemoryMap::from_rom_and_model(rom, model, vram, io).unwrap())); // TODO: Error should be handled rather than unwrapped
             let clock = Rc::new(Cell::new(0));
             let buttons = PressedButtons::default();
@@ -190,7 +190,8 @@ impl Emulator for GameBoy {
         let mut ppu = self.ppu.take().unwrap();
         let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, false));
         let_gen_using!(ppu_coro, |co| ppu.coro(self.clock.clone(), co));
-        
+        apu::test();
+
         // Main loop
         'main: loop {
             self.clock.set((self.clock.get() + 1) % CYCLES_PER_FRAME);

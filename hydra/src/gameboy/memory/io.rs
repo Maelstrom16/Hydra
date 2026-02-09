@@ -91,13 +91,13 @@ pub enum MMIO {
 
 pub type GBReg = MaskedBitSet<u8>;
 
-pub struct IOMap {
+pub struct IoMap {
     registers: [Rc<GBReg>; MMIO::VARIANT_COUNT]
 }
 
-impl IOMap {
+impl IoMap {
     pub fn new(model: Model) -> Self {
-        IOMap {
+        IoMap {
             registers: array::from_fn(|index| Rc::new(match MMIO::from_local(index) {
                 // Define default values for all registers and models
                 MMIO::JOYP => GBReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
@@ -262,7 +262,7 @@ impl IOMap {
     }
 }
 
-impl IOMap {
+impl IoMap {
     pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
         Ok(self.registers[Self::localize_address(address)?].read())
     }

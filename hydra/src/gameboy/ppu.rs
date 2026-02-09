@@ -9,12 +9,12 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        memory::{io::{self, IOMap, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
+        memory::{io::{self, IoMap, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
         ppu::fifo::RenderQueue,
     }, graphics::Graphics, window::UserEvent
 };
 
-pub struct PPU {
+pub struct Ppu {
     fifo: RenderQueue,
     screen_buffer: Box<[u8]>,
     next_frame_instant: Instant,
@@ -51,10 +51,10 @@ const MAP_WIDTH: u8 = 32;
 const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
-impl PPU {
-    pub fn new(vram: Rc<RefCell<Vram>>, io: &IOMap, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+impl Ppu {
+    pub fn new(vram: Rc<RefCell<Vram>>, io: &IoMap, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
-        let mut result = PPU {
+        let mut result = Ppu {
             fifo: RenderQueue::new(),
             screen_buffer,
             next_frame_instant: Instant::now(),

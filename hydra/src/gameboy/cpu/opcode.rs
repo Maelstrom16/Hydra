@@ -5,21 +5,21 @@ use genawaiter::stack::Co;
 
 use crate::{
     gameboy::{
-        cpu::{self, CPU},
+        cpu::{self, Cpu},
         memory::MemoryMap,
     },
     gen_all,
 };
 
 pub trait IntOperand<T> {
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> T;
-    async fn set(&self, value: T, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>);
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> T;
+    async fn set(&self, value: T, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>);
 }
 
 pub struct RegisterOperand8(pub cpu::Register8);
 impl IntOperand<u8> for RegisterOperand8 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) -> u8 {
+    async fn get(&self, cpu: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) -> u8 {
         match self.0 {
             cpu::Register8::A => cpu.af[1],
             cpu::Register8::F => cpu.af[0],
@@ -32,7 +32,7 @@ impl IntOperand<u8> for RegisterOperand8 {
         }
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
+    async fn set(&self, value: u8, cpu: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         match self.0 {
             cpu::Register8::A => cpu.af[1] = value,
             cpu::Register8::F => cpu.af[0] = value,
@@ -49,11 +49,11 @@ impl IntOperand<u8> for RegisterOperand8 {
 pub struct ImmediateOperand8;
 impl IntOperand<u8> for ImmediateOperand8 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         gen_all!(&co, |co_inner| cpu.step_u8(memory, co_inner))
     }
     #[inline(always)]
-    async fn set(&self, _: u8, _: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
+    async fn set(&self, _: u8, _: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -61,11 +61,11 @@ impl IntOperand<u8> for ImmediateOperand8 {
 pub struct ImmediateSignedOperand8;
 impl IntOperand<i8> for ImmediateSignedOperand8 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> i8 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> i8 {
         gen_all!(&co, |co_inner| cpu.step_u8(memory, co_inner)) as i8
     }
     #[inline(always)]
-    async fn set(&self, _: i8, _: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
+    async fn set(&self, _: i8, _: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -73,12 +73,12 @@ impl IntOperand<i8> for ImmediateSignedOperand8 {
 pub struct IndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.read_u8(address, memory, co_inner))
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
+    async fn set(&self, value: u8, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.write_u8(address, value, memory, co_inner));
     }
@@ -86,13 +86,13 @@ impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand8<O> {
 pub struct IncIndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         gen_all!(co, |co_inner| self.0.set(address + 1, cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.read_u8(address, memory, co_inner))
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
+    async fn set(&self, value: u8, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         gen_all!(co, |co_inner| self.0.set(address + 1, cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.write_u8(address, value, memory, co_inner));
@@ -101,13 +101,13 @@ impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
 pub struct DecIndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         gen_all!(co, |co_inner| self.0.set(address - 1, cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.read_u8(address, memory, co_inner))
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
+    async fn set(&self, value: u8, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         gen_all!(co, |co_inner| self.0.set(address - 1, cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.write_u8(address, value, memory, co_inner));
@@ -117,25 +117,25 @@ impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
 pub struct HramIndirectOperand<O: IntOperand<u8>>(pub O);
 impl<O: IntOperand<u8>> HramIndirectOperand<O> {
     #[inline(always)]
-    async fn as_hram_address(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u16 {
+    async fn as_hram_address(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u16 {
         0xFF00 | (gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner)) as u16)
     }
 }
 impl<O: IntOperand<u8>> IntOperand<u8> for HramIndirectOperand<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         let hram_address = gen_all!(co, |co_inner| self.as_hram_address(cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.read_u8(hram_address, memory, co_inner))
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
+    async fn set(&self, value: u8, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let hram_address = gen_all!(co, |co_inner| self.as_hram_address(cpu, memory, co_inner));
         gen_all!(&co, |co_inner| cpu.write_u8(hram_address, value, memory, co_inner));
     }
 }
 impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u16 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u16 {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         u16::from_le_bytes([
             gen_all!(&co, |co_inner| cpu.read_u8(address, memory, co_inner)),
@@ -143,7 +143,7 @@ impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
         ])
     }
     #[inline(always)]
-    async fn set(&self, value: u16, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
+    async fn set(&self, value: u16, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         let address = gen_all!(co, |co_inner| self.0.get(cpu, memory, co_inner));
         let bytes = u16::to_le_bytes(value);
         gen_all!(&co, |co_inner| cpu.write_u8(address, bytes[0], memory, co_inner));
@@ -154,7 +154,7 @@ impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
 pub struct RegisterOperand16(pub cpu::Register16);
 impl IntOperand<u16> for RegisterOperand16 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) -> u16 {
+    async fn get(&self, cpu: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) -> u16 {
         match self.0 {
             cpu::Register16::AF => u16::from_le_bytes(cpu.af),
             cpu::Register16::BC => u16::from_le_bytes(cpu.bc),
@@ -165,7 +165,7 @@ impl IntOperand<u16> for RegisterOperand16 {
         }
     }
     #[inline(always)]
-    async fn set(&self, value: u16, cpu: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
+    async fn set(&self, value: u16, cpu: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         match self.0 {
             cpu::Register16::AF => cpu.af = u16::to_le_bytes(value),
             cpu::Register16::BC => cpu.bc = u16::to_le_bytes(value),
@@ -180,11 +180,11 @@ impl IntOperand<u16> for RegisterOperand16 {
 pub struct ImmediateOperand16;
 impl IntOperand<u16> for ImmediateOperand16 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut CPU, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u16 {
+    async fn get(&self, cpu: &mut Cpu, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u16 {
         u16::from_le_bytes([gen_all!(&co, |co_inner| cpu.step_u8(memory, co_inner)), gen_all!(&co, |co_inner| cpu.step_u8(memory, co_inner))])
     }
     #[inline(always)]
-    async fn set(&self, _: u16, _: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
+    async fn set(&self, _: u16, _: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -192,11 +192,11 @@ impl IntOperand<u16> for ImmediateOperand16 {
 pub struct ConstOperand16(pub u16);
 impl IntOperand<u16> for ConstOperand16 {
     #[inline(always)]
-    async fn get(&self, _: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) -> u16 {
+    async fn get(&self, _: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) -> u16 {
         self.0
     }
     #[inline(always)]
-    async fn set(&self, _: u16, _: &mut CPU, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
+    async fn set(&self, _: u16, _: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         panic!("Cannot write to constant operand")
     }
 }
@@ -210,7 +210,7 @@ pub enum CondOperand {
 }
 impl CondOperand {
     #[inline(always)]
-    pub fn evaluate(&self, cpu: &CPU) -> bool {
+    pub fn evaluate(&self, cpu: &Cpu) -> bool {
         match self {
             Self::Unconditional => true,
             Self::NZ => cpu.af[0] & 0b10000000 == 0,
@@ -222,8 +222,8 @@ impl CondOperand {
 }
 
 pub type OpcodeFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
-pub type OpcodeFn = &'static (dyn for<'a> Fn(&'a mut CPU, &'a Rc<RefCell<MemoryMap>>, Co<'a, ()>) -> OpcodeFuture<'a> + Sync);
-pub type LocalOpcodeFn<'a> = Box<dyn FnOnce(&'a mut CPU, &'a Rc<RefCell<MemoryMap>>, Co<'a, ()>) -> OpcodeFuture<'a>>;
+pub type OpcodeFn = &'static (dyn for<'a> Fn(&'a mut Cpu, &'a Rc<RefCell<MemoryMap>>, Co<'a, ()>) -> OpcodeFuture<'a> + Sync);
+pub type LocalOpcodeFn<'a> = Box<dyn FnOnce(&'a mut Cpu, &'a Rc<RefCell<MemoryMap>>, Co<'a, ()>) -> OpcodeFuture<'a>>;
 
 pub static OP_TABLE: [OpcodeFn; 0x100] = generate_op();
 static CB_TABLE: [OpcodeFn; 0x100] = generate_cb();

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::gameboy::{Model, memory::io::{self, IOMap, deserialized::RegSvbk}};
+use crate::gameboy::{Model, memory::io::{self, IoMap, deserialized::RegSvbk}};
 
 pub const ADDRESS_OFFSET: u16 = 0xC000;
 
@@ -10,7 +10,7 @@ pub struct Wram {
 }
 
 impl Wram {
-    pub fn new(model: Model, io: &IOMap) -> Self {
+    pub fn new(model: Model, io: &IoMap) -> Self {
         let mut result = Wram {
             wram: Box::new([[0; 0x1000]; 2]),
             wbk: RegSvbk::wrap(io.clone_pointer(io::MMIO::SVBK))

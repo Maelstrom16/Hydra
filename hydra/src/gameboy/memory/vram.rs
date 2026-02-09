@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
 use crate::gameboy::memory::io::deserialized::{RegStat, RegVbk};
-use crate::gameboy::memory::io::{self, GBReg, IOMap};
+use crate::gameboy::memory::io::{self, GBReg, IoMap};
 
 pub const ADDRESS_OFFSET: u16 = 0x8000;
 
@@ -16,7 +16,7 @@ pub struct Vram {
 }
 
 impl Vram {
-    pub fn new(model: Model, io: &IOMap) -> Self {
+    pub fn new(model: Model, io: &IoMap) -> Self {
         let mut result = Vram {
             vram: Box::new([[0; 0x2000]; 1]),
             vbk: RegVbk::wrap(io.clone_pointer(io::MMIO::VBK)),
