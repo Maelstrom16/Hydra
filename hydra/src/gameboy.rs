@@ -107,12 +107,12 @@ impl GameBoy {
         // Build Game Boy on a new thread
         thread::spawn(move || {
             let io = IoMap::new(model);
-            let joyp = RegJoyp::wrap(io.clone_pointer(MMIO::JOYP));
-            let r#if = RegIf::wrap(io.clone_pointer(MMIO::IF));
+            let joyp = RegJoyp::new(io.clone_pointer(MMIO::JOYP));
+            let r#if = RegIf::new(io.clone_pointer(MMIO::IF));
             let cpu = Some(cpu::Cpu::new(&rom, &io, model));
             let vram = Rc::new(RefCell::new(Vram::new(model, &io)));
             let ppu = Some(ppu::Ppu::new(vram.clone(), &io, graphics, proxy));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::from_rom_and_model(rom, model, vram, io).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(rom, model, vram, io).unwrap())); // TODO: Error should be handled rather than unwrapped
             let clock = Rc::new(Cell::new(0));
             let buttons = PressedButtons::default();
             GameBoy {

@@ -27,7 +27,7 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
-    pub fn from_rom_and_model(rom: Rom, model: Model, vram: Rc<RefCell<Vram>>, io: IoMap) -> Result<MemoryMap, HydraIOError> {
+    pub fn new(rom: Rom, model: Model, vram: Rc<RefCell<Vram>>, io: IoMap) -> Result<MemoryMap, HydraIOError> {
         Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
             vram,

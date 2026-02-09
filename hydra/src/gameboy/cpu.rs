@@ -76,8 +76,8 @@ impl Cpu {
         let sp: u16 = 0xFFFE;
         let pc: u16 = 0x0100;
         let ir: u8 = 0x00;
-        let r#if = RegIf::wrap(io.clone_pointer(io::MMIO::IF));
-        let ie = RegIe::wrap(io.clone_pointer(io::MMIO::IE));
+        let r#if = RegIf::new(io.clone_pointer(io::MMIO::IF));
+        let ie = RegIe::new(io.clone_pointer(io::MMIO::IE));
         let interrupt_handler = InterruptHandler::default();
         match model {
             Model::GameBoy(Some(GBRevision::DMG0)) => {

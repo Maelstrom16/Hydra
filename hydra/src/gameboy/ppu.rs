@@ -60,17 +60,17 @@ impl Ppu {
             next_frame_instant: Instant::now(),
 
             vram,
-            lcdc: RegLcdc::wrap(io.clone_pointer(io::MMIO::LCDC)),
-            stat: RegStat::wrap(io.clone_pointer(io::MMIO::STAT)),
-            scy: RegScy::wrap(io.clone_pointer(io::MMIO::SCY)),
-            scx: RegScx::wrap(io.clone_pointer(io::MMIO::SCX)),
-            ly: RegLy::wrap(io.clone_pointer(io::MMIO::LY)),
-            lyc: RegLyc::wrap(io.clone_pointer(io::MMIO::LYC)),
-            wy: RegWy::wrap(io.clone_pointer(io::MMIO::WY)),
-            wx: RegWx::wrap(io.clone_pointer(io::MMIO::WX)),
-            bgp: RegBgp::wrap(io.clone_pointer(io::MMIO::BGP)),
+            lcdc: RegLcdc::new(io.clone_pointer(io::MMIO::LCDC)),
+            stat: RegStat::new(io.clone_pointer(io::MMIO::STAT)),
+            scy: RegScy::new(io.clone_pointer(io::MMIO::SCY)),
+            scx: RegScx::new(io.clone_pointer(io::MMIO::SCX)),
+            ly: RegLy::new(io.clone_pointer(io::MMIO::LY)),
+            lyc: RegLyc::new(io.clone_pointer(io::MMIO::LYC)),
+            wy: RegWy::new(io.clone_pointer(io::MMIO::WY)),
+            wx: RegWx::new(io.clone_pointer(io::MMIO::WX)),
+            bgp: RegBgp::new(io.clone_pointer(io::MMIO::BGP)),
 
-            r#if: RegIf::wrap(io.clone_pointer(io::MMIO::IF)),
+            r#if: RegIf::new(io.clone_pointer(io::MMIO::IF)),
 
             graphics,
             proxy,
@@ -139,6 +139,7 @@ impl Ppu {
                         self.set_ppu_mode(Mode::Render);
                     } else {
                         // TODO: Whatever OAM Scan is supposed to do
+
                     }
                 }
                 // Render

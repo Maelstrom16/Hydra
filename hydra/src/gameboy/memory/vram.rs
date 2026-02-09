@@ -19,8 +19,8 @@ impl Vram {
     pub fn new(model: Model, io: &IoMap) -> Self {
         let mut result = Vram {
             vram: Box::new([[0; 0x2000]; 1]),
-            vbk: RegVbk::wrap(io.clone_pointer(io::MMIO::VBK)),
-            stat: RegStat::wrap(io.clone_pointer(io::MMIO::STAT)),
+            vbk: RegVbk::new(io.clone_pointer(io::MMIO::VBK)),
+            stat: RegStat::new(io.clone_pointer(io::MMIO::STAT)),
         };
         result.change_model(model);
 

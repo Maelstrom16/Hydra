@@ -13,7 +13,7 @@ impl Wram {
     pub fn new(model: Model, io: &IoMap) -> Self {
         let mut result = Wram {
             wram: Box::new([[0; 0x1000]; 2]),
-            wbk: RegSvbk::wrap(io.clone_pointer(io::MMIO::SVBK))
+            wbk: RegSvbk::new(io.clone_pointer(io::MMIO::SVBK))
         };
         result.change_model(model);
 

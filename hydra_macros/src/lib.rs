@@ -32,8 +32,8 @@ pub fn field_map(attr: TokenStream, item: TokenStream) -> TokenStream {
         #item_struct
         // Constructor
         impl #item_struct_ident {
-            /// Wraps a `MaskedBitSet<T>` for use with this field map.
-            pub fn wrap(bitset: std::rc::Rc<std::cell::Cell<#ty>>) -> #item_struct_ident {
+            /// Wraps a `Rc<Cell<T>>` for use with this field map.
+            pub fn new(bitset: std::rc::Rc<std::cell::Cell<#ty>>) -> #item_struct_ident {
                 #item_struct_ident { inner: bitset, }
             }
         }
