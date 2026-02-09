@@ -1,9 +1,7 @@
 mod fifo;
 
 use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    sync::{Arc, RwLock},
+    cell::{Cell, RefCell}, rc::Rc, sync::{Arc, RwLock}, thread, time::{Duration, Instant}
 };
 
 use genawaiter::stack::Co;
@@ -19,6 +17,7 @@ use crate::{
 pub struct PPU {
     fifo: RenderQueue,
     screen_buffer: Box<[u8]>,
+    next_frame_instant: Instant,
 
     vram: Rc<RefCell<Vram>>,
     lcdc: RegLcdc,
@@ -58,6 +57,7 @@ impl PPU {
         let mut result = PPU {
             fifo: RenderQueue::new(),
             screen_buffer,
+            next_frame_instant: Instant::now(),
 
             vram,
             lcdc: RegLcdc::wrap(io.clone_pointer(io::MMIO::LCDC)),
@@ -202,7 +202,14 @@ impl PPU {
         }
     }
 
-    fn push_to_viewport(&self) {
+    fn push_to_viewport(&mut self) {
+        // Delay thread
+        const SECS_PER_FRAME: f64 = 1f64 / 60f64;
+        let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
+        thread::sleep(duration_until_next);
+        self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
+
+        // Send redraw request through event loop proxy
         let graphics = self.graphics.read().unwrap();
         graphics.update_screen_texture(&self.screen_buffer);
         self.proxy.send_event(UserEvent::RedrawRequest).expect("Unable to render Game Boy graphics: Main event loop closed unexpectedly");

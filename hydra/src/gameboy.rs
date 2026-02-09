@@ -14,9 +14,7 @@ use crate::{
     window::HydraApp
 };
 use std::{
-    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::{
-        mpsc::{Receiver, Sender, channel},
-    }, thread
+    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::mpsc::{Receiver, Sender, channel}, thread, time::{Duration, Instant}
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -187,62 +185,48 @@ impl Emulator for GameBoy {
     fn main_thread(mut self) {
         println!("Launching Wyrm");
 
-        // Enter coroutine scope
-        {
-            // Generate Coroutines
-            let mut cpu = self.cpu.take().unwrap();
-            let mut ppu = self.ppu.take().unwrap();
-            let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, true));
-            let_gen_using!(ppu_coro, |co| ppu.coro(self.clock.clone(), co));
+        // Generate Coroutines
+        let mut cpu = self.cpu.take().unwrap();
+        let mut ppu = self.ppu.take().unwrap();
+        let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, false));
+        let_gen_using!(ppu_coro, |co| ppu.coro(self.clock.clone(), co));
+        
+        // Main loop
+        'main: loop {
+            self.clock.set((self.clock.get() + 1) % CYCLES_PER_FRAME);
+            cpu_coro.resume();
+            ppu_coro.resume();
 
-            // Main loop
-            // let mut durs = [0.0f64, 0.0f64, 0.0f64];
-            'main: loop {
-                // let start = Instant::now();
-                self.clock.set((self.clock.get() + 1) % CYCLES_PER_FRAME);
-                // let clktime = Instant::now();
-                cpu_coro.resume();
-                // let cputime = Instant::now();
-                ppu_coro.resume();
-                // let pputime = Instant::now();
-                // durs[0] = ((clktime - start).as_secs_f64() + durs[0]) / 2.0f64;
-                // durs[1] = ((cputime - clktime).as_secs_f64() + durs[1]) / 2.0f64;
-                // durs[2] = ((pputime - cputime).as_secs_f64() + durs[2]) / 2.0f64;
+            self.update_joyp();
 
-                self.update_joyp();
-
-                // Every frame
-                if self.clock.get() == 0 {
-                    // Display diagnostic information
-                    // println!("CLK: {}; CPU: {}; PPU: {}", durs[0], durs[1], durs[2]);
-
-                    // Process any new messages
-                    for msg in self.channel.try_iter() {
-                        match msg {
-                            // TODO: Allow remapping controls in the future
-                            EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
-                                KeyCode::KeyW => self.buttons.up = state.is_pressed(),
-                                KeyCode::KeyS => self.buttons.down = state.is_pressed(),
-                                KeyCode::KeyA => self.buttons.left = state.is_pressed(),
-                                KeyCode::KeyD => self.buttons.right = state.is_pressed(),
-                                KeyCode::KeyK => self.buttons.a = state.is_pressed(),
-                                KeyCode::KeyJ => self.buttons.b = state.is_pressed(),
-                                KeyCode::Enter => self.buttons.start = state.is_pressed(),
-                                KeyCode::ShiftRight => self.buttons.select = state.is_pressed(),
-                                _ => {}
-                            }
-                            EmuMessage::HotSwap(path) => {
-                                if let Err(e) = self.memory.borrow_mut().hot_swap_rom(path) {
-                                    println!("{}", e);
-                                }
-                            },
-                            EmuMessage::Stop => break 'main,
-                            _ => {} // Do nothing
+            // Every frame
+            if self.clock.get() == 0 {
+                // Process any new messages
+                for msg in self.channel.try_iter() {
+                    match msg {
+                        // TODO: Allow remapping controls in the future
+                        EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
+                            KeyCode::KeyW => self.buttons.up = state.is_pressed(),
+                            KeyCode::KeyS => self.buttons.down = state.is_pressed(),
+                            KeyCode::KeyA => self.buttons.left = state.is_pressed(),
+                            KeyCode::KeyD => self.buttons.right = state.is_pressed(),
+                            KeyCode::KeyK => self.buttons.a = state.is_pressed(),
+                            KeyCode::KeyJ => self.buttons.b = state.is_pressed(),
+                            KeyCode::Enter => self.buttons.start = state.is_pressed(),
+                            KeyCode::ShiftRight => self.buttons.select = state.is_pressed(),
+                            _ => {}
                         }
+                        EmuMessage::HotSwap(path) => {
+                            if let Err(e) = self.memory.borrow_mut().hot_swap_rom(path) {
+                                println!("{}", e);
+                            }
+                        },
+                        EmuMessage::Stop => break 'main,
+                        _ => {} // Do nothing
                     }
                 }
             }
-        } // Coroutines now out of scope
+        }
 
         println!("Exiting Wyrm");
 
