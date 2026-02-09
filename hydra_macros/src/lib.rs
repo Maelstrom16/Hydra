@@ -25,7 +25,7 @@ pub fn field_map(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.into_compile_error().into()
     };
 
-    item_struct.fields = Fields::Named(parse_quote!({inner: std::rc::Rc<crate::common::bit::MaskedBitSet<#ty>>}));
+    item_struct.fields = Fields::Named(parse_quote!({inner: std::rc::Rc<std::cell::Cell<#ty>>}));
     let item_struct_ident = &item_struct.ident;
     
     TokenStream::from(quote! {
@@ -33,7 +33,7 @@ pub fn field_map(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Constructor
         impl #item_struct_ident {
             /// Wraps a `MaskedBitSet<T>` for use with this field map.
-            pub fn wrap(bitset: std::rc::Rc<crate::common::bit::MaskedBitSet<#ty>>) -> #item_struct_ident {
+            pub fn wrap(bitset: std::rc::Rc<std::cell::Cell<#ty>>) -> #item_struct_ident {
                 #item_struct_ident { inner: bitset, }
             }
         }

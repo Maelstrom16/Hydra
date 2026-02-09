@@ -1,6 +1,6 @@
 pub mod deserialized;
 
-use std::{array, rc::Rc};
+use std::{array, cell::Cell, rc::Rc};
 
 use hydra_macros::TrijectiveMMIO;
 
@@ -92,13 +92,13 @@ pub enum MMIO {
 pub type GBReg = MaskedBitSet<u8>;
 
 pub struct IoMap {
-    registers: [Rc<GBReg>; MMIO::VARIANT_COUNT]
+    registers: [GBReg; MMIO::VARIANT_COUNT]
 }
 
 impl IoMap {
     pub fn new(model: Model) -> Self {
         IoMap {
-            registers: array::from_fn(|index| Rc::new(match MMIO::from_local(index) {
+            registers: array::from_fn(|index| match MMIO::from_local(index) {
                 // Define default values for all registers and models
                 MMIO::JOYP => GBReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
                 MMIO::SB => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
@@ -257,7 +257,7 @@ impl IoMap {
                     Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
                 },
                 MMIO::IE => GBReg::new(0x00, 0b00011111, 0b00011111, WriteBehavior::Standard),
-            }))
+            })
         }
     }
 }
@@ -271,8 +271,8 @@ impl IoMap {
         Ok(self.registers[Self::localize_address(address)?].write(value))
     }
 
-    pub fn clone_pointer(&self, mmio: MMIO) -> Rc<GBReg> {
-        self.registers[mmio.to_local()].clone()
+    pub fn clone_pointer(&self, mmio: MMIO) -> Rc<Cell<u8>> {
+        self.registers[mmio.to_local()].clone_inner()
     }
 
     const fn localize_address(address: u16) -> Result<usize, HydraIOError> {

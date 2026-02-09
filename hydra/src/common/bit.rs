@@ -9,9 +9,9 @@ use funty::Unsigned;
 /// `I` is the type of a `DeserializedRegister<U>` into which this `MaskedBitSet`
 /// may be deserialized into.
 pub struct MaskedBitSet<T> {
-    inner: Cell<T>,
-    read_mask: Cell<T>,
-    write_mask: Cell<T>,
+    inner: Rc<Cell<T>>,
+    read_mask: T,
+    write_mask: T,
     write_fn: fn(&MaskedBitSet<T>, val: T),
 }
 
@@ -23,9 +23,9 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
         };
 
         MaskedBitSet { 
-            inner: Cell::new(value), 
-            read_mask: Cell::new(read_mask), 
-            write_mask: Cell::new(write_mask), 
+            inner: Rc::new(Cell::new(value)), 
+            read_mask: read_mask, 
+            write_mask: write_mask, 
             write_fn,
         }
     }
@@ -34,20 +34,15 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
         MaskedBitSet::new(T::ZERO.not(), T::ZERO, T::ZERO, WriteBehavior::Standard)
     }
 
-    /// Returns a copy of the contained value.
-    pub fn get(&self) -> T {
-        self.inner.get()
-    }
-
-    /// Sets the contained value.
-    pub fn set(&self, val: T) {
-        self.inner.set(val)
+    /// Clones a shared pointer to the inner value.
+    pub fn clone_inner(&self) -> Rc<Cell<T>> {
+        self.inner.clone()
     }
 
     /// Returns a copy of the contained value, with write-only
     /// and unimplemented bits replaced by a 1.
     pub fn read(&self) -> T {
-        self.inner.get() | !self.read_mask.get()
+        self.inner.get() | !self.read_mask
     }
 
     /// Sets the contained value, with read-only
@@ -57,8 +52,7 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
     }
 
     fn write_standard(&self, val: T) {
-        let write_mask = self.write_mask.get();
-        self.inner.set((self.inner.get() & !write_mask) | (val & write_mask))
+        self.inner.set((self.inner.get() & !self.write_mask) | (val & self.write_mask))
     }
 
     fn write_reset(&self, _val: T) {
@@ -67,9 +61,9 @@ impl<T> MaskedBitSet<T> where T: Unsigned {
 
     /// Redefines which bits of this register are
     /// readable and/or writable. 
-    pub fn change_masks(&self, read_mask: T, write_mask: T) {
-        self.read_mask.set(read_mask);
-        self.write_mask.set(write_mask);
+    pub fn change_masks(&mut self, read_mask: T, write_mask: T) {
+        self.read_mask = read_mask;
+        self.write_mask = write_mask;
     }
 }
 

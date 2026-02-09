@@ -1,3 +1,4 @@
+mod apu;
 mod cpu;
 mod memory;
 mod ppu;
