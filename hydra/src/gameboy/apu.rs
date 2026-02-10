@@ -1,15 +1,10 @@
-use std::f32;
+mod deserializers;
 
-use cpal::{OutputCallbackInfo, Sample, StreamConfig, StreamError, traits::{DeviceTrait, HostTrait, StreamTrait}};
+use cpal::{traits::{DeviceTrait, HostTrait, StreamTrait}};
 
-use crate::gameboy::memory::io::{IoMap, MMIO, deserialized::{RegNr10, RegNr11, RegNr12, RegNr13, RegNr14, RegNr21, RegNr22, RegNr23, RegNr24, RegNr30, RegNr31, RegNr32, RegNr33, RegNr34, RegNr41, RegNr42, RegNr43, RegNr44, RegNr50, RegNr51, RegNr52, RegWav00, RegWav01, RegWav02, RegWav03, RegWav04, RegWav05, RegWav06, RegWav07, RegWav08, RegWav09, RegWav10, RegWav11, RegWav12, RegWav13, RegWav14, RegWav15}};
+use crate::{common::audio, gameboy::memory::io::{IoMap, deserialized::{RegNr10, RegNr11, RegNr12, RegNr13, RegNr14, RegNr21, RegNr22, RegNr23, RegNr24, RegNr30, RegNr31, RegNr32, RegNr33, RegNr34, RegNr41, RegNr42, RegNr43, RegNr44, RegNr50, RegNr51, RegNr52, RegWav00, RegWav01, RegWav02, RegWav03, RegWav04, RegWav05, RegWav06, RegWav07, RegWav08, RegWav09, RegWav10, RegWav11, RegWav12, RegWav13, RegWav14, RegWav15}}};
 
-pub struct Apu {
-    nr10: RegNr10,
-    nr11: RegNr11,
-    nr12: RegNr12,
-    nr13: RegNr13,
-    nr14: RegNr14,
+pub struct Apu {                              
 
     nr21: RegNr21,
     nr22: RegNr22,
@@ -54,28 +49,8 @@ pub fn test() {
     let output = host.default_output_device().unwrap();
     let supported_config = output.default_output_config().unwrap();
     let config = supported_config.into();
-    let stream = output.build_output_stream(&config, sine_callback(880.0, &config), error_callback, None).unwrap();
+    let stream = output.build_output_stream(&config, audio::sawtooth_callback(440.0, &config), audio::error_callback, None).unwrap();
 
     stream.play().unwrap();
     std::thread::sleep(std::time::Duration::from_secs(3));
-}
-
-fn sine_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
-    let mut phase = 0f32;
-    let sample_rate = config.sample_rate as f32;
-    let channels = config.channels as f32;
-
-    let inc = ((frequency * f32::consts::TAU) / sample_rate) / channels;
-
-    move |samples, _callback_info| {
-        for sample in samples.iter_mut() {
-            *sample = (phase.sin() + 1.0) / 2.0;
-            phase += inc;
-            phase %= f32::consts::TAU;
-        }
-    }
-}
-
-fn error_callback(err: StreamError) {
-    panic!("Audio streaming error: {}", err)
 }

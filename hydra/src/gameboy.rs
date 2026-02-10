@@ -107,8 +107,8 @@ impl GameBoy {
         // Build Game Boy on a new thread
         thread::spawn(move || {
             let io = IoMap::new(model);
-            let joyp = RegJoyp::new(io.clone_pointer(MMIO::JOYP));
-            let r#if = RegIf::new(io.clone_pointer(MMIO::IF));
+            let joyp = RegJoyp::new(io.clone_register(MMIO::JOYP));
+            let r#if = RegIf::new(io.clone_register(MMIO::IF));
             let cpu = Some(cpu::Cpu::new(&rom, &io, model));
             let vram = Rc::new(RefCell::new(Vram::new(model, &io)));
             let ppu = Some(ppu::Ppu::new(vram.clone(), &io, graphics, proxy));

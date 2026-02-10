@@ -271,7 +271,7 @@ impl IoMap {
         Ok(self.registers[Self::localize_address(address)?].write(value))
     }
 
-    pub fn clone_pointer(&self, mmio: MMIO) -> Rc<Cell<u8>> {
+    pub fn clone_register(&self, mmio: MMIO) -> Rc<Cell<u8>> {
         self.registers[mmio.to_local()].clone_inner()
     }
 
@@ -281,4 +281,8 @@ impl IoMap {
             None => Err(HydraIOError::OpenBusAccess)
         }
     }
+}
+
+pub trait MmioDeserializer {
+    fn new(io: &IoMap) -> Self;
 }
