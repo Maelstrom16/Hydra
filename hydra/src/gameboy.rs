@@ -2,6 +2,7 @@ mod apu;
 mod cpu;
 mod memory;
 mod ppu;
+mod timer;
 
 use genawaiter::stack::let_gen_using;
 use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
@@ -10,11 +11,11 @@ use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
     },
-    gameboy::{apu::Apu, memory::{MemoryMap, MemoryMappedIo, io::{MMIO, deserialized::MasterTimer}, rom::Rom, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::ColorMap, lcdc::LcdController, state::PpuState}},
+    gameboy::{apu::Apu, cpu::Cpu, memory::{MMIO, MemoryMap, MemoryMappedIo, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer},
     window::HydraApp
 };
 use std::{
-    cell::{Cell, RefCell}, ffi::OsStr, fs, ops::Deref, path::Path, rc::Rc, sync::mpsc::{Receiver, Sender, channel}, thread, time::{Duration, Instant}
+    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::mpsc::{Receiver, Sender, channel}, thread, time::{Duration, Instant}
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -83,10 +84,10 @@ pub enum AGBRevision {
 }
 
 pub struct GameBoy {
-    //apu: apu::APU,
-    cpu: Option<cpu::Cpu>,
+    // apu: Option<Apu>,
+    cpu: Option<Cpu>,
     memory: Rc<RefCell<MemoryMap>>,
-    ppu: Option<ppu::Ppu>,
+    ppu: Option<Ppu>,
     clock: Rc<RefCell<MasterTimer>>,
 
     joypad: Rc<RefCell<Joypad>>,
@@ -249,12 +250,12 @@ impl Joypad {
         *self.joyp = (*self.joyp & 0b00110000) | (after ^ 0b1111);
     }
 
-    pub fn press_button(&mut self, button: Button, is_pressed: bool) {
+    pub(self) fn press_button(&mut self, button: Button, is_pressed: bool) {
         self.button_vector.map_bits(button as u8, is_pressed);
         self.refresh();
     }
 
-    pub fn press_dpad(&mut self, dpad: Dpad, is_pressed: bool) {
+    pub(self) fn press_dpad(&mut self, dpad: Dpad, is_pressed: bool) {
         self.dpad_vector.map_bits(dpad as u8, is_pressed);
         self.refresh();
     }

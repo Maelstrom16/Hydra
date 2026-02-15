@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{deserialize, gameboy::{Model, memory::{MemoryMappedIo, io::MMIO}}, serialize};
+use crate::{deserialize, gameboy::{Model, memory::{MMIO, MemoryMappedIo}}, serialize};
 
 pub struct ColorMap {
     bgp: [u8; 4]
@@ -46,3 +46,12 @@ impl MemoryMappedIo<{MMIO::BGP as u16}> for ColorMap {
         );
     }
 }
+
+//         MMIO::OBP0 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // Unitialized, but 0xFF is a common value
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
+//         },
+//         MMIO::OBP1 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // Unitialized, but 0xFF is a common value
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
+//         },

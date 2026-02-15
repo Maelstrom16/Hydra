@@ -37,3 +37,8 @@ impl RenderQueue {
 pub struct Pixel {
     color: u8,
 }
+
+//         MMIO::DMA => GBReg::new(match model {
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => 0xFF,
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0x00,
+//         }, 0b11111111, 0b11111111),

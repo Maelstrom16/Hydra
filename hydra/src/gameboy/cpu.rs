@@ -1,7 +1,7 @@
 mod ime;
 mod opcode;
 
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use futures::FutureExt;
 use genawaiter::stack::Co;

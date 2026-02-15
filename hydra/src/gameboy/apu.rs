@@ -1,4 +1,4 @@
-mod deserializers;
+mod channel;
 
 use cpal::{traits::{DeviceTrait, HostTrait, StreamTrait}};
 

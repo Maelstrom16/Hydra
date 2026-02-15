@@ -1,4 +1,4 @@
-use crate::{deserialize, gameboy::memory::{MemoryMappedIo, io::MMIO}, serialize};
+use crate::{deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
 
 pub struct LcdController {
     pub(super) lcd_enabled: bool,

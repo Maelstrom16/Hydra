@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, memory::{MemoryMappedIo, io::MMIO}, ppu::PpuMode}, serialize};
+use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, memory::{MMIO, MemoryMappedIo}, ppu::PpuMode}, serialize};
 
 pub struct PpuState {
     ppu_mode: Rc<RefCell<PpuMode>>,

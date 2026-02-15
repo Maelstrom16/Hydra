@@ -12,7 +12,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        Interrupt, InterruptFlags, memory::{io::{self, deserialized::{MasterTimer, RegBgp, RegScx, RegScy, RegWx, RegWy}}, vram::Vram}, ppu::{colormap::ColorMap, fifo::RenderQueue, lcdc::LcdController, state::PpuState}
+        InterruptFlags, memory::vram::Vram, ppu::{colormap::ColorMap, fifo::RenderQueue, lcdc::LcdController, state::PpuState}, timer::MasterTimer
     }, graphics::Graphics, window::UserEvent
 };
 
