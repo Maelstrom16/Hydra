@@ -60,15 +60,15 @@ impl HydraApp {
         &self.config
     }
 
-    pub fn get_window(&self) -> Arc<Window> {
+    pub fn clone_window(&self) -> Arc<Window> {
         Arc::clone(self.window.as_ref().unwrap())
     }
 
-    pub fn get_graphics(&self) -> Arc<RwLock<Graphics>> {
+    pub fn clone_graphics(&self) -> Arc<RwLock<Graphics>> {
         Arc::clone(self.graphics.as_ref().unwrap())
     }
 
-    pub fn get_proxy(&self) -> EventLoopProxy<UserEvent> {
+    pub fn clone_proxy(&self) -> EventLoopProxy<UserEvent> {
         self.proxy.clone()
     }
 

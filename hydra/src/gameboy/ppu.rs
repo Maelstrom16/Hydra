@@ -1,4 +1,7 @@
+pub mod colormap;
 mod fifo;
+pub mod lcdc;
+pub mod state;
 
 use std::{
     cell::{Cell, RefCell}, rc::Rc, sync::{Arc, RwLock}, thread, time::{Duration, Instant}
@@ -9,41 +12,50 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        memory::{io::{self, IoMap, deserialized::{RegBgp, RegIf, RegLcdc, RegLy, RegLyc, RegScx, RegScy, RegStat, RegWx, RegWy}}, vram::Vram},
-        ppu::fifo::RenderQueue,
+        Interrupt, InterruptFlags, memory::{io::{self, deserialized::{MasterTimer, RegBgp, RegScx, RegScy, RegWx, RegWy}}, vram::Vram}, ppu::{colormap::ColorMap, fifo::RenderQueue, lcdc::LcdController, state::PpuState}
     }, graphics::Graphics, window::UserEvent
 };
 
 pub struct Ppu {
+    timer: Rc<RefCell<MasterTimer>>,
     fifo: RenderQueue,
     screen_buffer: Box<[u8]>,
     next_frame_instant: Instant,
 
     vram: Rc<RefCell<Vram>>,
-    lcdc: RegLcdc,
-    stat: RegStat,
-    scy: RegScy,
-    scx: RegScx,
-    ly: RegLy,
-    lyc: RegLyc,
-    wy: RegWy,
-    wx: RegWx,
-    bgp: RegBgp,
+    lcdc: Rc<RefCell<LcdController>>,
+    status: Rc<RefCell<PpuState>>,
+    scy: Rc<Cell<u8>>,
+    scx: Rc<Cell<u8>>,
+    wy: Rc<Cell<u8>>,
+    wx: Rc<Cell<u8>>,
+    color_map: Rc<RefCell<ColorMap>>,
 
-    r#if: RegIf,
+    interrupt_flags: Rc<RefCell<InterruptFlags>>,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
 }
 
-pub enum Mode {
-    HBlank,
-    VBlank,
-    OAMScan,
-    Render,
+#[derive(Copy, Clone, PartialEq)]
+pub enum PpuMode {
+    HBlank = 0,
+    VBlank = 1,
+    OAMScan = 2,
+    Render = 3,
 }
 
-pub const DOTS: u32 = 456;
+impl PpuMode {
+    pub const fn as_stat_line_flag(self) -> u8 {
+        match self {
+            Self::HBlank  => 0b00001000,
+            Self::VBlank  => 0b00010000,
+            Self::OAMScan => 0b00100000,
+            Self::Render  => 0b00000000,
+        }
+    }
+}
+
 const SCANLINES: u32 = 154;
 const SCREEN_WIDTH: u8 = 160;
 const SCREEN_HEIGHT: u8 = 144;
@@ -52,25 +64,24 @@ const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl Ppu {
-    pub fn new(vram: Rc<RefCell<Vram>>, io: &IoMap, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(vram: Rc<RefCell<Vram>>, lcdc: Rc<RefCell<LcdController>>, status: Rc<RefCell<PpuState>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
         let mut result = Ppu {
+            timer,
             fifo: RenderQueue::new(),
             screen_buffer,
             next_frame_instant: Instant::now(),
 
             vram,
-            lcdc: RegLcdc::new(io.clone_register(io::MMIO::LCDC)),
-            stat: RegStat::new(io.clone_register(io::MMIO::STAT)),
-            scy: RegScy::new(io.clone_register(io::MMIO::SCY)),
-            scx: RegScx::new(io.clone_register(io::MMIO::SCX)),
-            ly: RegLy::new(io.clone_register(io::MMIO::LY)),
-            lyc: RegLyc::new(io.clone_register(io::MMIO::LYC)),
-            wy: RegWy::new(io.clone_register(io::MMIO::WY)),
-            wx: RegWx::new(io.clone_register(io::MMIO::WX)),
-            bgp: RegBgp::new(io.clone_register(io::MMIO::BGP)),
+            lcdc,
+            status,
+            scy,
+            scx,
+            wy,
+            wx,
+            color_map,
 
-            r#if: RegIf::new(io.clone_register(io::MMIO::IF)),
+            interrupt_flags,
 
             graphics,
             proxy,
@@ -83,67 +94,35 @@ impl Ppu {
         self.graphics.write().unwrap().resize_screen_texture(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
     }
 
-    fn set_ppu_mode(&mut self, mode: Mode) {
-        if let Mode::VBlank = mode {self.r#if.set_vblank(true)};
-        self.stat.set_ppu_mode(mode as u8);
-    }
-
-    fn update_ly(&mut self, clk: u32) -> u8 {
-        let ly = (clk / DOTS) as u8;
-        self.ly.set(ly);
-        self.stat.set_ly_equals_lyc(ly == self.lyc.get());
-
-        ly
-    }
-
-    fn stat_interrupt(&mut self) {
-        let ppu_mode = self.stat.get_ppu_mode();
-        if self.stat.get_mode_0_int() && ppu_mode == 0
-        || self.stat.get_mode_1_int() && ppu_mode == 1
-        || self.stat.get_mode_2_int() && ppu_mode == 2
-        || self.stat.get_lyc_int() && self.stat.get_ly_equals_lyc() {
-            self.r#if.set_stat(true);
-        }
-    }
-
     #[inline(always)]
-    pub async fn coro(&mut self, clock: Rc<Cell<u32>>, co: Co<'_, ()>) {
+    pub async fn coro(&mut self, co: Co<'_, ()>) {
         loop {
-            // Update screen position
-            let clk = clock.get();
-            let ly = self.update_ly(clk);
-            let lx = (clk % DOTS) as u8;
-
-            self.stat_interrupt(); // TODO: Verify when this needs to be called
+            let (lx, ly) = self.status.borrow().get_dot_coords();
 
             // Perform mode-specific behavior
-            match self.stat.get_ppu_mode() {
-                // HBlank
-                0 => {
+            match {self.status.borrow().get_mode()} {
+                PpuMode::HBlank => {
                     if ly == SCREEN_HEIGHT {
-                        self.set_ppu_mode(Mode::VBlank);
+                        self.status.borrow_mut().set_mode(PpuMode::VBlank);
                         self.push_to_viewport();
                     } else if lx == 0 {
-                        self.set_ppu_mode(Mode::OAMScan);
+                        self.status.borrow_mut().set_mode(PpuMode::OAMScan);
                     }
                 }
-                // VBlank
-                1 => {
+                PpuMode::VBlank => {
                     if ly == 0 {
-                        self.set_ppu_mode(Mode::OAMScan);
+                        self.status.borrow_mut().set_mode(PpuMode::OAMScan);
                     }
                 }
-                // OAM scan
-                2 => {
+                PpuMode::OAMScan => {
                     if lx == 80 {
-                        self.set_ppu_mode(Mode::Render);
+                        self.status.borrow_mut().set_mode(PpuMode::Render);
                     } else {
                         // TODO: Whatever OAM Scan is supposed to do
 
                     }
                 }
-                // Render
-                3 => {
+                PpuMode::Render => {
                     // Screen texture generation
 
                     // Slight delay in rendering depending on horizontal scroll
@@ -152,13 +131,13 @@ impl Ppu {
                     }
 
                     // Begin rendering at 
-                    let screen_y = self.ly.get();
+                    let screen_y = ly;
                     for screen_x in 0..SCREEN_WIDTH {
                         // Only render if LCD is enabled (LCDC bit 7)
-                        if self.lcdc.get_ppu_enabled() {
-                            let data_low_address = if self.lcdc.get_tile_data_index() == 1 {0x8000} else {0x9000};
-                            let bg_map_address = if self.lcdc.get_bg_map_index() == 0 {0x9800} else {0x9C00};
-                            let win_map_address = if self.lcdc.get_win_map_index() == 0 {0x9800} else {0x9C00};
+                        if self.lcdc.borrow().lcd_enabled {
+                            let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
+                            let bg_map_address = self.lcdc.borrow().bg_map_area as u16;
+                            let win_map_address = self.lcdc.borrow().win_map_area as u16;
 
                             let map_x = u8::wrapping_add(screen_x, self.scx.get());
                             let map_y = u8::wrapping_add(screen_y, self.scy.get());
@@ -185,7 +164,7 @@ impl Ppu {
                                           | color_index_bits[0];
 
                             // TODO: allow colors to be configured by user
-                            let color = self.bgp.get_color(color_index);
+                            let color = self.color_map.borrow().get_color(color_index);
 
                             let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
                             self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color);
@@ -195,7 +174,7 @@ impl Ppu {
                     }
 
                     // Return to HBlank upon completion of the scanline
-                    self.set_ppu_mode(Mode::HBlank);
+                    self.status.borrow_mut().set_mode(PpuMode::HBlank);
                 }
                 _ => panic!("Invalid PPU mode")
             }

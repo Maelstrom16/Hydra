@@ -1,30 +1,26 @@
 use std::rc::Rc;
 
-use crate::gameboy::{Model, memory::io::{self, IoMap, deserialized::RegSvbk}};
+use crate::gameboy::Model;
 
 pub const ADDRESS_OFFSET: u16 = 0xC000;
 
 pub struct Wram {
+    model: Rc<Model>,
     wram: Box<[[u8; 0x1000]]>,
-    wbk: RegSvbk,
+    wbk: u8,
 }
 
 impl Wram {
-    pub fn new(model: Model, io: &IoMap) -> Self {
-        let mut result = Wram {
-            wram: Box::new([[0; 0x1000]; 2]),
-            wbk: RegSvbk::new(io.clone_register(io::MMIO::SVBK))
+    pub fn new(model: Rc<Model>) -> Self {
+        let bank_count = match model.is_monochrome() {
+            true => 2,
+            false => 8
         };
-        result.change_model(model);
 
-        result
-    }
-
-    pub fn change_model(&mut self, model: Model) {
-        match (self.is_monochrome(), model.is_monochrome()) {
-            (false, true) => self.wram = Box::from(&self.wram[0..2]),
-            (true, false) => self.wram = [&self.wram[0..2], &[[0; 0x1000]; 6]].concat().into_boxed_slice(),
-            _ => {}
+        Wram {
+            model,
+            wram: vec![[0; 0x1000]; 2].into_boxed_slice(),
+            wbk: 0
         }
     }
 
@@ -40,22 +36,10 @@ impl Wram {
         self.wram[self.get_bank_id(local_address) as usize][local_address % 0x1000] = value
     }
 
-    fn is_monochrome(&self) -> bool {
-        let bank_count = self.wram.len();
-
-        bank_count == 2
-    }
-
-    fn is_color(&self) -> bool {
-        let bank_count = self.wram.len();
-
-        bank_count == 8
-    }
-
     fn get_bank_id(&self, address: usize) -> u8 {
         match address {
             0..0x1000 => 0,
-            _ => if self.is_monochrome() {1} else {self.wbk.get().max(1)}
+            _ => if self.model.is_monochrome() {1} else {self.wbk.max(1)}
         }
     }
 

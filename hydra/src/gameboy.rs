@@ -8,14 +8,13 @@ use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 
 use crate::{
     common::{
-        emulator::{EmuMessage, Emulator},
-        errors::HydraIOError,
+        bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
     },
-    gameboy::memory::{io::{IoMap, MMIO, deserialized::{RegIf, RegJoyp}}, rom::Rom, vram::Vram},
+    gameboy::{apu::Apu, memory::{MemoryMap, MemoryMappedIo, io::{MMIO, deserialized::MasterTimer}, rom::Rom, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::ColorMap, lcdc::LcdController, state::PpuState}},
     window::HydraApp
 };
 use std::{
-    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::mpsc::{Receiver, Sender, channel}, thread, time::{Duration, Instant}
+    cell::{Cell, RefCell}, ffi::OsStr, fs, ops::Deref, path::Path, rc::Rc, sync::mpsc::{Receiver, Sender, channel}, thread, time::{Duration, Instant}
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -86,13 +85,11 @@ pub enum AGBRevision {
 pub struct GameBoy {
     //apu: apu::APU,
     cpu: Option<cpu::Cpu>,
-    memory: Rc<RefCell<memory::MemoryMap>>,
+    memory: Rc<RefCell<MemoryMap>>,
     ppu: Option<ppu::Ppu>,
-    clock: Rc<Cell<u32>>,
+    clock: Rc<RefCell<MasterTimer>>,
 
-    buttons: PressedButtons,
-    joyp: RegJoyp,
-    r#if: RegIf,
+    joypad: Rc<RefCell<Joypad>>,
 
     channel: Receiver<EmuMessage>,
 }
@@ -101,31 +98,39 @@ impl GameBoy {
     fn from_revision(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let rom = Rom::from_vec(fs::read(path)?)?;
         let (send, recv) = channel();
-        let graphics = app.get_graphics();
-        let proxy = app.get_proxy();
+        let graphics = app.clone_graphics();
+        let proxy = app.clone_proxy();
 
         // Build Game Boy on a new thread
         thread::spawn(move || {
-            let io = IoMap::new(model);
-            let joyp = RegJoyp::new(io.clone_register(MMIO::JOYP));
-            let r#if = RegIf::new(io.clone_register(MMIO::IF));
-            let cpu = Some(cpu::Cpu::new(&rom, &io, model));
-            let vram = Rc::new(RefCell::new(Vram::new(model, &io)));
-            let ppu = Some(ppu::Ppu::new(vram.clone(), &io, graphics, proxy));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(rom, model, vram, io).unwrap())); // TODO: Error should be handled rather than unwrapped
-            let clock = Rc::new(Cell::new(0));
-            let buttons = PressedButtons::default();
+            let model = Rc::new(model);
+            let interrupt_flags = Rc::new(RefCell::new(InterruptFlags::new()));
+            let interrupt_enable = Rc::new(RefCell::new(InterruptEnable::new()));
+            let joypad = Rc::new(RefCell::new(Joypad::new(interrupt_flags.clone())));
+            let cpu = Some(cpu::Cpu::new(&rom, &model, interrupt_flags.clone(), interrupt_enable.clone()));
+            let ppu_mode = Rc::new(RefCell::new(PpuMode::OAMScan));
+            let vram = Rc::new(RefCell::new(Vram::new(model.clone(), ppu_mode.clone())));
+            let wram = Rc::new(RefCell::new(Wram::new(model.clone())));
+            let apu = Rc::new(RefCell::new(Apu::new()));
+            let lcd_controller = Rc::new(RefCell::new(LcdController::new()));
+            let ppu_state = Rc::new(RefCell::new(PpuState::new(&model, ppu_mode.clone(), interrupt_flags.clone())));
+            let clock = Rc::new(RefCell::new(MasterTimer::new(model.clone(), apu.clone(), ppu_state.clone(), interrupt_flags.clone())));
+            let scy = Rc::new(Cell::new(0x00));
+            let scx = Rc::new(Cell::new(0x00));
+            let wy = Rc::new(Cell::new(0x00));
+            let wx = Rc::new(Cell::new(0x00));
+            let color_map = Rc::new(RefCell::new(ColorMap::new(&model)));
+            let ppu = Some(ppu::Ppu::new(vram.clone(), lcd_controller.clone(), ppu_state.clone(), clock.clone(), interrupt_flags.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
+            let apu = Rc::new(RefCell::new(Apu::new()));
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(rom, vram, wram, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
             GameBoy {
                 cpu,
                 memory,
                 ppu,
                 clock,
-                buttons,
-                joyp,
-                r#if,
+                joypad,
                 channel: recv,
-            }
-            .main_thread();
+            }.main_thread();
         });
         Ok(send)
     }
@@ -151,36 +156,7 @@ impl GameBoy {
             println!("");
         }
     }
-
-    fn update_joyp(&mut self) {
-        // Save pressed buttons and set bottom nybble (i.e. unpress them)
-        let joyp_original = self.joyp.get_entire();
-        self.joyp.set_entire(joyp_original | 0x0F);
-
-        let polling_buttons = !self.joyp.get_polling_buttons();
-        let polling_dpad = !self.joyp.get_polling_dpad();
-        if polling_buttons || polling_dpad {
-            let mut joypad_interrupt = false;
-
-            let mut update_pair = |button: bool, dpad: bool, get_fn: fn(&RegJoyp) -> bool, set_fn: fn(&mut RegJoyp, bool)| {
-                let either_pressed = (button && polling_buttons) || (dpad && polling_dpad);
-                joypad_interrupt |= get_fn(&self.joyp) && either_pressed;
-                set_fn(&mut self.joyp, !either_pressed);
-            };
-            
-            update_pair(self.buttons.a, self.buttons.right, RegJoyp::get_a_or_right, RegJoyp::set_a_or_right);
-            update_pair(self.buttons.b, self.buttons.left, RegJoyp::get_b_or_left, RegJoyp::set_b_or_left);
-            update_pair(self.buttons.start, self.buttons.down, RegJoyp::get_start_or_down, RegJoyp::set_start_or_down);
-            update_pair(self.buttons.select, self.buttons.up, RegJoyp::get_select_or_up, RegJoyp::set_select_or_up);
-
-            if joypad_interrupt {
-                self.r#if.set_joypad(true);
-            }
-        }
-    }
 }
-
-const CYCLES_PER_FRAME: u32 = 70224;
 
 impl Emulator for GameBoy {
     fn main_thread(mut self) {
@@ -190,32 +166,31 @@ impl Emulator for GameBoy {
         let mut cpu = self.cpu.take().unwrap();
         let mut ppu = self.ppu.take().unwrap();
         let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, false));
-        let_gen_using!(ppu_coro, |co| ppu.coro(self.clock.clone(), co));
+        let_gen_using!(ppu_coro, |co| ppu.coro(co));
         apu::test();
 
         // Main loop
         'main: loop {
-            self.clock.set((self.clock.get() + 1) % CYCLES_PER_FRAME);
+            self.clock.borrow_mut().tick();
             cpu_coro.resume();
+            self.clock.borrow_mut().refresh_tima_if_overflowing();
             ppu_coro.resume();
 
-            self.update_joyp();
-
             // Every frame
-            if self.clock.get() == 0 {
+            if self.clock.borrow().get_ppu_dots() == 0 {
                 // Process any new messages
                 for msg in self.channel.try_iter() {
                     match msg {
                         // TODO: Allow remapping controls in the future
                         EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
-                            KeyCode::KeyW => self.buttons.up = state.is_pressed(),
-                            KeyCode::KeyS => self.buttons.down = state.is_pressed(),
-                            KeyCode::KeyA => self.buttons.left = state.is_pressed(),
-                            KeyCode::KeyD => self.buttons.right = state.is_pressed(),
-                            KeyCode::KeyK => self.buttons.a = state.is_pressed(),
-                            KeyCode::KeyJ => self.buttons.b = state.is_pressed(),
-                            KeyCode::Enter => self.buttons.start = state.is_pressed(),
-                            KeyCode::ShiftRight => self.buttons.select = state.is_pressed(),
+                            KeyCode::KeyW => self.joypad.borrow_mut().press_dpad(Dpad::Up, state.is_pressed()),
+                            KeyCode::KeyS => self.joypad.borrow_mut().press_dpad(Dpad::Down, state.is_pressed()),
+                            KeyCode::KeyA => self.joypad.borrow_mut().press_dpad(Dpad::Left, state.is_pressed()),
+                            KeyCode::KeyD => self.joypad.borrow_mut().press_dpad(Dpad::Right, state.is_pressed()),
+                            KeyCode::KeyK => self.joypad.borrow_mut().press_button(Button::A, state.is_pressed()),
+                            KeyCode::KeyJ => self.joypad.borrow_mut().press_button(Button::B, state.is_pressed()),
+                            KeyCode::Enter => self.joypad.borrow_mut().press_button(Button::Start, state.is_pressed()),
+                            KeyCode::ShiftRight => self.joypad.borrow_mut().press_button(Button::Select, state.is_pressed()),
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
@@ -237,14 +212,138 @@ impl Emulator for GameBoy {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct PressedButtons {
-    pub up: bool,
-    pub down: bool,
-    pub left: bool,
-    pub right: bool,
-    pub a: bool,
-    pub b: bool,
-    pub start: bool,
-    pub select: bool
+pub struct Joypad {
+    button_vector: u8,
+    dpad_vector: u8,
+    joyp: MaskedBitVec<u8, true>,
+    interrupt_flags: Rc<RefCell<InterruptFlags>>
+}
+
+impl Joypad {
+    pub fn new(interrupt_flags: Rc<RefCell<InterruptFlags>>) -> Self {
+        Joypad { 
+            button_vector: 0b0000,
+            dpad_vector: 0b0000,
+            joyp: MaskedBitVec::new(0xCF, 0b00111111, 0b00110000),
+            interrupt_flags 
+        }
+    }
+
+    fn is_polling_buttons(&self) -> bool {
+        !self.joyp.test_bit(5)
+    }
+    
+    fn is_polling_dpad(&self) -> bool {
+        !self.joyp.test_bit(4)
+    }
+
+    fn refresh(&mut self) {
+        let mut after = 0b0000;
+        if self.is_polling_buttons() {after |= self.button_vector}
+        if self.is_polling_dpad() {after |= self.dpad_vector}
+        
+        if *self.joyp & after != 0 {
+            self.interrupt_flags.borrow_mut().request(Interrupt::Joypad);
+        }
+
+        *self.joyp = (*self.joyp & 0b00110000) | (after ^ 0b1111);
+    }
+
+    pub fn press_button(&mut self, button: Button, is_pressed: bool) {
+        self.button_vector.map_bits(button as u8, is_pressed);
+        self.refresh();
+    }
+
+    pub fn press_dpad(&mut self, dpad: Dpad, is_pressed: bool) {
+        self.dpad_vector.map_bits(dpad as u8, is_pressed);
+        self.refresh();
+    }
+}
+
+impl MemoryMappedIo<{MMIO::JOYP as u16}> for Joypad {   
+    fn read(&self) -> u8 {
+        self.joyp.read()
+    }
+
+    fn write(&mut self, val: u8) {
+        self.joyp.write(val);
+        self.refresh();
+    }
+}
+
+#[repr(u8)]
+enum Dpad {
+    Right = 0b00000001,
+    Left  = 0b00000010,
+    Up    = 0b00000100,
+    Down  = 0b00001000,
+}
+
+#[repr(u8)]
+enum Button {
+    A      = 0b00000001,
+    B      = 0b00000010,
+    Select = 0b00000100,
+    Start  = 0b00001000,
+}
+
+pub struct InterruptFlags {
+    interrupts: MaskedBitVec<u8, true>
+}
+
+impl InterruptFlags {
+    pub fn new() -> Self {
+        InterruptFlags {
+            interrupts: MaskedBitVec::new(0b11100001, 0b00011111, 0b00011111)
+        }
+    }
+
+    pub fn request(&mut self, interrupt: Interrupt) {
+        *self.interrupts |= interrupt as u8
+    }
+
+    pub fn get_inner(&mut self) -> &mut MaskedBitVec<u8, true> {
+        &mut self.interrupts
+    }
+}
+
+impl MemoryMappedIo<{MMIO::IF as u16}> for InterruptFlags{
+    fn read(&self) -> u8 {
+        self.interrupts.read()
+    }
+
+    fn write(&mut self, val: u8) {
+        self.interrupts.write(val);
+    }
+}
+
+pub struct InterruptEnable {
+    interrupts: MaskedBitVec<u8, false> // TODO: false assumed due to startup value -- verify this
+}
+
+impl InterruptEnable {
+    pub fn new() -> Self {
+        InterruptEnable {
+            interrupts: MaskedBitVec::new(0b00000000, 0b00011111, 0b00011111)
+        }
+    }
+}
+
+impl MemoryMappedIo<{MMIO::IE as u16}> for InterruptEnable {
+    fn read(&self) -> u8 {
+        self.interrupts.read()
+    }
+
+    fn write(&mut self, val: u8) {
+        self.interrupts.write(val)
+    }
+}
+
+#[repr(u8)]
+pub enum Interrupt {
+    Vblank = 0b00000001,
+    Stat   = 0b00000010,
+    Timer  = 0b00000100,
+    Serial = 0b00001000,
+    Joypad = 0b00010000,
 }

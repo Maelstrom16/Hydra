@@ -1,37 +1,33 @@
 mod deserialized;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
-use crate::gameboy::memory::io::deserialized::{RegStat, RegVbk};
-use crate::gameboy::memory::io::{self, GBReg, IoMap};
+use crate::gameboy::ppu::PpuMode;
 
 pub const ADDRESS_OFFSET: u16 = 0x8000;
 
 pub struct Vram {
+    model: Rc<Model>,
     vram: Box<[[u8; 0x2000]]>,
-    vbk: RegVbk,
-    stat: RegStat,
+    vbk: u8,
+    ppu_mode: Rc<RefCell<PpuMode>>,
 }
 
 impl Vram {
-    pub fn new(model: Model, io: &IoMap) -> Self {
-        let mut result = Vram {
-            vram: Box::new([[0; 0x2000]; 1]),
-            vbk: RegVbk::new(io.clone_register(io::MMIO::VBK)),
-            stat: RegStat::new(io.clone_register(io::MMIO::STAT)),
+    pub fn new(model: Rc<Model>, ppu_mode: Rc<RefCell<PpuMode>>) -> Self {
+        let bank_count = match model.is_monochrome() {
+            true => 1,
+            false => 2
         };
-        result.change_model(model);
 
-        result
-    }
-
-    pub fn change_model(&mut self, model: Model) {
-        match (self.is_monochrome(), model.is_monochrome()) {
-            (false, true) => self.vram = Box::from(&self.vram[0..1]),
-            (true, false) => self.vram = Box::new([self.vram[0], [0; 0x2000]]),
-            _ => {}
+        Vram {
+            model,
+            vram: vec![[0; 0x2000]; bank_count].into_boxed_slice(),
+            vbk: 0,
+            ppu_mode,
         }
     }
 
@@ -58,23 +54,11 @@ impl Vram {
 
     fn is_accessible(&self) -> bool {
         // VRAM is inaccessible during PPU mode 3
-        self.stat.get_ppu_mode() != 3
-    }
-
-    fn is_monochrome(&self) -> bool {
-        let bank_count = self.vram.len();
-
-        bank_count == 1
-    }
-
-    fn is_color(&self) -> bool {
-        let bank_count = self.vram.len();
-
-        bank_count == 2
+        *self.ppu_mode.borrow() != PpuMode::Render
     }
 
     fn get_bank_id(&self) -> u8 {
-        if self.is_monochrome() {0} else {self.vbk.get()}
+        if self.model.is_monochrome() {0} else {self.vbk}
     }
 
     const fn localize_address(address: u16) -> usize {

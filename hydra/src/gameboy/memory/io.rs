@@ -1,14 +1,7 @@
 pub mod deserialized;
 
-use std::{array, cell::Cell, rc::Rc};
-
-use hydra_macros::TrijectiveMMIO;
-
-use crate::{common::{bit::{MaskedBitSet, WriteBehavior}, errors::HydraIOError}, gameboy::{GBRevision, Model}};
-
 pub const ADDRESS_OFFSET: u16 = 0xFF00;
 
-#[derive(TrijectiveMMIO)]
 #[repr(u16)]
 pub enum MMIO {
     JOYP = 0xFF00,
@@ -89,200 +82,165 @@ pub enum MMIO {
     IE = 0xFFFF
 }
 
-pub type GBReg = MaskedBitSet<u8>;
-
-pub struct IoMap {
-    registers: [GBReg; MMIO::VARIANT_COUNT]
-}
-
-impl IoMap {
-    pub fn new(model: Model) -> Self {
-        IoMap {
-            registers: array::from_fn(|index| match MMIO::from_local(index) {
-                // Define default values for all registers and models
-                MMIO::JOYP => GBReg::new(0xCF, 0b00111111, 0b00110000, WriteBehavior::Standard),
-                MMIO::SB => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::SC => match model {
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0x7E, 0b10000001, 0b10000001, WriteBehavior::Standard),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x7F, 0b10000011, 0b10000011, WriteBehavior::Standard),
-                },
-                MMIO::DIV => GBReg::new(match model { 
-                    Model::GameBoy(Some(GBRevision::DMG0)) => 0x18,
-                    Model::GameBoy(_) => 0xAB,
-                    Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
-                }, 0b11111111, 0b11111111, WriteBehavior::ResetOnWrite),
-                MMIO::TIMA => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::TMA => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::TAC => GBReg::new(0xF8, 0b00000111, 0b00000111, WriteBehavior::Standard),
-                MMIO::IF => GBReg::new(0xE1, 0b00011111, 0b00011111, WriteBehavior::Standard),
-                MMIO::NR10 => GBReg::new(0x80, 0b01111111, 0b01111111, WriteBehavior::Standard),
-                MMIO::NR11 => GBReg::new(0xBF, 0b11000000, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR12 => GBReg::new(0xF3, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR13 => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR14 => GBReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
-                MMIO::NR21 => GBReg::new(0x3F, 0b11000000, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR22 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR23 => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR24 => GBReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
-                MMIO::NR30 => GBReg::new(0x7F, 0b10000000, 0b10000000, WriteBehavior::Standard),
-                MMIO::NR31 => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR32 => GBReg::new(0x9F, 0b01100000, 0b01100000, WriteBehavior::Standard),
-                MMIO::NR33 => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR34 => GBReg::new(0xBF, 0b01000000, 0b11000111, WriteBehavior::Standard),
-                MMIO::NR41 => GBReg::new(0xFF, 0b00000000, 0b00111111, WriteBehavior::Standard),
-                MMIO::NR42 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR43 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR44 => GBReg::new(0xBF, 0b01000000, 0b11000000, WriteBehavior::Standard),
-                MMIO::NR50 => GBReg::new(0x77, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR51 => GBReg::new(0xF3, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::NR52 => GBReg::new(match model {
-                    Model::GameBoy(_) => 0xF1,
-                    Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0xF0,
-                }, 0b10001111, 0b00001111, WriteBehavior::Standard),
-                MMIO::WAV00 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV01 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV02 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV03 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV04 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV05 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV06 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV07 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV08 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV09 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV10 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV11 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV12 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV13 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV14 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WAV15 => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::LCDC => GBReg::new(0x91, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::STAT => GBReg::new(match model {
-                    Model::GameBoy(Some(GBRevision::DMG0)) => 0x81,
-                    Model::GameBoy(_) => 0x85,
-                    Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
-                }, 0b01111111, 0b01111000, WriteBehavior::Standard),
-                MMIO::SCY => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::SCX => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::LY => GBReg::new(match model {
-                    Model::GameBoy(Some(GBRevision::DMG0)) => 0x91,
-                    Model::GameBoy(_) => 0x00,
-                    Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
-                }, 0b11111111, 0b00000000, WriteBehavior::Standard),
-                MMIO::LYC => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::DMA => GBReg::new(match model {
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => 0xFF,
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0x00,
-                }, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::BGP => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFC, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
-                },
-                MMIO::OBP0 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // Unitialized, but 0xFF is a common value
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
-                },
-                MMIO::OBP1 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // Unitialized, but 0xFF is a common value
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
-                },
-                MMIO::WY => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::WX => GBReg::new(0x00, 0b11111111, 0b11111111, WriteBehavior::Standard),
-                MMIO::KEY0 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(rand::random(), 0b00000100, 0b00000000, WriteBehavior::Standard), // TODO: Value is supposed to be based on header contents, Allow writing during boot ROM if included
-                }, 
-                MMIO::KEY1 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x7E, 0b10000001, 0b00000001, WriteBehavior::Standard),
-                }, 
-                MMIO::VBK => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFE, 0b00000001, 0b00000001, WriteBehavior::Standard),
-                }, 
-                MMIO::BOOT => GBReg::new(0xFF, 0b00000000, 0b00000000, WriteBehavior::Standard), // TODO: Allow write if boot ROM is included
-                MMIO::HDMA1 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard),
-                }, 
-                MMIO::HDMA2 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure lower four bits are ignored
-                }, 
-                MMIO::HDMA3 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure upper three bits are ignored
-                }, 
-                MMIO::HDMA4 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111, WriteBehavior::Standard), // TODO: Ensure lower four bits are ignored
-                }, 
-                MMIO::HDMA5 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Ensure proper read behavior
-                }, 
-                MMIO::RP => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x3E, 0b11000011, 0b00000010, WriteBehavior::Standard),
-                },
-                MMIO::BCPS => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b10111111, 0b10111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles
-                },
-                MMIO::BCPD => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
-                },
-                MMIO::OCPS => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b10111111, 0b10111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles
-                },
-                MMIO::OCPD => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111, WriteBehavior::Standard), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
-                },
-                MMIO::OPRI => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000001, 0b00000001, WriteBehavior::Standard), // TODO: Verify startup value and masks
-                },
-                MMIO::SVBK => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xF8, 0b00000111, 0b00000111, WriteBehavior::Standard),
-                },
-                MMIO::PCM12 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
-                },
-                MMIO::PCM34 => match model { 
-                    Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
-                    Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000, WriteBehavior::Standard), // TODO: Verify startup value
-                },
-                MMIO::IE => GBReg::new(0x00, 0b00011111, 0b00011111, WriteBehavior::Standard),
-            })
-        }
-    }
-}
-
-impl IoMap {
-    pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
-        Ok(self.registers[Self::localize_address(address)?].read())
-    }
-
-    pub fn write(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
-        Ok(self.registers[Self::localize_address(address)?].write(value))
-    }
-
-    pub fn clone_register(&self, mmio: MMIO) -> Rc<Cell<u8>> {
-        self.registers[mmio.to_local()].clone_inner()
-    }
-
-    const fn localize_address(address: u16) -> Result<usize, HydraIOError> {
-        match MMIO::global_to_local(address) {
-            Some(addr) => Ok(addr),
-            None => Err(HydraIOError::OpenBusAccess)
-        }
-    }
-}
-
-pub trait MmioDeserializer {
-    fn new(io: &IoMap) -> Self;
-}
+// IoMap {
+//     registers: array::from_fn(|index| match MMIO::from_local(index) {
+//         // Define default values for all registers and models
+//         MMIO::JOYP => GBReg::new(0xCF, 0b00111111, 0b00110000),
+//         MMIO::SB => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::SC => match model {
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0x7E, 0b10000001, 0b10000001),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x7F, 0b10000011, 0b10000011),
+//         },
+//         MMIO::DIV => GBReg::with_callback(match model { 
+//             Model::GameBoy(Some(GBRevision::DMG0)) => 0x18,
+//             Model::GameBoy(_) => 0xAB,
+//             Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
+//         }, 0b11111111, 0b11111111, |_, _, _| timer.reset_div()),
+//         MMIO::TIMA => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::TMA => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::TAC => GBReg::new(0xF8, 0b00000111, 0b00000111),
+//         MMIO::IF => GBReg::new(0xE1, 0b00011111, 0b00011111),
+//         MMIO::NR10 => GBReg::new(0x80, 0b01111111, 0b01111111),
+//         MMIO::NR11 => GBReg::new(0xBF, 0b11000000, 0b11111111),
+//         MMIO::NR12 => GBReg::new(0xF3, 0b11111111, 0b11111111),
+//         MMIO::NR13 => GBReg::new(0xFF, 0b00000000, 0b11111111),
+//         MMIO::NR14 => GBReg::new(0xBF, 0b01000000, 0b11000111),
+//         MMIO::NR21 => GBReg::new(0x3F, 0b11000000, 0b11111111),
+//         MMIO::NR22 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::NR23 => GBReg::new(0xFF, 0b00000000, 0b11111111),
+//         MMIO::NR24 => GBReg::new(0xBF, 0b01000000, 0b11000111),
+//         MMIO::NR30 => GBReg::new(0x7F, 0b10000000, 0b10000000),
+//         MMIO::NR31 => GBReg::new(0xFF, 0b00000000, 0b11111111),
+//         MMIO::NR32 => GBReg::new(0x9F, 0b01100000, 0b01100000),
+//         MMIO::NR33 => GBReg::new(0xFF, 0b11111111, 0b11111111),
+//         MMIO::NR34 => GBReg::new(0xBF, 0b01000000, 0b11000111),
+//         MMIO::NR41 => GBReg::new(0xFF, 0b00000000, 0b00111111),
+//         MMIO::NR42 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::NR43 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::NR44 => GBReg::new(0xBF, 0b01000000, 0b11000000),
+//         MMIO::NR50 => GBReg::new(0x77, 0b11111111, 0b11111111),
+//         MMIO::NR51 => GBReg::new(0xF3, 0b11111111, 0b11111111),
+//         MMIO::NR52 => GBReg::new(match model {
+//             Model::GameBoy(_) => 0xF1,
+//             Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0xF0,
+//         }, 0b10001111, 0b00001111),
+//         MMIO::WAV00 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV01 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV02 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV03 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV04 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV05 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV06 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV07 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV08 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV09 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV10 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV11 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV12 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV13 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV14 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WAV15 => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::LCDC => GBReg::new(0x91, 0b11111111, 0b11111111),
+//         MMIO::STAT => GBReg::new(match model {
+//             Model::GameBoy(Some(GBRevision::DMG0)) => 0x81,
+//             Model::GameBoy(_) => 0x85,
+//             Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
+//         }, 0b01111111, 0b01111000),
+//         MMIO::SCY => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::SCX => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::LY => GBReg::new(match model {
+//             Model::GameBoy(Some(GBRevision::DMG0)) => 0x91,
+//             Model::GameBoy(_) => 0x00,
+//             Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
+//         }, 0b11111111, 0b00000000),
+//         MMIO::LYC => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::DMA => GBReg::new(match model {
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => 0xFF,
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => 0x00,
+//         }, 0b11111111, 0b11111111),
+//         MMIO::BGP => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFC, 0b11111111, 0b11111111),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
+//         },
+//         MMIO::OBP0 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // Unitialized, but 0xFF is a common value
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
+//         },
+//         MMIO::OBP1 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // Unitialized, but 0xFF is a common value
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new_unimplemented(),
+//         },
+//         MMIO::WY => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::WX => GBReg::new(0x00, 0b11111111, 0b11111111),
+//         MMIO::KEY0 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(rand::random(), 0b00000100, 0b00000000), // TODO: Value is supposed to be based on header contents, Allow writing during boot ROM if included
+//         }, 
+//         MMIO::KEY1 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x7E, 0b10000001, 0b00000001),
+//         }, 
+//         MMIO::VBK => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFE, 0b00000001, 0b00000001),
+//         }, 
+//         MMIO::BOOT => GBReg::new(0xFF, 0b00000000, 0b00000000), // TODO: Allow write if boot ROM is included
+//         MMIO::HDMA1 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111),
+//         }, 
+//         MMIO::HDMA2 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111), // TODO: Ensure lower four bits are ignored
+//         }, 
+//         MMIO::HDMA3 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111), // TODO: Ensure upper three bits are ignored
+//         }, 
+//         MMIO::HDMA4 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000000, 0b11111111), // TODO: Ensure lower four bits are ignored
+//         }, 
+//         MMIO::HDMA5 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // TODO: Ensure proper read behavior
+//         }, 
+//         MMIO::RP => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0x3E, 0b11000011, 0b00000010),
+//         },
+//         MMIO::BCPS => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b10111111, 0b10111111), // TODO: Value is supposed to be based on boot rom cycles
+//         },
+//         MMIO::BCPD => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
+//         },
+//         MMIO::OCPS => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b10111111, 0b10111111), // TODO: Value is supposed to be based on boot rom cycles
+//         },
+//         MMIO::OCPD => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b11111111), // TODO: Value is supposed to be based on boot rom cycles, change write mask depending on addressed palette entry
+//         },
+//         MMIO::OPRI => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b00000001, 0b00000001), // TODO: Verify startup value and masks
+//         },
+//         MMIO::SVBK => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xF8, 0b00000111, 0b00000111),
+//         },
+//         MMIO::PCM12 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000), // TODO: Verify startup value
+//         },
+//         MMIO::PCM34 => match model { 
+//             Model::GameBoy(_) | Model::SuperGameBoy(_) => GBReg::new_unimplemented(),
+//             Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => GBReg::new(0xFF, 0b11111111, 0b00000000), // TODO: Verify startup value
+//         },
+//         MMIO::IE => GBReg::new(0x00, 0b00011111, 0b00011111),
+//     })
+// }

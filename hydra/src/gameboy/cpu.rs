@@ -1,19 +1,16 @@
 mod ime;
 mod opcode;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use futures::FutureExt;
 use genawaiter::stack::Co;
 
 use crate::{
     gameboy::{
-        AGBRevision, CGBRevision, GBRevision, Model, SGBRevision,
-        cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}},
-        memory::{
-            MemoryMap,
-            io::{self, IoMap, deserialized::{RegIe, RegIf}}, rom::Rom,
-        },
+        AGBRevision, CGBRevision, GBRevision, InterruptEnable, InterruptFlags, Model, SGBRevision, cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}}, memory::{
+            MemoryMap, MemoryMappedIo, rom::Rom
+        }
     },
     gen_all,
 };
@@ -43,8 +40,6 @@ pub struct Cpu {
     sp: u16,
     pc: u16,
     ir: u8,
-    r#if: RegIf,
-    ie: RegIe,
     interrupt_handler: InterruptHandler,
 }
 
@@ -68,7 +63,7 @@ pub enum Register16 {
 }
 
 impl Cpu {
-    pub fn new(rom: &Rom, io: &IoMap, model: Model) -> Self {
+    pub fn new(rom: &Rom, model: &Rc<Model>, interrupt_flags: Rc<RefCell<InterruptFlags>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Self {
         let af;
         let bc;
         let de;
@@ -76,10 +71,8 @@ impl Cpu {
         let sp: u16 = 0xFFFE;
         let pc: u16 = 0x0100;
         let ir: u8 = 0x00;
-        let r#if = RegIf::new(io.clone_register(io::MMIO::IF));
-        let ie = RegIe::new(io.clone_register(io::MMIO::IE));
-        let interrupt_handler = InterruptHandler::default();
-        match model {
+        let interrupt_handler = InterruptHandler::new(interrupt_flags, interrupt_enable);
+        match **model {
             Model::GameBoy(Some(GBRevision::DMG0)) => {
                 af = [0b0000 << 4, 0x01];
                 bc = [0x13, 0xFF];
@@ -172,8 +165,6 @@ impl Cpu {
             sp,
             pc,
             ir,
-            r#if,
-            ie,
             interrupt_handler,
         }
     }
@@ -201,9 +192,9 @@ impl Cpu {
 
     #[inline(always)]
     fn fetch<'a>(&mut self, debug: bool) -> LocalOpcodeFn<'a> {
-        if self.interrupt_handler.ime && self.interrupt_pending() { 
+        if self.interrupt_handler.ime && self.interrupt_handler.interrupt_pending() { 
             // Generate call instruction from handled interrupt
-            let composite = self.ie.get_entire() & self.r#if.get_entire();
+            let composite = self.interrupt_handler.interrupt_enable.borrow().read() & self.interrupt_handler.interrupt_flags.borrow().read();
             for shift_width in 0..=4 {
                 let bitmask = 1 << shift_width;
                 if composite & bitmask == 0 {
@@ -212,7 +203,7 @@ impl Cpu {
                 } else {
                     // Handle interrupt and return call instruction
                     self.interrupt_handler.ime = false;
-                    self.r#if.set_entire(self.r#if.get_entire() ^ bitmask);
+                    self.interrupt_handler.interrupt_flags.borrow_mut().get_inner().reset_bits(bitmask);
                     let jump_addr = (shift_width * 0x8) + 0x40;
                     
                     return Box::new(move |cpu_inner: &'a mut Cpu, memory_inner, co_inner| cpu_inner.fetch_interrupt(memory_inner, co_inner, jump_addr).boxed_local())
@@ -247,16 +238,11 @@ impl Cpu {
         memory.borrow_mut().write_u8(value, address);
     }
 
-    #[inline(always)]
-    fn interrupt_pending(&self) -> bool {
-        self.ie.get_entire() & self.r#if.get_entire() != 0
-    }
-
     pub async fn coro(&mut self, memory: Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, debug: bool) {
         loop {
             // Skip this iteration if halted and there are no interrupts pending
             if self.interrupt_handler.halted {
-                if self.interrupt_pending() {
+                if self.interrupt_handler.interrupt_pending() {
                     self.interrupt_handler.halted = false;
                 } else {
                     co.yield_(()).await;
@@ -770,7 +756,7 @@ impl Cpu {
         self.interrupt_handler.halted = true;
 
         // If IME is off but an interrupt is already pending, trigger halt bug
-        if !self.interrupt_handler.ime && self.interrupt_pending() {
+        if !self.interrupt_handler.ime && self.interrupt_handler.interrupt_pending() {
             self.interrupt_handler.queue_halt_bug();
         }
     }

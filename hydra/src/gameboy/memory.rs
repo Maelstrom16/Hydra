@@ -4,13 +4,12 @@ mod oam;
 mod sram;
 pub mod rom;
 pub mod vram;
-mod wram;
+pub mod wram;
 
 use crate::{
     common::errors::HydraIOError,
     gameboy::{
-        Model,
-        memory::{io::IoMap, oam::Oam, rom::Rom, vram::Vram, wram::Wram},
+        InterruptEnable, InterruptFlags, Joypad, Model, memory::{io::deserialized::MasterTimer, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
@@ -18,23 +17,45 @@ use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
 pub struct MemoryMap {
     cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
     vram: Rc<RefCell<Vram>>,
-    wram: Box<Wram>,
+    wram: Rc<RefCell<Wram>>,
     oam: Oam,
-    io: IoMap,
     hram: [u8; 0x7F],
+
+    joypad: Rc<RefCell<Joypad>>,
+    timer: Rc<RefCell<MasterTimer>>,
+    interrupt_flags: Rc<RefCell<InterruptFlags>>,
+    lcd_controller: Rc<RefCell<LcdController>>,
+    ppu_state: Rc<RefCell<PpuState>>,
+    scy: Rc<Cell<u8>>,
+    scx: Rc<Cell<u8>>,
+    color_map: Rc<RefCell<ColorMap>>,
+    wy: Rc<Cell<u8>>,
+    wx: Rc<Cell<u8>>,
+    interrupt_enable: Rc<RefCell<InterruptEnable>>,
 
     data_bus: Cell<u8>,
 }
 
 impl MemoryMap {
-    pub fn new(rom: Rom, model: Model, vram: Rc<RefCell<Vram>>, io: IoMap) -> Result<MemoryMap, HydraIOError> {
+    pub fn new(rom: Rom, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
         Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
             vram,
-            wram: Box::new(Wram::new(model, &io)),
+            wram,
             oam: Oam::new(),
-            io,
             hram: [0; 0x7F],
+
+            joypad,
+            timer,
+            interrupt_flags,
+            lcd_controller,
+            ppu_state,
+            scy,
+            scx,
+            color_map,
+            wy,
+            wx,
+            interrupt_enable,
 
             data_bus: Cell::new(0),
         })
@@ -51,12 +72,27 @@ impl MemoryMap {
             0x0000..=0x7FFF => self.cartridge.as_ref().map(|this| this.read_rom_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0x8000..=0x9FFF => self.vram.borrow().read_u8(address),
             0xA000..=0xBFFF => self.cartridge.as_ref().map(|this| this.read_ram_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0xC000..=0xDFFF => Ok(self.wram.read_u8(address)),
-            0xE000..=0xFDFF => Ok(self.wram.read_u8(address - 0x2000)), // Treat exactly like WRAM
+            0xC000..=0xDFFF => Ok(self.wram.borrow().read_u8(address)),
+            0xE000..=0xFDFF => Ok(self.wram.borrow().read_u8(address - 0x2000)), // Treat exactly like WRAM
             0xFE00..=0xFEFF => self.oam.read(address - oam::ADDRESS_OFFSET),
-            0xFF00..=0xFF7F => self.io.read(address),
+            0xFF00 => Ok(<Joypad as MemoryMappedIo<0xFF00>>::read(&*self.joypad.borrow())),
+            0xFF04 => Ok(<MasterTimer as MemoryMappedIo<0xFF04>>::read(&*self.timer.borrow())),
+            0xFF05 => Ok(<MasterTimer as MemoryMappedIo<0xFF05>>::read(&*self.timer.borrow())),
+            0xFF06 => Ok(<MasterTimer as MemoryMappedIo<0xFF06>>::read(&*self.timer.borrow())),
+            0xFF07 => Ok(<MasterTimer as MemoryMappedIo<0xFF07>>::read(&*self.timer.borrow())),
+            0xFF0F => Ok(<InterruptFlags as MemoryMappedIo<0xFF0F>>::read(&*self.interrupt_flags.borrow())),
+            0xFF40 => Ok(<LcdController as MemoryMappedIo<0xFF40>>::read(&*self.lcd_controller.borrow())),
+            0xFF41 => Ok(<PpuState as MemoryMappedIo<0xFF41>>::read(&*self.ppu_state.borrow())),
+            0xFF42 => Ok(self.scy.get()),
+            0xFF43 => Ok(self.scx.get()),
+            0xFF44 => Ok(<PpuState as MemoryMappedIo<0xFF44>>::read(&*self.ppu_state.borrow())),
+            0xFF45 => Ok(<PpuState as MemoryMappedIo<0xFF45>>::read(&*self.ppu_state.borrow())),
+            0xFF47 => Ok(<ColorMap as MemoryMappedIo<0xFF47>>::read(&*self.color_map.borrow())),
+            0xFF4A => Ok(self.wy.get()),
+            0xFF4B => Ok(self.wx.get()),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
-            0xFFFF => self.io.read(address), // Same as MMIO case, kept separate for clarity
+            0xFFFF => Ok(<InterruptEnable as MemoryMappedIo<0xFFFF>>::read(&*self.interrupt_enable.borrow())),
+            _ => Err(HydraIOError::OpenBusAccess)
         };
         match read_result {
             Ok(value) => self.data_bus.set(value),
@@ -73,12 +109,27 @@ impl MemoryMap {
             0x0000..=0x7FFF => self.cartridge.as_mut().map(|this| this.write_rom_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0x8000..=0x9FFF => self.vram.borrow_mut().write_u8(value, address),
             0xA000..=0xBFFF => self.cartridge.as_mut().map(|this| this.write_ram_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0xC000..=0xDFFF => Ok(self.wram.write_u8(value, address)),
-            0xE000..=0xFDFF => Ok(self.wram.write_u8(value, address - 0x2000)), // Treat exactly like WRAM
+            0xC000..=0xDFFF => Ok(self.wram.borrow_mut().write_u8(value, address)),
+            0xE000..=0xFDFF => Ok(self.wram.borrow_mut().write_u8(value, address - 0x2000)), // Treat exactly like WRAM
             0xFE00..=0xFEFF => self.oam.write(address - oam::ADDRESS_OFFSET, value),
-            0xFF00..=0xFF7F => self.io.write(value, address),
+            0xFF00 => Ok(<Joypad as MemoryMappedIo<0xFF00>>::write(&mut *self.joypad.borrow_mut(), value)),
+            0xFF04 => Ok(<MasterTimer as MemoryMappedIo<0xFF04>>::write(&mut *self.timer.borrow_mut(), value)),
+            0xFF05 => Ok(<MasterTimer as MemoryMappedIo<0xFF05>>::write(&mut *self.timer.borrow_mut(), value)),
+            0xFF06 => Ok(<MasterTimer as MemoryMappedIo<0xFF06>>::write(&mut *self.timer.borrow_mut(), value)),
+            0xFF07 => Ok(<MasterTimer as MemoryMappedIo<0xFF07>>::write(&mut *self.timer.borrow_mut(), value)),
+            0xFF0F => Ok(<InterruptFlags as MemoryMappedIo<0xFF0F>>::write(&mut *self.interrupt_flags.borrow_mut(), value)),
+            0xFF40 => Ok(<LcdController as MemoryMappedIo<0xFF40>>::write(&mut *self.lcd_controller.borrow_mut(), value)),
+            0xFF41 => Ok(<PpuState as MemoryMappedIo<0xFF41>>::write(&mut *self.ppu_state.borrow_mut(), value)),
+            0xFF42 => Ok(self.scy.set(value)),
+            0xFF43 => Ok(self.scx.set(value)),
+            0xFF44 => Ok(<PpuState as MemoryMappedIo<0xFF44>>::write(&mut *self.ppu_state.borrow_mut(), value)),
+            0xFF45 => Ok(<PpuState as MemoryMappedIo<0xFF45>>::write(&mut *self.ppu_state.borrow_mut(), value)),
+            0xFF47 => Ok(<ColorMap as MemoryMappedIo<0xFF47>>::write(&mut *self.color_map.borrow_mut(), value)),
+            0xFF4A => Ok(self.wy.set(value)),
+            0xFF4B => Ok(self.wx.set(value)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
-            0xFFFF => self.io.write(value, address), // Same as MMIO case, kept separate for clarity
+            0xFFFF => Ok(<InterruptEnable as MemoryMappedIo<0xFFFF>>::write(&mut *self.interrupt_enable.borrow_mut(), value)),
+            _ => Err(HydraIOError::OpenBusAccess)
         };
         match write_result {
             Ok(_) => {}
@@ -86,4 +137,9 @@ impl MemoryMap {
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
     }
+}
+
+pub trait MemoryMappedIo<const ADDRESS: u16> {
+    fn read(&self) -> u8;
+    fn write(&mut self, val: u8);
 }

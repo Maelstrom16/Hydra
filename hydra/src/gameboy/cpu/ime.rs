@@ -1,4 +1,11 @@
+use std::{cell::RefCell, rc::Rc};
+
+use crate::gameboy::{InterruptEnable, InterruptFlags, memory::MemoryMappedIo};
+
 pub struct InterruptHandler {
+    pub interrupt_flags: Rc<RefCell<InterruptFlags>>,
+    pub interrupt_enable: Rc<RefCell<InterruptEnable>>,
+    
     pub ime: bool,
     cycles_until_ime: Option<u8>,
     pub halted: bool,
@@ -6,6 +13,18 @@ pub struct InterruptHandler {
 }
 
 impl InterruptHandler {
+    pub fn new(interrupt_flags: Rc<RefCell<InterruptFlags>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Self {
+        InterruptHandler { 
+            interrupt_flags,
+            interrupt_enable,
+
+            ime: false, 
+            cycles_until_ime: None, 
+            halted: false, 
+            cycles_until_halt_bug: None 
+        }
+    }
+
     pub fn queue_ime(&mut self) {
         self.cycles_until_ime = Some(2)
     }
@@ -22,10 +41,9 @@ impl InterruptHandler {
         if let Some(_) = self.cycles_until_ime.take_if(decrements_to_zero) {self.ime = true;}
         if let Some(_) = self.cycles_until_halt_bug.take_if(decrements_to_zero) {*pc = pc_old;}
     }
-}
 
-impl Default for InterruptHandler {
-    fn default() -> Self {
-        InterruptHandler { ime: false, cycles_until_ime: None, halted: false, cycles_until_halt_bug: None }
+    #[inline(always)]
+    pub fn interrupt_pending(&self) -> bool {
+        self.interrupt_enable.borrow().read() & self.interrupt_flags.borrow().read() != 0
     }
 }
