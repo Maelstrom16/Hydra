@@ -385,7 +385,7 @@ impl Cpu {
     async fn add<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_add(operand);
-        let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
+        let (_, half_carry) = (a | 0xF0).overflowing_add(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -401,7 +401,7 @@ impl Cpu {
         let [_, h] = self.hl;
         let [_, oph] = u16::to_le_bytes(operand);
         let (_, carry) = h.overflowing_add(oph);
-        let (_, half_carry) = (h | 0xF0).overflowing_add(oph);
+        let (_, half_carry) = (h | 0xF0).overflowing_add(oph & 0x0F);
         set_flags!(self;
             n=(false),
             h=(half_carry),
@@ -416,7 +416,7 @@ impl Cpu {
         let lsb = (self.sp & 0xFF) as u8;
         let (_, carry) = lsb.overflowing_add_signed(e);
         let lsb_half = if e.signum() == 1 { lsb | 0xF0 } else { lsb & 0x0F };
-        let (_, half_carry) = lsb_half.overflowing_add_signed(e);
+        let (_, half_carry) = lsb_half.overflowing_add_signed(e & 0x0F);
         set_flags!(self;
             z=(false),
             n=(false),
@@ -432,7 +432,7 @@ impl Cpu {
     async fn adc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_add(operand);
-        let (_, half_carry) = (a | 0xF0).overflowing_add(operand);
+        let (_, half_carry) = (a | 0xF0).overflowing_add(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -446,7 +446,7 @@ impl Cpu {
     async fn sub<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_sub(operand);
-        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
+        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -460,7 +460,7 @@ impl Cpu {
     async fn sbc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) + get_flag!(self; c) as u8);
         let (result, carry) = a.overflowing_sub(operand);
-        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
+        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -510,7 +510,7 @@ impl Cpu {
     async fn cp<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let (a, operand) = (self.af[1], gen_all!(co, |co_inner| operand.get(self, memory, co_inner)));
         let (result, carry) = a.overflowing_sub(operand);
-        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand);
+        let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -559,7 +559,30 @@ impl Cpu {
 
     #[inline(always)]
     async fn daa(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        todo!() //TODO
+        let a = self.af[1];
+        let n = get_flag!(self; n);
+        let h = get_flag!(self; h);
+        let c = get_flag!(self; c);
+
+        let adjustment_lo = if (h || a & 0x0F >= 0x0A) {0x06} else {0};
+        let (half_result, _) = match n {
+            false => a.overflowing_add(adjustment_lo),
+            true => a.overflowing_sub(adjustment_lo),
+        };
+        let adjustment_hi = if (c || a & 0xF0 >= 0xA0) {0x60} else {0};
+        let (result, carry) = match n {
+            false => half_result.overflowing_add(adjustment_hi),
+            true => half_result.overflowing_sub(adjustment_hi),
+        };
+
+        set_flags!(self;
+            z=(result == 0),
+            n=(false),
+            c=(carry)
+        );
+
+        self.af[1] = result;
+        // 0x94 + 0x07 = 0x9B (should be 01; add 0x06)
     }
 
     #[inline(always)]
@@ -679,7 +702,7 @@ impl Cpu {
     async fn bit<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, index: u8, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         set_flags!(self;
-            z=(o & (1 << index) != 0),
+            z=(o & (1 << index) == 0),
             n=(false),
             h=(true),
         );
