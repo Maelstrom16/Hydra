@@ -133,17 +133,26 @@ impl Ppu {
                     // Begin rendering at 
                     let screen_y = ly;
                     for screen_x in 0..SCREEN_WIDTH {
-                        // Only render if LCD is enabled (LCDC bit 7)
-                        if self.lcdc.borrow().lcd_enabled {
-                            let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
-                            let bg_map_address = self.lcdc.borrow().bg_map_area as u16;
-                            let win_map_address = self.lcdc.borrow().win_map_area as u16;
+                        let color_index = if self.lcdc.borrow().lcd_enabled && self.lcdc.borrow().tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
+                            let is_window = self.lcdc.borrow().window_enabled && screen_x >= self.wx.get() - 7 && screen_y >= self.wy.get();
 
-                            let map_x = u8::wrapping_add(screen_x, self.scx.get());
-                            let map_y = u8::wrapping_add(screen_y, self.scy.get());
+                            let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
+                            let (map_address, map_x, map_y) = match is_window {
+                                false => (
+                                    self.lcdc.borrow().bg_map_area as u16,
+                                    screen_x.wrapping_add(self.scx.get()),
+                                    screen_y.wrapping_add(self.scy.get()),
+                                ),
+                                true => (
+                                    self.lcdc.borrow().win_map_area as u16,
+                                    screen_x - self.wx.get() + 7,
+                                    screen_y - self.wy.get(),
+                                ),
+                            };
+
                             let map_index_x = (map_x / 8) as u16;
                             let map_index_y = (map_y / 8) as u16;
-                            let data_index_address = bg_map_address + map_index_x + (map_index_y * MAP_WIDTH as u16);
+                            let data_index_address = map_address + map_index_x + (map_index_y * MAP_WIDTH as u16);
 
                             let data_index = self.vram.borrow().unbound_read_u8(data_index_address, 0);
                             // let tile_attributes = self.vram.borrow().unbound_read_u8(data_index_address, 1); //TODO: Enable on CGB
@@ -160,15 +169,16 @@ impl Ppu {
 
                             let tile_x = map_x % 8;
                             let color_index_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
-                            let color_index = color_index_bits[1] << 1 
-                                          | color_index_bits[0];
 
-                            // TODO: allow colors to be configured by user
-                            let color = self.color_map.borrow().get_color(color_index);
+                            color_index_bits[1] << 1 | color_index_bits[0]
+                        } else {
+                            0
+                        };
 
-                            let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
-                            self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color);
-                        }
+                        // TODO: allow colors to be configured by user
+                        let color = self.color_map.borrow().get_tile_color(color_index);
+                        let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
+                        self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color);
 
                         co.yield_(()).await;
                     }
