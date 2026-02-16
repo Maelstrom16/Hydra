@@ -123,7 +123,7 @@ impl GameBoy {
             let color_map = Rc::new(RefCell::new(ColorMap::new(&model)));
             let ppu = Some(ppu::Ppu::new(vram.clone(), lcd_controller.clone(), ppu_state.clone(), clock.clone(), interrupt_flags.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
             let apu = Rc::new(RefCell::new(Apu::new()));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(rom, vram, wram, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
             GameBoy {
                 cpu,
                 memory,
@@ -152,7 +152,7 @@ impl GameBoy {
         for y in 0..=0xFFF {
             print!("{:#06X}:   ", y << 4);
             for x in 0..=0xF {
-                print!("{:02X} ", self.memory.borrow().read_u8(x | (y << 4)));
+                print!("{:02X} ", self.memory.borrow().read_u8(x | (y << 4), true));
             }
             println!("");
         }
@@ -173,6 +173,7 @@ impl Emulator for GameBoy {
         // Main loop
         'main: loop {
             self.clock.borrow_mut().tick();
+            self.memory.borrow_mut().tick_dma();
             cpu_coro.resume();
             self.clock.borrow_mut().refresh_tima_if_overflowing();
             ppu_coro.resume();

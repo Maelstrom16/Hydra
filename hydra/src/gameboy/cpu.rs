@@ -220,7 +220,7 @@ impl Cpu {
 
     #[inline(always)]
     async fn step_u8(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
-        let result = memory.borrow().read_u8(self.pc);
+        let result = memory.borrow().read_u8(self.pc, false);
         self.pc += 1;
         co.yield_(()).await;
         result
@@ -229,13 +229,13 @@ impl Cpu {
     #[inline(always)]
     async fn read_u8(&self, address: u16, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> u8 {
         co.yield_(()).await;
-        memory.borrow().read_u8(address)
+        memory.borrow().read_u8(address, false)
     }
 
     #[inline(always)]
     async fn write_u8(&self, address: u16, value: u8, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) -> () {
         co.yield_(()).await;
-        memory.borrow_mut().write_u8(value, address);
+        memory.borrow_mut().write_u8(value, address, false);
     }
 
     pub async fn coro(&mut self, memory: Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, debug: bool) {

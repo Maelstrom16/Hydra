@@ -9,7 +9,7 @@ pub mod wram;
 use crate::{
     common::errors::HydraIOError,
     gameboy::{
-        InterruptEnable, InterruptFlags, Joypad, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
+        InterruptEnable, InterruptFlags, Joypad, Model, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
@@ -33,11 +33,13 @@ pub struct MemoryMap {
     wx: Rc<Cell<u8>>,
     interrupt_enable: Rc<RefCell<InterruptEnable>>,
 
+    dma_source: u8,
+    dma_cycle: Option<u8>,
     data_bus: Cell<u8>,
 }
 
 impl MemoryMap {
-    pub fn new(rom: Rom, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
+    pub fn new(model: &Rc<Model>, rom: Rom, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
         Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
             vram,
@@ -57,6 +59,11 @@ impl MemoryMap {
             wx,
             interrupt_enable,
 
+            dma_source: match model.is_monochrome() {
+                true => 0xFF,
+                false => 0x00,
+            },
+            dma_cycle: None,
             data_bus: Cell::new(0),
         })
     }
@@ -67,8 +74,24 @@ impl MemoryMap {
         Ok(())
     }
 
-    pub fn read_u8(&self, address: u16) -> u8 {
-        let read_result = match address {
+    pub fn tick_dma(&mut self) {
+        if let Some(cycle) = self.dma_cycle {
+            let source_address = (self.dma_source as u16) << 8 | cycle as u16;
+            let destination_address = 0xFE00 | cycle as u16;
+            self.write_u8(self.read_u8(source_address, true), destination_address, true);
+
+            let next_dma_cycle = cycle + 1;
+            self.dma_cycle = if next_dma_cycle < 160 {
+                Some(next_dma_cycle)
+            } else {
+                None
+            };
+        }
+    }
+
+    pub fn read_u8(&self, address: u16, is_dma: bool) -> u8 {
+        let mem_accessible = is_dma || matches!(self.dma_cycle, None);
+        let read_result = if mem_accessible { match address {
             0x0000..=0x7FFF => self.cartridge.as_ref().map(|this| this.read_rom_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0x8000..=0x9FFF => self.vram.borrow().read_u8(address),
             0xA000..=0xBFFF => self.cartridge.as_ref().map(|this| this.read_ram_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
@@ -87,6 +110,7 @@ impl MemoryMap {
             0xFF43 => Ok(self.scx.get()),
             0xFF44 => Ok(<PpuState as MemoryMappedIo<0xFF44>>::read(&*self.ppu_state.borrow())),
             0xFF45 => Ok(<PpuState as MemoryMappedIo<0xFF45>>::read(&*self.ppu_state.borrow())),
+            0xFF46 => Ok(self.dma_source),
             0xFF47 => Ok(<ColorMap as MemoryMappedIo<0xFF47>>::read(&*self.color_map.borrow())),
             0xFF48 => Ok(<ColorMap as MemoryMappedIo<0xFF48>>::read(&*self.color_map.borrow())),
             0xFF49 => Ok(<ColorMap as MemoryMappedIo<0xFF49>>::read(&*self.color_map.borrow())),
@@ -95,19 +119,23 @@ impl MemoryMap {
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             0xFFFF => Ok(<InterruptEnable as MemoryMappedIo<0xFFFF>>::read(&*self.interrupt_enable.borrow())),
             _ => Err(HydraIOError::OpenBusAccess)
-        };
+        }} else { match address {
+            0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }};
         match read_result {
             Ok(value) => self.data_bus.set(value),
-            Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Read from open bus at address {:#06X}", address),
+            Err(HydraIOError::OpenBusAccess) => println!("Warning: Read from open bus at address {:#06X}", address),
             Err(e) => panic!("Error reading from memory.\n{}", e),
         }
 
         return self.data_bus.get();
     }
 
-    pub fn write_u8(&mut self, value: u8, address: u16) -> () {
+    pub fn write_u8(&mut self, value: u8, address: u16, is_dma: bool) -> () {
         self.data_bus.set(value);
-        let write_result = match address {
+        let mem_accessible = is_dma || matches!(self.dma_cycle, None);
+        let write_result = if mem_accessible { match address {
             0x0000..=0x7FFF => self.cartridge.as_mut().map(|this| this.write_rom_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0x8000..=0x9FFF => self.vram.borrow_mut().write_u8(value, address),
             0xA000..=0xBFFF => self.cartridge.as_mut().map(|this| this.write_ram_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
@@ -126,6 +154,7 @@ impl MemoryMap {
             0xFF43 => Ok(self.scx.set(value)),
             0xFF44 => Ok(<PpuState as MemoryMappedIo<0xFF44>>::write(&mut *self.ppu_state.borrow_mut(), value)),
             0xFF45 => Ok(<PpuState as MemoryMappedIo<0xFF45>>::write(&mut *self.ppu_state.borrow_mut(), value)),
+            0xFF46 => Ok(self.dma_cycle = Some(0)),
             0xFF47 => Ok(<ColorMap as MemoryMappedIo<0xFF47>>::write(&mut *self.color_map.borrow_mut(), value)),
             0xFF48 => Ok(<ColorMap as MemoryMappedIo<0xFF48>>::write(&mut *self.color_map.borrow_mut(), value)),
             0xFF49 => Ok(<ColorMap as MemoryMappedIo<0xFF49>>::write(&mut *self.color_map.borrow_mut(), value)),
@@ -134,10 +163,13 @@ impl MemoryMap {
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
             0xFFFF => Ok(<InterruptEnable as MemoryMappedIo<0xFFFF>>::write(&mut *self.interrupt_enable.borrow_mut(), value)),
             _ => Err(HydraIOError::OpenBusAccess)
-        };
+        }} else { match address {
+            0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }};
         match write_result {
             Ok(_) => {}
-            Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Write to open bus at address {:#06X}", address),
+            Err(HydraIOError::OpenBusAccess) => println!("Warning: Write to open bus at address {:#06X}", address),
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
     }
