@@ -1,11 +1,11 @@
-use crate::deserialize;
+use crate::{deserialize, gameboy::ppu::lcdc::ObjectHeight};
 
 pub struct TileAttributes {
-    priority: bool,
-    y_flip: bool,
-    x_flip: bool,
-    bank_index: u8,
-    palette: u8,
+    pub(super) priority: bool,
+    pub(super) y_flip: bool,
+    pub(super) x_flip: bool,
+    pub(super) bank_index: u8,
+    pub(super) palette: u8,
 }
 
 impl TileAttributes {
@@ -23,10 +23,10 @@ impl TileAttributes {
 }
 
 pub struct ObjectAttributes {
-    y: u8,
-    x: u8,
-    data_index: u8,
-    attributes: TileAttributes,
+    pub(super) y: u8,
+    pub(super) x: u8,
+    pub(super) data_index: u8,
+    pub(super) attributes: TileAttributes,
 }
 
 impl ObjectAttributes {
@@ -37,5 +37,10 @@ impl ObjectAttributes {
             data_index: bytes[2],
             attributes: TileAttributes::from_u8(bytes[3]),
         }
+    }
+
+    pub fn occupies_scanline(&self, scanline: u8, obj_height: ObjectHeight) -> bool {
+        let upper = scanline + 16;
+        ((upper - obj_height as u8 + 1)..=upper).contains(&self.y)
     }
 }
