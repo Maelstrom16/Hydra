@@ -100,6 +100,7 @@ impl GameBoy {
         let rom = Rom::from_vec(fs::read(path)?)?;
         let (send, recv) = channel();
         let graphics = app.clone_graphics();
+        let audio = app.clone_audio();
         let proxy = app.clone_proxy();
 
         // Build Game Boy on a new thread
@@ -112,9 +113,9 @@ impl GameBoy {
             let ppu_mode = Rc::new(RefCell::new(PpuMode::OAMScan));
             let vram = Rc::new(RefCell::new(Vram::new(model.clone(), ppu_mode.clone())));
             let wram = Rc::new(RefCell::new(Wram::new(model.clone())));
-            let apu = Rc::new(RefCell::new(Apu::new()));
             let lcd_controller = Rc::new(RefCell::new(LcdController::new()));
             let ppu_state = Rc::new(RefCell::new(PpuState::new(&model, ppu_mode.clone(), interrupt_flags.clone())));
+            let apu = Rc::new(RefCell::new(Apu::new(audio)));
             let clock = Rc::new(RefCell::new(MasterTimer::new(model.clone(), apu.clone(), ppu_state.clone(), interrupt_flags.clone())));
             let scy = Rc::new(Cell::new(0x00));
             let scx = Rc::new(Cell::new(0x00));
@@ -123,7 +124,6 @@ impl GameBoy {
             let color_map = Rc::new(RefCell::new(ColorMap::new(&model)));
             let oam = Rc::new(RefCell::new(Oam::new(model.clone())));
             let ppu = Some(ppu::Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), clock.clone(), interrupt_flags.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
-            let apu = Rc::new(RefCell::new(Apu::new()));
             let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
             GameBoy {
                 cpu,
@@ -169,7 +169,6 @@ impl Emulator for GameBoy {
         let mut ppu = self.ppu.take().unwrap();
         let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, false));
         let_gen_using!(ppu_coro, |co| ppu.coro(co));
-        apu::test();
 
         // Main loop
         'main: loop {

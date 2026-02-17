@@ -1,10 +1,12 @@
-use std::f32;
+use std::{f32, sync::Arc};
 
 use cpal::{OutputCallbackInfo, StreamConfig, StreamError};
 
-pub fn sine_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
-    let sample_rate = config.sample_rate as f32; // samples per second
-    let channels = config.channels as usize; // 1 for mono, 2 for stereo
+use crate::audio::Audio;
+
+pub fn sine_callback(frequency: f32, audio: &Arc<Audio>) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
+    let sample_rate = audio.get_sample_rate() as f32; // samples per second
+    let channels = audio.get_channel_count() as usize; // 1 for mono, 2 for stereo
     let inc = (frequency * f32::consts::TAU) / sample_rate;
     let mut phase = 0f32;
     move |samples, _callback_info| {
@@ -15,9 +17,9 @@ pub fn sine_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [
     }
 }
 
-pub fn pulse_callback(duty: f32, frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
-    let sample_rate = config.sample_rate as f32; // samples per second
-    let channels = config.channels as usize; // 1 for mono, 2 for stereo
+pub fn pulse_callback(duty: f32, frequency: f32, audio: &Arc<Audio>) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
+    let sample_rate = audio.get_sample_rate() as f32; // samples per second
+    let channels = audio.get_channel_count() as usize; // 1 for mono, 2 for stereo
     let inc = frequency / sample_rate;
     let mut phase = 0f32;
     move |samples, _callback_info| {
@@ -28,9 +30,9 @@ pub fn pulse_callback(duty: f32, frequency: f32, config: &StreamConfig) -> impl 
     }
 }
 
-pub fn triangle_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
-    let sample_rate = config.sample_rate as f32; // samples per second
-    let channels = config.channels as usize; // 1 for mono, 2 for stereo
+pub fn triangle_callback(frequency: f32, audio: &Arc<Audio>) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
+    let sample_rate = audio.get_sample_rate() as f32; // samples per second
+    let channels = audio.get_channel_count() as usize; // 1 for mono, 2 for stereo
     let inc = (frequency * f32::consts::TAU) / sample_rate;
     let mut phase = 0f32;
     move |samples, _callback_info| {
@@ -41,9 +43,9 @@ pub fn triangle_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&m
     }
 }
 
-pub fn sawtooth_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
-    let sample_rate = config.sample_rate as f32; // samples per second
-    let channels = config.channels as usize; // 1 for mono, 2 for stereo
+pub fn sawtooth_callback(frequency: f32, audio: &Arc<Audio>) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<> {
+    let sample_rate = audio.get_sample_rate() as f32; // samples per second
+    let channels = audio.get_channel_count() as usize; // 1 for mono, 2 for stereo
     let inc = (2.0 * frequency) / sample_rate;
     let mut phase = 1f32;
     move |samples, _callback_info| {
@@ -54,9 +56,9 @@ pub fn sawtooth_callback(frequency: f32, config: &StreamConfig) -> impl FnMut(&m
     }
 }
 
-pub fn wave_callback<const N: usize>(wave: [f32; N], frequency: f32, config: &StreamConfig) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<N> {
-    let sample_rate = config.sample_rate as f32; // samples per second
-    let channels = config.channels as usize; // 1 for mono, 2 for stereo
+pub fn wave_callback<const N: usize>(wave: [f32; N], frequency: f32, audio: &Arc<Audio>) -> impl FnMut(&mut [f32], &OutputCallbackInfo) + use<N> {
+    let sample_rate = audio.get_sample_rate() as f32; // samples per second
+    let channels = audio.get_channel_count() as usize; // 1 for mono, 2 for stereo
     let inc = (N as f32 * frequency) / sample_rate;
     let mut phase = 0f32;
     move |samples, _callback_info| {

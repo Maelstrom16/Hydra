@@ -11,6 +11,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 
+use crate::audio::Audio;
 use crate::common::emulator::{self, EmuMessage};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
@@ -24,6 +25,7 @@ pub struct HydraApp {
     config: Config,
     window: Option<Arc<Window>>,
     graphics: Option<Arc<RwLock<Graphics>>>,
+    audio: Option<Arc<Audio>>,
     ui: Option<UserInterface>,
     proxy: EventLoopProxy<UserEvent>,
 
@@ -39,6 +41,7 @@ impl HydraApp {
             config: Config::from_toml(),
             window: None, // Initialized on app startup
             graphics: None, // Initialized on app startup
+            audio: None, // Initialized on app startup
             ui: None, // Initialized on app startup
             proxy,
 
@@ -53,6 +56,7 @@ impl HydraApp {
         let window_attributes = Window::default_attributes().with_title("Hydra");
         self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
         self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(self.window.clone().unwrap(), None)))));
+        self.audio = Some(Arc::new(Audio::new()));
         self.ui = Some(UserInterface::from_config(&self.config));
     }
 
@@ -66,6 +70,10 @@ impl HydraApp {
 
     pub fn clone_graphics(&self) -> Arc<RwLock<Graphics>> {
         Arc::clone(self.graphics.as_ref().unwrap())
+    }
+
+    pub fn clone_audio(&self) -> Arc<Audio> {
+        Arc::clone(self.audio.as_ref().unwrap())
     }
 
     pub fn clone_proxy(&self) -> EventLoopProxy<UserEvent> {

@@ -1,26 +1,94 @@
-// use std::{cell::Cell, rc::Rc};
+use std::sync::Arc;
 
-// use crate::gameboy::memory::io::MMIO;
+use cpal::{Stream, traits::{DeviceTrait, HostTrait}};
 
-// pub struct Pulse1 {
-//     nr10: Rc<Cell<u8>>,
-//     nr11: Rc<Cell<u8>>,
-//     nr12: Rc<Cell<u8>>,
-//     nr13: Rc<Cell<u8>>,
-//     nr14: Rc<Cell<u8>>,
-// }
+use crate::{audio::Audio, common::audio, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
 
-// impl Pulse1 {
-//     fn new(io: &IoMap) -> Self {
-//         Pulse1 { 
-//             nr10: io.clone_register(MMIO::NR10), 
-//             nr11: io.clone_register(MMIO::NR11), 
-//             nr12: io.clone_register(MMIO::NR12), 
-//             nr13: io.clone_register(MMIO::NR13), 
-//             nr14: io.clone_register(MMIO::NR14)
-//         }
-//     }
-// }
+pub struct Pulse {
+    enabled: bool,
+    stream: Stream,
+    
+    period: u16,
+    period_sweep_interval: u8,
+    period_sweep_direction: Direction,
+    period_sweep_step: u8,
+
+    volume: u16,
+    volume_sweep_interval: u8,
+    volume_sweep_direction: Direction,
+
+    duty_cycle: f32,
+    length_timer: u8,
+    length_timer_enabled: bool,
+}
+
+impl Pulse {
+    const DUTY_CYCLES: [f32; 4] = [0.125, 0.25, 0.5, 0.75];
+
+    pub fn new1(audio: &Arc<Audio>) -> Self {
+        let stream = audio.build_output_stream(audio::sawtooth_callback(440.0, audio), audio::error_callback, None);
+        Pulse { 
+            enabled: true, 
+            stream,
+
+            period: 0b11111111111, 
+            period_sweep_interval: 0, 
+            period_sweep_direction: Direction::Decreasing, 
+            period_sweep_step: 0, 
+
+            volume: 0b1111, 
+            volume_sweep_interval: 3, 
+            volume_sweep_direction: Direction::Decreasing, 
+            
+            duty_cycle: 0.5, 
+            length_timer: 0b111111, 
+            length_timer_enabled: false
+        }
+    }
+
+    pub fn new2(audio: &Arc<Audio>) -> Self {
+        let stream = audio.build_output_stream(audio::sawtooth_callback(261.63, audio), audio::error_callback, None);
+        Pulse { 
+            enabled: true, 
+            stream,
+
+            period: 0b11111111111, 
+            period_sweep_interval: 0, 
+            period_sweep_direction: Direction::Decreasing, 
+            period_sweep_step: 0, 
+
+            volume: 0, 
+            volume_sweep_interval: 0, 
+            volume_sweep_direction: Direction::Decreasing, 
+            
+            duty_cycle: 0.125, 
+            length_timer: 0b111111, 
+            length_timer_enabled: false 
+        }
+    }
+}
+
+impl MemoryMappedIo<{MMIO::NR11 as u16}> for Pulse {
+    fn read(&self) -> u8 {
+        serialize!(
+            (0) =>> 7..=6;
+            0b00111111;
+        )
+    }
+
+    fn write(&mut self, val: u8) {
+        deserialize!(val;
+            7..=6 =>> duty_cycle;
+            5..=0 =>> (self.length_timer);
+        );
+        self.duty_cycle = Self::DUTY_CYCLES[duty_cycle as usize];
+    }
+}
+
+enum Direction {
+    Increasing = 1,
+    Decreasing = -1
+}
 
 //         MMIO::NR10 => GBReg::new(0x80, 0b01111111, 0b01111111),
 //         MMIO::NR11 => GBReg::new(0xBF, 0b11000000, 0b11111111),
