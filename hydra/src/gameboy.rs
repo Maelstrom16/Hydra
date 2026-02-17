@@ -121,7 +121,7 @@ impl GameBoy {
             let wy = Rc::new(Cell::new(0x00));
             let wx = Rc::new(Cell::new(0x00));
             let color_map = Rc::new(RefCell::new(ColorMap::new(&model)));
-            let oam = Rc::new(RefCell::new(Oam::new()));
+            let oam = Rc::new(RefCell::new(Oam::new(model.clone())));
             let ppu = Some(ppu::Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), clock.clone(), interrupt_flags.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
             let apu = Rc::new(RefCell::new(Apu::new()));
             let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped

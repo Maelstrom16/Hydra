@@ -12,7 +12,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        InterruptFlags, Model, memory::{oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{colormap::ColorMap, lcdc::{LcdController, ObjectHeight}, state::PpuState}, timer::MasterTimer
+        InterruptFlags, Model, memory::{oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::ColorMap, lcdc::{LcdController, ObjectHeight}, state::PpuState}, timer::MasterTimer
     }, graphics::Graphics, window::UserEvent
 };
 
@@ -149,75 +149,10 @@ impl Ppu {
                     // Begin rendering at 
                     let screen_y = ly;
                     for screen_x in 0..SCREEN_WIDTH {
-                        let color = 'color_resolution: {
-                            // Check for opaque object pixels first
-                            let valid_objects = self.fifo.iter().filter(|obj| obj.occupies_x(screen_x));
-                            for oam_meta in valid_objects {
-                                let mut render_meta = self.oam.borrow().resolve_oam_meta(oam_meta);
-                                // Ignore LSB of tile index if objects are tall
-                                if self.lcdc.borrow().object_size == ObjectHeight::Tall {
-                                    render_meta.data_index &= 0b11111110; 
-                                }
-
-                                let data_address = 0x8000 + (render_meta.data_index as u16 * 16);
-
-                                let tile_y = screen_y + 16 - oam_meta.y;
-                                let byte_address = data_address + (tile_y as u16 * 2);
-                                let data = [self.vram.borrow().unbound_read_u8(byte_address, 0),
-                                    self.vram.borrow().unbound_read_u8(byte_address + 1, 0)]; //TODO: Switch bank based on attributes
-
-                                let tile_x = screen_x - oam_meta.x;
-                                let color_index_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
-                                let color_index = color_index_bits[1] << 1 | color_index_bits[0];
-
-                                if color_index != 0 {
-                                    break 'color_resolution self.color_map.borrow().get_object_color(render_meta.attributes.palette, color_index);
-                                }
-                            }
-
-                            // If an opaque object pixel was not found, resolve the BG/window color instead
-                            let color_index = if self.lcdc.borrow().lcd_enabled && self.lcdc.borrow().tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
-                                let is_window = self.lcdc.borrow().window_enabled && screen_x >= self.wx.get() - 7 && screen_y >= self.wy.get();
-
-                                let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
-                                let (map_address, map_x, map_y) = match is_window {
-                                    false => (
-                                        self.lcdc.borrow().bg_map_area as u16,
-                                        screen_x.wrapping_add(self.scx.get()),
-                                        screen_y.wrapping_add(self.scy.get()),
-                                    ),
-                                    true => (
-                                        self.lcdc.borrow().win_map_area as u16,
-                                        screen_x - self.wx.get() + 7,
-                                        screen_y - self.wy.get(),
-                                    ),
-                                };
-
-                                let map_index_x = (map_x / 8) as u16;
-                                let map_index_y = (map_y / 8) as u16;
-                                let data_index_address = map_address + map_index_x + (map_index_y * MAP_WIDTH as u16);
-
-                                let data_index = self.vram.borrow().unbound_read_u8(data_index_address, 0);
-                                // let tile_attributes = self.vram.borrow().unbound_read_u8(data_index_address, 1); //TODO: Enable on CGB
-                                let data_address = if data_index < 0x80 {
-                                    data_low_address + (data_index as u16 * 16)
-                                } else {
-                                    0x8800 + ((data_index - 0x80) as u16 * 16)
-                                };
-
-                                let tile_y = map_y % 8;
-                                let byte_address = data_address + (tile_y as u16 * 2);
-                                let data = [self.vram.borrow().unbound_read_u8(byte_address, 0),
-                                    self.vram.borrow().unbound_read_u8(byte_address + 1, 0)]; //TODO: Switch bank based on attributes
-
-                                let tile_x = map_x % 8;
-                                let color_index_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
-                                color_index_bits[1] << 1 | color_index_bits[0]
-                            } else {
-                                0
-                            };
-
-                            self.color_map.borrow().get_tile_color(color_index)
+                        let color = if self.lcdc.borrow().lcd_enabled {
+                            self.resolve_color(screen_x, screen_y)
+                        } else {
+                            &ColorMap::LCD_OFF_COLOR
                         };
 
                         let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
@@ -229,7 +164,6 @@ impl Ppu {
                     // Return to HBlank upon completion of the scanline
                     self.status.borrow_mut().set_mode(PpuMode::HBlank);
                 }
-                _ => panic!("Invalid PPU mode")
             }
             co.yield_(()).await;
         }
@@ -246,5 +180,97 @@ impl Ppu {
         let graphics = self.graphics.read().unwrap();
         graphics.update_screen_texture(&self.screen_buffer);
         self.proxy.send_event(UserEvent::RedrawRequest).expect("Unable to render Game Boy graphics: Main event loop closed unexpectedly");
+    }
+
+    fn resolve_color(&self, screen_x: u8, screen_y: u8) -> &'static [u8] {
+        // Check BG/window color first
+        let (bg_color_index, bg_priority) = if self.lcdc.borrow().tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
+            let is_window = self.lcdc.borrow().window_enabled && screen_x >= self.wx.get() - 7 && screen_y >= self.wy.get();
+
+            let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
+            let (map_address, map_x, map_y) = match is_window {
+                false => (
+                    self.lcdc.borrow().bg_map_area as u16,
+                    screen_x.wrapping_add(self.scx.get()),
+                    screen_y.wrapping_add(self.scy.get()),
+                ),
+                true => (
+                    self.lcdc.borrow().win_map_area as u16,
+                    screen_x - self.wx.get() + 7,
+                    screen_y - self.wy.get(),
+                ),
+            };
+
+            let map_index_x = (map_x / 8) as u16;
+            let map_index_y = (map_y / 8) as u16;
+            let data_index_address = map_address + map_index_x + (map_index_y * MAP_WIDTH as u16);
+
+            let (data_index, tile_attributes) = self.vram.borrow().read_tile_map(data_index_address);
+            let data_address = if data_index < 0x80 {
+                data_low_address + (data_index as u16 * 16)
+            } else {
+                0x8800 + ((data_index - 0x80) as u16 * 16)
+            };
+
+            let tile_y = map_y % 8;
+            let tile_x = map_x % 8;
+            
+            (self.resolve_color_index(tile_x, tile_y, data_address, &tile_attributes), tile_attributes.bg_priority)
+        } else {
+            (0, false)
+        };
+
+        // Return early if BG color has priority over any potential objects
+        let bg_color = self.color_map.borrow().get_tile_color(bg_color_index);
+        let bg_can_override = bg_color_index != 0;
+        if bg_priority && bg_can_override {
+            return bg_color;
+        }
+
+        // If background does not have inherent priority, check for opaque object pixels
+        let valid_objects = self.fifo.iter().filter(|obj| obj.occupies_x(screen_x));
+        if self.lcdc.borrow().objects_enabled { 
+            for oam_meta in valid_objects {
+                let mut render_meta = self.oam.borrow().resolve_oam_meta(oam_meta);
+                // Ignore LSB of tile index if objects are tall
+                if self.lcdc.borrow().object_size == ObjectHeight::Tall {
+                    render_meta.data_index &= 0b11111110; 
+                }
+
+                let data_address = 0x8000 + (render_meta.data_index as u16 * 16);
+
+                let tile_y = screen_y + 16 - oam_meta.y;
+                let tile_x = screen_x - oam_meta.x;
+                let obj_color_index = self.resolve_color_index(tile_x, tile_y, data_address, &render_meta.attributes);
+
+                if obj_color_index != 0 {
+                    return match render_meta.attributes.bg_priority && bg_can_override {
+                        true => bg_color,
+                        false => self.color_map.borrow().get_object_color(render_meta.attributes.palette, obj_color_index)
+                    }
+                }
+            }
+        }
+
+        // Return background color if no opaque object pixels are found
+        return bg_color
+    }
+
+    fn resolve_color_index(&self, tile_x: u8, tile_y: u8, tile_address: u16, attributes: &TileAttributes) -> u8 {
+        let tile_x = match attributes.x_flip {
+            true => 7 - tile_x,
+            false => tile_x
+        };
+        let tile_y = match attributes.y_flip {
+            true => 7 - tile_y,
+            false => tile_y
+        };
+
+        let byte_address = tile_address + (tile_y as u16 * 2);
+        let data = [self.vram.borrow().read_tile_data(byte_address, attributes.bank_index),
+            self.vram.borrow().read_tile_data(byte_address + 1, attributes.bank_index)];
+
+        let color_index_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
+        color_index_bits[1] << 1 | color_index_bits[0]
     }
 }

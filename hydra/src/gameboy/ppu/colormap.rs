@@ -9,6 +9,7 @@ pub struct ColorMap {
 
 impl ColorMap {
     // TODO: allow colors to be configured by user
+    pub const LCD_OFF_COLOR: [u8; 4] = [0, 0, 0, 255];
     const COLOR_MAP: [[u8; 4]; 4] = [
         [255, 255, 255, 255],
         [170, 170, 170, 255],

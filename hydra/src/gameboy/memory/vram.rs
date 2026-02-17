@@ -4,6 +4,7 @@ use std::rc::Rc;
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
 use crate::gameboy::ppu::PpuMode;
+use crate::gameboy::ppu::attributes::TileAttributes;
 
 pub const ADDRESS_OFFSET: u16 = 0x8000;
 
@@ -46,8 +47,16 @@ impl Vram {
         // }
     }
 
-    pub fn unbound_read_u8(&self, address: u16, bank: u8) -> u8 {
+    pub fn read_tile_data(&self, address: u16, bank: u8) -> u8 {
         self.vram[bank as usize][Vram::localize_address(address)]
+    }
+
+    pub fn read_tile_map(&self, address: u16) -> (u8, TileAttributes) {
+        let address = Vram::localize_address(address);
+        (self.vram[0][address], match self.model.is_monochrome() {
+            true => TileAttributes::default(),
+            false => TileAttributes::from_u8(self.vram[1][address], &self.model)
+        }) 
     }
 
     fn is_accessible(&self) -> bool {
