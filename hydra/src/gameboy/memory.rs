@@ -98,6 +98,8 @@ impl MemoryMap {
             0xE000..=0xFDFF => Ok(self.wram.borrow().read_u8(address - 0x2000)), // Treat exactly like WRAM
             0xFE00..=0xFEFF => self.oam.borrow().read(address),
             0xFF00 => Ok(<Joypad as MemoryMappedIo<0xFF00>>::read(&*self.joypad.borrow())),
+            0xFF01 => Ok(0x00), // TODO: Implement once everything is stable
+            0xFF02 => Ok(0x7E), // TODO: Implement once everything is stable
             0xFF04 => Ok(<MasterTimer as MemoryMappedIo<0xFF04>>::read(&*self.timer.borrow())),
             0xFF05 => Ok(<MasterTimer as MemoryMappedIo<0xFF05>>::read(&*self.timer.borrow())),
             0xFF06 => Ok(<MasterTimer as MemoryMappedIo<0xFF06>>::read(&*self.timer.borrow())),
@@ -142,6 +144,8 @@ impl MemoryMap {
             0xE000..=0xFDFF => Ok(self.wram.borrow_mut().write_u8(value, address - 0x2000)), // Treat exactly like WRAM
             0xFE00..=0xFEFF => self.oam.borrow_mut().write(address, value),
             0xFF00 => Ok(<Joypad as MemoryMappedIo<0xFF00>>::write(&mut *self.joypad.borrow_mut(), value)),
+            0xFF01 => Ok(()), // TODO: Implement once everything is stable
+            0xFF02 => Ok(()), // TODO: Implement once everything is stable
             0xFF04 => Ok(<MasterTimer as MemoryMappedIo<0xFF04>>::write(&mut *self.timer.borrow_mut(), value)),
             0xFF05 => Ok(<MasterTimer as MemoryMappedIo<0xFF05>>::write(&mut *self.timer.borrow_mut(), value)),
             0xFF06 => Ok(<MasterTimer as MemoryMappedIo<0xFF06>>::write(&mut *self.timer.borrow_mut(), value)),
