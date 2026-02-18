@@ -81,6 +81,8 @@ impl MasterTimer {
         if self.tima_enabled && falling_edges & self.tima_speed as u16 != 0 {
             self.tick_tima();
         }
+        // Update DIV when done
+        self.div_master = new_div;
     }
 
     fn tick_tima(&mut self) {
