@@ -48,7 +48,7 @@ impl MasterTimer {
     const MASTER_HZ: u32 = 4194304;
     const SYSTEM_HZ: u32 = Self::MASTER_HZ / 4;
     const DIV_HZ: u32 = Self::SYSTEM_HZ / 64;
-    const PPU_DOTS_PER_FRAME: u32 = 70224;
+    pub const PPU_DOTS_PER_FRAME: u32 = 70224;
 
     pub fn tick(&mut self) {
         self.update_div(self.div_master.wrapping_add(1));
@@ -61,6 +61,7 @@ impl MasterTimer {
             }
         };
         self.ppu_state.borrow_mut().tick();
+        self.apu.borrow_mut().system_tick();
     }
 
     pub fn get_ppu_dots(&self) -> u32 {
@@ -76,7 +77,7 @@ impl MasterTimer {
     fn update_div(&mut self, new_div: u16) {
         let falling_edges = self.div_master & !new_div;
         if falling_edges & self.system_speed as u16 != 0 {
-            self.apu.borrow_mut().tick();
+            self.apu.borrow_mut().apu_tick();
         }
         if self.tima_enabled && falling_edges & self.tima_speed as u16 != 0 {
             self.tick_tima();
@@ -103,7 +104,7 @@ impl MasterTimer {
 
             // Tick APU timer if falling edge detected
             if (self.div_master & self.system_speed as u16 != 0) && (self.div_master & new_system_speed as u16 == 0) {
-                self.apu.borrow_mut().tick();
+                self.apu.borrow_mut().apu_tick();
             }
         }
     }

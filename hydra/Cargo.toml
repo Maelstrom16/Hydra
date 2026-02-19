@@ -12,6 +12,7 @@ hydra_macros = {path = "../hydra_macros"}
 muda = "0.17.1"
 rand = "0.9.2"
 rfd = "0.15.4"
+ringbuf = "0.4.8"
 serde = "1.0.228"
 toml = "0.9.7"
 wgpu = "26.0.1"

@@ -25,7 +25,7 @@ pub struct HydraApp {
     config: Config,
     window: Option<Arc<Window>>,
     graphics: Option<Arc<RwLock<Graphics>>>,
-    audio: Option<Arc<Audio>>,
+    audio: Option<Arc<RwLock<Audio>>>,
     ui: Option<UserInterface>,
     proxy: EventLoopProxy<UserEvent>,
 
@@ -56,7 +56,7 @@ impl HydraApp {
         let window_attributes = Window::default_attributes().with_title("Hydra");
         self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
         self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(self.window.clone().unwrap(), None)))));
-        self.audio = Some(Arc::new(Audio::new()));
+        self.audio = Some(Arc::new(RwLock::new(Audio::new())));
         self.ui = Some(UserInterface::from_config(&self.config));
     }
 
@@ -72,7 +72,7 @@ impl HydraApp {
         Arc::clone(self.graphics.as_ref().unwrap())
     }
 
-    pub fn clone_audio(&self) -> Arc<Audio> {
+    pub fn clone_audio(&self) -> Arc<RwLock<Audio>> {
         Arc::clone(self.audio.as_ref().unwrap())
     }
 

@@ -1,11 +1,15 @@
-use std::time::Duration;
+use std::{collections::VecDeque, io::Read, sync::{Arc, Mutex}, time::Duration};
 
-use cpal::{Device, Host, OutputCallbackInfo, SizedSample, Stream, StreamConfig, StreamError, traits::{DeviceTrait, HostTrait}};
+use cpal::{Device, Host, OutputCallbackInfo, SampleRate, SizedSample, Stream, StreamConfig, StreamError, traits::{DeviceTrait, HostTrait}};
+use ringbuf::{HeapProd, HeapRb, traits::{Consumer, Observer, Split}};
+
+use crate::common::audio::sine_callback;
 
 pub struct Audio {
     host: Host,
     output: Device,
-    config: StreamConfig
+    config: StreamConfig,
+    stream: Option<Stream>,
 }
 
 impl Audio {
@@ -15,15 +19,7 @@ impl Audio {
         let supported_config = output.default_output_config().unwrap();
         let config = supported_config.config();
 
-        Audio { host, output, config }
-    }
-
-    pub fn build_output_stream<T, D, E>(&self, data_callback: D, error_callback: E, timeout: Option<Duration>) -> Stream where
-        T: SizedSample,
-        D: FnMut(&mut [T], &OutputCallbackInfo) + Send + 'static,
-        E: FnMut(StreamError) + Send + 'static,
-    {
-        self.output.build_output_stream(&self.config, data_callback, error_callback, timeout).unwrap()
+        Audio { host, output, config, stream: None }
     }
 
     pub fn get_sample_rate(&self) -> u32 {
@@ -32,5 +28,15 @@ impl Audio {
 
     pub fn get_channel_count(&self) -> u16 {
         self.config.channels
+    }
+
+    pub fn get_producer(&mut self) -> HeapProd<f32> {       
+        let (producer, mut consumer) = HeapRb::<f32>::new(self.config.sample_rate as usize / 10).split();
+        self.stream = Some(self.output.build_output_stream(&self.config, move |samples: &mut [f32], _| {consumer.pop_slice(samples);}, Self::error_callback, None).unwrap());
+        producer
+    }
+
+    fn error_callback(err: StreamError) {
+        panic!("Audio streaming error: {}", err)
     }
 }

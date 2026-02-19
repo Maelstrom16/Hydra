@@ -84,7 +84,7 @@ pub enum AGBRevision {
 }
 
 pub struct GameBoy {
-    // apu: Option<Apu>,
+    apu: Rc<RefCell<Apu>>,
     cpu: Option<Cpu>,
     memory: Rc<RefCell<MemoryMap>>,
     ppu: Option<Ppu>,
@@ -126,6 +126,7 @@ impl GameBoy {
             let ppu = Some(ppu::Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), clock.clone(), interrupt_flags.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
             let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
             GameBoy {
+                apu,
                 cpu,
                 memory,
                 ppu,
@@ -180,6 +181,10 @@ impl Emulator for GameBoy {
 
             // Every frame
             if self.clock.borrow().get_ppu_dots() == 0 {
+
+                // Send audio for playback
+                self.apu.borrow_mut().frame();
+
                 // Process any new messages
                 for msg in self.channel.try_iter() {
                     match msg {
