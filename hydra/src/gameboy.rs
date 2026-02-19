@@ -124,7 +124,7 @@ impl GameBoy {
             let color_map = Rc::new(RefCell::new(ColorMap::new(&model)));
             let oam = Rc::new(RefCell::new(Oam::new(model.clone())));
             let ppu = Some(ppu::Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), clock.clone(), interrupt_flags.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), apu.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
             GameBoy {
                 apu,
                 cpu,
@@ -175,7 +175,10 @@ impl Emulator for GameBoy {
         'main: loop {
             self.clock.borrow_mut().tick();
             self.memory.borrow_mut().tick_dma();
-            cpu_coro.resume();
+            if self.clock.borrow().is_system_cycle() {
+                cpu_coro.resume();
+                self.apu.borrow_mut().system_tick();
+            }
             self.clock.borrow_mut().refresh_tima_if_overflowing();
             ppu_coro.resume();
 

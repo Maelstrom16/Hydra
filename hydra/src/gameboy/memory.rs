@@ -8,7 +8,7 @@ pub mod wram;
 use crate::{
     common::errors::HydraIOError,
     gameboy::{
-        InterruptEnable, InterruptFlags, Joypad, Model, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
+        InterruptEnable, InterruptFlags, Joypad, Model, apu::{Apu, channel::Pulse}, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
@@ -23,6 +23,8 @@ pub struct MemoryMap {
     joypad: Rc<RefCell<Joypad>>,
     timer: Rc<RefCell<MasterTimer>>,
     interrupt_flags: Rc<RefCell<InterruptFlags>>,
+    pulse1: Rc<RefCell<Pulse>>,
+    pulse2: Rc<RefCell<Pulse>>,
     lcd_controller: Rc<RefCell<LcdController>>,
     ppu_state: Rc<RefCell<PpuState>>,
     scy: Rc<Cell<u8>>,
@@ -38,7 +40,8 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
-    pub fn new(model: &Rc<Model>, rom: Rom, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, oam: Rc<RefCell<Oam>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
+    pub fn new(model: &Rc<Model>, rom: Rom, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, oam: Rc<RefCell<Oam>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, apu: Rc<RefCell<Apu>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
+        let (pulse1, pulse2) = apu.borrow().clone_pointers();
         Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
             vram,
@@ -49,6 +52,8 @@ impl MemoryMap {
             joypad,
             timer,
             interrupt_flags,
+            pulse1,
+            pulse2,
             lcd_controller,
             ppu_state,
             scy,
@@ -105,6 +110,14 @@ impl MemoryMap {
             0xFF06 => Ok(<MasterTimer as MemoryMappedIo<0xFF06>>::read(&*self.timer.borrow())),
             0xFF07 => Ok(<MasterTimer as MemoryMappedIo<0xFF07>>::read(&*self.timer.borrow())),
             0xFF0F => Ok(<InterruptFlags as MemoryMappedIo<0xFF0F>>::read(&*self.interrupt_flags.borrow())),
+            0xFF11 => Ok(<Pulse as MemoryMappedIo<0xFF11>>::read(&*self.pulse1.borrow())),
+            0xFF12 => Ok(<Pulse as MemoryMappedIo<0xFF12>>::read(&*self.pulse1.borrow())),
+            0xFF13 => Ok(<Pulse as MemoryMappedIo<0xFF13>>::read(&*self.pulse1.borrow())),
+            0xFF14 => Ok(<Pulse as MemoryMappedIo<0xFF14>>::read(&*self.pulse1.borrow())),
+            0xFF16 => Ok(<Pulse as MemoryMappedIo<0xFF11>>::read(&*self.pulse2.borrow())),
+            0xFF17 => Ok(<Pulse as MemoryMappedIo<0xFF12>>::read(&*self.pulse2.borrow())),
+            0xFF18 => Ok(<Pulse as MemoryMappedIo<0xFF13>>::read(&*self.pulse2.borrow())),
+            0xFF19 => Ok(<Pulse as MemoryMappedIo<0xFF14>>::read(&*self.pulse2.borrow())),
             0xFF40 => Ok(<LcdController as MemoryMappedIo<0xFF40>>::read(&*self.lcd_controller.borrow())),
             0xFF41 => Ok(<PpuState as MemoryMappedIo<0xFF41>>::read(&*self.ppu_state.borrow())),
             0xFF42 => Ok(self.scy.get()),
@@ -151,6 +164,14 @@ impl MemoryMap {
             0xFF06 => Ok(<MasterTimer as MemoryMappedIo<0xFF06>>::write(&mut *self.timer.borrow_mut(), value)),
             0xFF07 => Ok(<MasterTimer as MemoryMappedIo<0xFF07>>::write(&mut *self.timer.borrow_mut(), value)),
             0xFF0F => Ok(<InterruptFlags as MemoryMappedIo<0xFF0F>>::write(&mut *self.interrupt_flags.borrow_mut(), value)),
+            0xFF11 => Ok(<Pulse as MemoryMappedIo<0xFF11>>::write(&mut *self.pulse1.borrow_mut(), value)),
+            0xFF12 => Ok(<Pulse as MemoryMappedIo<0xFF12>>::write(&mut *self.pulse1.borrow_mut(), value)),
+            0xFF13 => Ok(<Pulse as MemoryMappedIo<0xFF13>>::write(&mut *self.pulse1.borrow_mut(), value)),
+            0xFF14 => Ok(<Pulse as MemoryMappedIo<0xFF14>>::write(&mut *self.pulse1.borrow_mut(), value)),
+            0xFF16 => Ok(<Pulse as MemoryMappedIo<0xFF11>>::write(&mut *self.pulse2.borrow_mut(), value)),
+            0xFF17 => Ok(<Pulse as MemoryMappedIo<0xFF12>>::write(&mut *self.pulse2.borrow_mut(), value)),
+            0xFF18 => Ok(<Pulse as MemoryMappedIo<0xFF13>>::write(&mut *self.pulse2.borrow_mut(), value)),
+            0xFF19 => Ok(<Pulse as MemoryMappedIo<0xFF14>>::write(&mut *self.pulse2.borrow_mut(), value)),
             0xFF40 => Ok(<LcdController as MemoryMappedIo<0xFF40>>::write(&mut *self.lcd_controller.borrow_mut(), value)),
             0xFF41 => Ok(<PpuState as MemoryMappedIo<0xFF41>>::write(&mut *self.ppu_state.borrow_mut(), value)),
             0xFF42 => Ok(self.scy.set(value)),

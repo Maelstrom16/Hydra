@@ -61,7 +61,10 @@ impl MasterTimer {
             }
         };
         self.ppu_state.borrow_mut().tick();
-        self.apu.borrow_mut().system_tick();
+    }
+
+    pub fn is_system_cycle(&self) -> bool {
+        self.div_master % 4 == 0
     }
 
     pub fn get_ppu_dots(&self) -> u32 {

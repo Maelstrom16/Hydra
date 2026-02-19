@@ -1,8 +1,8 @@
-mod channel;
+pub mod channel;
 
-use std::{f32, sync::{Arc, RwLock}, time::Instant};
+use std::{cell::RefCell, f32, rc::Rc, sync::{Arc, RwLock}, time::Instant};
 
-use cpal::{OutputCallbackInfo, Stream};
+use cpal::{OutputCallbackInfo, Sample, Stream};
 use ringbuf::{HeapProd, traits::{Observer, Producer}};
 
 use crate::{audio::Audio, common::audio, gameboy::{apu::channel::Pulse, timer::MasterTimer}};
@@ -10,20 +10,18 @@ use crate::{audio::Audio, common::audio, gameboy::{apu::channel::Pulse, timer::M
 pub struct Apu {       
     div: u8,
 
-    pulse1: Pulse,
-    pulse2: Pulse,
+    pub(super) pulse1: Rc<RefCell<Pulse>>,
+    pub(super) pulse2: Rc<RefCell<Pulse>>,
     // wave: Wave,
     // noise: Noise,
 
     global_sample_rate: u32,
     local_buffer: Vec<f32>,
     ring_buffer: HeapProd<f32>,
-
-    phase_accumulator: f32
 }
 
 impl Apu {
-    const SAMPLE_RATE: u32 = MasterTimer::PPU_DOTS_PER_FRAME * 60;
+    const SAMPLE_RATE: u32 = MasterTimer::PPU_DOTS_PER_FRAME * 15;
 
     pub fn new(audio: Arc<RwLock<Audio>>) -> Self {
         let global_sample_rate = audio.read().unwrap().get_sample_rate();
@@ -31,24 +29,23 @@ impl Apu {
 
         Apu { 
             div: 0,
-            pulse1: Pulse::new1(),
-            pulse2: Pulse::new2(),
+            pulse1: Rc::new(RefCell::new(Pulse::new1())),
+            pulse2: Rc::new(RefCell::new(Pulse::new2())),
             // wave: Wave::new(),
             // noise: Noise::new(),
 
             global_sample_rate,
             local_buffer: Vec::new(),
             ring_buffer,
-
-            phase_accumulator: 0.0
         }
     }
 
     /// Tick function to be called on every machine cycle to generate audio samples.
     pub fn system_tick(&mut self) {
-        let inc = (440.0 * f32::consts::TAU) / Self::SAMPLE_RATE as f32;
-        self.phase_accumulator = (self.phase_accumulator + inc) % f32::consts::TAU;
-        self.local_buffer.push(self.phase_accumulator.sin());
+        let pulse1_sample = self.pulse1.borrow_mut().tick_and_sample().to_sample::<f32>();
+        let pulse2_sample = self.pulse2.borrow_mut().tick_and_sample().to_sample::<f32>();
+        let sample = (pulse1_sample + pulse2_sample) / 2.0;
+        self.local_buffer.push(sample);
     }
 
     /// Tick function to be called on every DIV-APU tick to update audio channel fields.
@@ -62,5 +59,9 @@ impl Apu {
         let new_buffer = (0..samples).into_iter().map(|index| self.local_buffer[index * self.local_buffer.len() / samples]).flat_map(|n| [n, n]).collect::<Vec<_>>();
         self.ring_buffer.push_slice(new_buffer.as_slice());
         self.local_buffer.clear();
+    }
+
+    pub fn clone_pointers(&self) -> (Rc<RefCell<Pulse>>, Rc<RefCell<Pulse>>) {
+        (self.pulse1.clone(), self.pulse2.clone())
     }
 }
