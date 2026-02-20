@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cpal::{Sample, Stream};
 
-use crate::{audio::Audio, common::{audio, timing::{Resettable, ModuloCounter, DynamicModuloCounter}}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
+use crate::{audio::Audio, common::{audio, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
 
 pub struct Pulse {
     enabled: bool,
@@ -236,6 +236,76 @@ impl Into<u8> for Direction {
         match self {
             Self::Increasing => 1,
             Self::Decreasing => 0
+        }
+    }
+}
+
+
+
+pub struct Wave {
+    enabled: bool,
+
+    wave_table: [u8; 16],
+
+    length_timer: OverflowCounter<u8>,
+    length_timer_enabled: bool,
+}
+
+impl Wave {
+    pub(super) fn new() -> Self {
+        Wave { 
+            enabled: false,
+
+            wave_table: [0x00; 16], 
+
+            length_timer: OverflowCounter::new(0b11111111), 
+            length_timer_enabled: false
+        }
+    }
+
+    pub fn tick_and_sample(&mut self) -> f32 {
+        if self.enabled {
+            0.0
+        } else {
+            Sample::EQUILIBRIUM
+        }
+    }
+
+    pub fn tick_length(&mut self) {
+        if self.length_timer_enabled && self.length_timer.increment() {
+            self.enabled = false;
+        }
+    }
+}
+
+pub struct Noise {
+    enabled: bool,
+
+    length_timer: ModuloCounter<u8>,
+    length_timer_enabled: bool,
+}
+
+impl Noise {
+    pub(super) fn new() -> Self {
+        Noise { 
+            enabled: false,
+
+            length_timer: ModuloCounter::new(0b111111, 64), 
+            length_timer_enabled: false
+        }
+    }
+
+    pub fn tick_and_sample(&mut self) -> f32 {
+        if self.enabled {
+            0.0
+        } else {
+            Sample::EQUILIBRIUM
+        }
+    }
+
+    pub fn tick_length(&mut self) {
+        if self.length_timer_enabled && self.length_timer.increment() {
+            self.enabled = false;
         }
     }
 }

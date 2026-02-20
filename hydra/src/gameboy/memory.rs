@@ -8,7 +8,7 @@ pub mod wram;
 use crate::{
     common::errors::HydraIOError,
     gameboy::{
-        InterruptEnable, InterruptFlags, Joypad, Model, apu::{Apu, channel::Pulse}, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
+        InterruptEnable, InterruptFlags, Joypad, Model, apu::{Apu, channel::{Noise, Pulse, Wave}}, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
@@ -25,6 +25,8 @@ pub struct MemoryMap {
     interrupt_flags: Rc<RefCell<InterruptFlags>>,
     pulse1: Rc<RefCell<Pulse>>,
     pulse2: Rc<RefCell<Pulse>>,
+    wave: Rc<RefCell<Wave>>,
+    noise: Rc<RefCell<Noise>>,
     lcd_controller: Rc<RefCell<LcdController>>,
     ppu_state: Rc<RefCell<PpuState>>,
     scy: Rc<Cell<u8>>,
@@ -41,7 +43,7 @@ pub struct MemoryMap {
 
 impl MemoryMap {
     pub fn new(model: &Rc<Model>, rom: Rom, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, oam: Rc<RefCell<Oam>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, apu: Rc<RefCell<Apu>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
-        let (pulse1, pulse2) = apu.borrow().clone_pointers();
+        let (pulse1, pulse2, wave, noise) = apu.borrow().clone_pointers();
         Ok(MemoryMap {
             cartridge: Some(rom.into_mbc()?),
             vram,
@@ -54,6 +56,8 @@ impl MemoryMap {
             interrupt_flags,
             pulse1,
             pulse2,
+            wave,
+            noise,
             lcd_controller,
             ppu_state,
             scy,
