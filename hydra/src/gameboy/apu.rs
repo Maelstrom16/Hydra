@@ -5,7 +5,7 @@ use std::{cell::RefCell, f32, rc::Rc, sync::{Arc, RwLock}, time::Instant};
 use cpal::{OutputCallbackInfo, Sample, Stream};
 use ringbuf::{HeapProd, traits::{Observer, Producer}};
 
-use crate::{audio::Audio, common::audio, gameboy::{apu::channel::Pulse, timer::MasterTimer}};
+use crate::{audio::Audio, common::audio, gameboy::{apu::channel::{Pulse, PulseType}, timer::MasterTimer}};
 
 pub struct Apu {       
     div: u8,
@@ -29,8 +29,8 @@ impl Apu {
 
         Apu { 
             div: 0,
-            pulse1: Rc::new(RefCell::new(Pulse::new1())),
-            pulse2: Rc::new(RefCell::new(Pulse::new2())),
+            pulse1: Rc::new(RefCell::new(Pulse::new(PulseType::Pulse1))),
+            pulse2: Rc::new(RefCell::new(Pulse::new(PulseType::Pulse2))),
             // wave: Wave::new(),
             // noise: Noise::new(),
 
@@ -51,6 +51,20 @@ impl Apu {
     /// Tick function to be called on every DIV-APU tick to update audio channel fields.
     pub fn apu_tick(&mut self) {
         self.div = self.div.wrapping_add(1);
+
+        if self.div % 8 == 0 {
+            self.pulse1.borrow_mut().envelope_sweep();
+            self.pulse2.borrow_mut().envelope_sweep();
+        }
+
+        if self.div % 4 == 0 {
+            self.pulse1.borrow_mut().period_sweep();
+        }
+
+        if self.div % 2 == 0 {
+            self.pulse1.borrow_mut().tick_length();
+            self.pulse2.borrow_mut().tick_length();
+        }
     }
 
     /// Tick function to be called every frame to push to the global ringbuf.

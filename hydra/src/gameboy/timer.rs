@@ -1,11 +1,12 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, apu::Apu, memory::{MMIO, MemoryMappedIo}, ppu::state::PpuState}, serialize};
+use crate::{common::timing::ModuloCounter, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, apu::Apu, memory::{MMIO, MemoryMappedIo}, ppu::state::PpuState}, serialize};
 
 pub struct MasterTimer {
     model: Rc<Model>,
 
-    div_master: u16,
+    machine_cycle_timer: ModuloCounter<u8>,
+    div_full: u16,
     tima: u8,
     tma: u8,
     tima_speed: TimaSpeed,
@@ -23,7 +24,8 @@ pub struct MasterTimer {
 impl MasterTimer {
     pub fn new(model: Rc<Model>, apu: Rc<RefCell<Apu>>, ppu_state: Rc<RefCell<PpuState>>, interrupt_flags: Rc<RefCell<InterruptFlags>>) -> Self {
         MasterTimer { 
-            div_master: match *model { 
+            machine_cycle_timer: ModuloCounter::new(0, 4),
+            div_full: match *model { 
                 Model::GameBoy(Some(GBRevision::DMG0)) => 0x18,
                 Model::GameBoy(_) => 0xAB,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles,
@@ -51,20 +53,24 @@ impl MasterTimer {
     pub const PPU_DOTS_PER_FRAME: u32 = 70224;
 
     pub fn tick(&mut self) {
-        self.update_div(self.div_master.wrapping_add(1));
-        self.timer_interrupt_status = match self.timer_interrupt_status {
-            InterruptStatus::Idle | InterruptStatus::Requesting => InterruptStatus::Idle,
-            InterruptStatus::Queued => {
-                self.tima = self.tma;
-                self.interrupt_flags.borrow_mut().request(Interrupt::Timer);
-                InterruptStatus::Requesting
-            }
-        };
+        if self.machine_cycle_timer.increment() {
+            self.update_div(self.div_full.wrapping_add(1));
+
+            self.timer_interrupt_status = match self.timer_interrupt_status {
+                InterruptStatus::Idle | InterruptStatus::Requesting => InterruptStatus::Idle,
+                InterruptStatus::Queued => {
+                    self.tima = self.tma;
+                    self.interrupt_flags.borrow_mut().request(Interrupt::Timer);
+                    InterruptStatus::Requesting
+                }
+            };
+        }
+
         self.ppu_state.borrow_mut().tick();
     }
 
     pub fn is_system_cycle(&self) -> bool {
-        self.div_master % 4 == 0
+        self.machine_cycle_timer.has_completed_cycle()
     }
 
     pub fn get_ppu_dots(&self) -> u32 {
@@ -78,7 +84,7 @@ impl MasterTimer {
     }
 
     fn update_div(&mut self, new_div: u16) {
-        let falling_edges = self.div_master & !new_div;
+        let falling_edges = self.div_full & !new_div;
         if falling_edges & self.system_speed as u16 != 0 {
             self.apu.borrow_mut().apu_tick();
         }
@@ -86,7 +92,7 @@ impl MasterTimer {
             self.tick_tima();
         }
         // Update DIV when done
-        self.div_master = new_div;
+        self.div_full = new_div;
     }
 
     fn tick_tima(&mut self) {
@@ -106,7 +112,7 @@ impl MasterTimer {
             };
 
             // Tick APU timer if falling edge detected
-            if (self.div_master & self.system_speed as u16 != 0) && (self.div_master & new_system_speed as u16 == 0) {
+            if (self.div_full & self.system_speed as u16 != 0) && (self.div_full & new_system_speed as u16 == 0) {
                 self.apu.borrow_mut().apu_tick();
             }
         }
@@ -115,7 +121,7 @@ impl MasterTimer {
 
 impl MemoryMappedIo<{MMIO::DIV as u16}> for MasterTimer {
     fn read(&self) -> u8 {
-        (self.div_master >> 6) as u8 & 0xFF
+        (self.div_full >> 6) as u8 & 0xFF
     }
     fn write(&mut self, _val: u8) {
         self.update_div(0);
@@ -158,8 +164,8 @@ impl MemoryMappedIo<{MMIO::TAC as u16}> for MasterTimer {
         );
         let tima_speed = TimaSpeed::from_u2(tima_speed);
 
-        let old_div_bit_high = self.div_master & self.tima_speed as u16 != 0;
-        let new_div_bit_low = self.div_master & tima_speed as u16 == 0;
+        let old_div_bit_high = self.div_full & self.tima_speed as u16 != 0;
+        let new_div_bit_low = self.div_full & tima_speed as u16 == 0;
         if match self.model.is_monochrome() {
             // On DMG, tick TIMA only when falling edge from (selected DIV bit && TIMA enable bit)
             // i.e. either selected bit went from set => unset, or TIMA was disabled

@@ -1,26 +1,25 @@
 use std::sync::Arc;
 
-use cpal::Stream;
+use cpal::{Sample, Stream};
 
-use crate::{audio::Audio, common::{audio, util::Delayed}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
+use crate::{audio::Audio, common::{audio, timing::{Resettable, ModuloCounter, DynamicModuloCounter}}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
 
 pub struct Pulse {
     enabled: bool,
     
-    period: u16,
-    period_div: u16,
-    period_sweep_interval: u8,
+    period_timer: DynamicModuloCounter<u16, u16, Resettable<u16>>,
     period_sweep_direction: Direction,
+    period_sweep_timer: DynamicModuloCounter<u8, Resettable<u8>, u8>,
     period_sweep_step: u8,
 
-    volume: u8,
-    volume_sweep_interval: u8,
-    volume_sweep_direction: Direction,
+    volume: Resettable<u8>,
+    volume_sweep_timer: DynamicModuloCounter<u8, Resettable<u8>, u8>,
+    volume_sweep_direction: Resettable<Direction>,
 
-    duty_index: Delayed<usize>,
-    wavetable_index: usize,
+    duty_index: usize,
+    wavetable_index: ModuloCounter<usize>,
 
-    length_timer: u8,
+    length_timer: ModuloCounter<u8>,
     length_timer_enabled: bool,
 }
 
@@ -32,69 +31,104 @@ impl Pulse {
         [0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xF, 0xF],
     ];
 
-    pub fn new1() -> Self {
-        Pulse { 
-            enabled: true, 
+    pub(super) fn new(pulse_type: PulseType) -> Self {
+        let mut volume: Resettable<u8> = 0.into();
+        volume.reset_value = match pulse_type {
+            PulseType::Pulse1 => 0b1111,
+            PulseType::Pulse2 => 0b0000,
+        };
 
-            period: 0b11111111111, 
-            period_div: 0,
-            period_sweep_interval: 0, 
+        Pulse { 
+            enabled: false, 
+
+            period_timer: DynamicModuloCounter::with_reset_value(0, 0x7FF, 0b11111111111.into()),
             period_sweep_direction: Direction::Decreasing, 
+            period_sweep_timer: DynamicModuloCounter::new(0, 0.into()),
             period_sweep_step: 0, 
 
-            volume: 0b1111, 
-            volume_sweep_interval: 3, 
-            volume_sweep_direction: Direction::Decreasing, 
+            volume,
+            volume_sweep_timer: DynamicModuloCounter::new(0, match pulse_type {
+                PulseType::Pulse1 => 3.into(),
+                PulseType::Pulse2 => 0.into(),
+            }),
+            volume_sweep_direction: Direction::Decreasing.into(), 
             
-            duty_index: 2.into(), 
-            wavetable_index: 0, 
+            duty_index: match pulse_type {
+                PulseType::Pulse1 => 2,
+                PulseType::Pulse2 => 0,
+            }, 
+            wavetable_index: ModuloCounter::new(0, 8), 
 
-            length_timer: 0b111111, 
+            length_timer: ModuloCounter::new(0b111111, 64), 
             length_timer_enabled: false
         }
     }
 
-    pub fn new2() -> Self {
-        Pulse { 
-            enabled: true, 
+    pub fn tick_and_sample(&mut self) -> f32 {
+        if self.enabled {
+            if self.period_timer.increment() && self.wavetable_index.increment() {
+                self.period_timer.reset_value.reset();
+            }
 
-            period: 0b11111111111,
-            period_div: 0,
-            period_sweep_interval: 0, 
-            period_sweep_direction: Direction::Decreasing, 
-            period_sweep_step: 0, 
-
-            volume: 0, 
-            volume_sweep_interval: 0, 
-            volume_sweep_direction: Direction::Decreasing, 
-            
-            duty_index: 1.into(), 
-            wavetable_index: 0, 
-            
-            length_timer: 0b111111, 
-            length_timer_enabled: false 
+            let digital = Self::WAVETABLES[self.duty_index][self.wavetable_index.value];
+            let analog = (digital * 0x11).to_sample::<f32>() * -1.0;
+            analog.mul_amp(self.volume.current as f32 / 0xF as f32)
+        } else {
+            Sample::EQUILIBRIUM
         }
     }
 
-    pub fn tick_and_sample(&mut self) -> u8 {
-        if self.period_div >= 0x7FF {
-            self.period_div = self.period;
-            self.wavetable_index = (self.wavetable_index + 1) % 8;
-            if self.wavetable_index == 0 {
-                self.duty_index.process_queue();
-            }
-        } else {
-            self.period_div += 1
+    pub fn envelope_sweep(&mut self) {
+        if self.volume_sweep_timer.increment() {
+            self.volume.current = (self.volume.current.saturating_add_signed(self.volume_sweep_direction.current as i8)).min(0xF)
         }
+    }
 
-        Self::WAVETABLES[*self.duty_index][self.wavetable_index]
+    pub fn period_sweep(&mut self) {
+        if self.period_sweep_timer.increment() {
+            let addend = (self.volume_sweep_direction.current as i16) * ((self.period_timer.reset_value.reset_value) / (2u16.pow(self.period_sweep_step as u32))) as i16;
+            let new_period = self.period_timer.reset_value.reset_value.saturating_add_signed(addend);
+            if new_period > 0x7FF {
+                self.enabled = false;
+            } else {
+                self.period_timer.reset_value.reset_value = new_period;
+            }
+            self.period_sweep_timer.modulus.reset();
+        }
+    }
+
+    pub fn tick_length(&mut self) {
+        if self.length_timer_enabled && self.length_timer.increment() {
+            self.enabled = false;
+        }
+    }
+}
+
+impl MemoryMappedIo<{MMIO::NR10 as u16}> for Pulse {
+    fn read(&self) -> u8 {
+        serialize!(
+            (self.period_sweep_timer.modulus.reset_value) =>> 6..=4;
+            (<Direction as Into<u8>>::into(self.period_sweep_direction)) =>> 3;
+            (self.period_sweep_step) =>> 2..=0;
+        )
+    }
+
+    fn write(&mut self, val: u8) {
+        deserialize!(val;
+            6..=4 =>> period_sweep_interval;
+            3 as bool =>> period_sweep_direction;
+            2..=0 =>> (self.period_sweep_step);
+        );
+        self.period_sweep_timer.modulus.reset_value = period_sweep_interval;
+        self.period_sweep_timer.modulus.reset();
+        self.period_sweep_direction = if period_sweep_direction {Direction::Increasing} else {Direction::Decreasing};
     }
 }
 
 impl MemoryMappedIo<{MMIO::NR11 as u16}> for Pulse {
     fn read(&self) -> u8 {
         serialize!(
-            (0) =>> 7..=6;
+            (self.duty_index as u8) =>> 7..=6;
             0b00111111;
         )
     }
@@ -102,29 +136,36 @@ impl MemoryMappedIo<{MMIO::NR11 as u16}> for Pulse {
     fn write(&mut self, val: u8) {
         deserialize!(val;
             7..=6 =>> duty_index;
-            5..=0 =>> (self.length_timer);
+            5..=0 =>> initial_length_timer;
         );
-        self.duty_index.queue(duty_index as usize);
+        self.duty_index = duty_index as usize;
+        self.length_timer.reset_value = initial_length_timer;
     }
 }
 
 impl MemoryMappedIo<{MMIO::NR12 as u16}> for Pulse {
     fn read(&self) -> u8 {
         serialize!(
-            (self.volume) =>> 7..=4;
-            (self.volume_sweep_direction as u8) =>> 3;
-            (self.volume_sweep_interval) =>> 2..=0;
+            (self.volume.reset_value) =>> 7..=4;
+            (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> 3;
+            (self.volume_sweep_timer.modulus.reset_value) =>> 2..=0;
         )
     }
 
     fn write(&mut self, val: u8) {
         deserialize!(val;
-            7..=4 =>> (self.volume);
+            7..=4 =>> volume;
             3 as bool =>> volume_sweep_direction;
-            2..=0 =>> (self.volume_sweep_interval);
+            2..=0 =>> volume_sweep_interval;
         );
 
-        self.volume_sweep_direction = if volume_sweep_direction {Direction::Increasing} else {Direction::Decreasing};
+        self.volume.reset_value = volume;
+        self.volume_sweep_direction.reset_value = if volume_sweep_direction {Direction::Increasing} else {Direction::Decreasing};
+        self.volume_sweep_timer.modulus.reset_value = volume_sweep_interval;
+
+        if volume == 0 && !volume_sweep_direction {
+            self.enabled = false;
+        }
     }
 }
 
@@ -134,7 +175,7 @@ impl MemoryMappedIo<{MMIO::NR13 as u16}> for Pulse {
     }
 
     fn write(&mut self, val: u8) {
-        self.period = (self.period & 0b11100000000) | val as u16
+        self.period_timer.reset_value.reset_value = (self.period_timer.reset_value.reset_value & 0b11100000000) | val as u16
     }
 }
 
@@ -148,18 +189,55 @@ impl MemoryMappedIo<{MMIO::NR14 as u16}> for Pulse {
 
     fn write(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> (self.enabled);
+            7 as bool =>> trigger;
             6 as bool =>> (self.length_timer_enabled);
             2..=0 =>> period_high;
         );
-        self.period = ((period_high as u16) << 8) | (self.period & 0b00011111111)
+
+        self.period_timer.reset_value.reset_value = ((period_high as u16) << 8) | (self.period_timer.reset_value.reset_value & 0b00011111111);
+        
+        if trigger {
+            self.enabled = true;
+            self.length_timer.reset();
+            self.period_timer.reset();
+            self.volume.reset();
+            self.volume_sweep_direction.reset();
+            self.volume_sweep_timer.modulus.reset();
+            self.volume_sweep_timer.reset();
+            self.period_timer.reset_value.reset();
+            self.period_sweep_timer.reset();
+        }
     }
 }
 
+pub(super) enum PulseType {
+    Pulse1,
+    Pulse2
+}
+
 #[derive(Copy, Clone)]
+#[repr(i8)]
 enum Direction {
     Increasing = 1,
-    Decreasing = 0
+    Decreasing = -1
+}
+
+impl From<bool> for Direction {
+    fn from(value: bool) -> Self {
+        match value {
+            true => Self::Increasing,
+            false => Self::Decreasing
+        }
+    }
+}
+
+impl Into<u8> for Direction {
+    fn into(self) -> u8 {
+        match self {
+            Self::Increasing => 1,
+            Self::Decreasing => 0
+        }
+    }
 }
 
 //         MMIO::NR10 => GBReg::new(0x80, 0b01111111, 0b01111111),
