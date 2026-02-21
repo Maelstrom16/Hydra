@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use funty::Unsigned;
+use funty::{Integral, Unsigned};
 
 #[macro_export]
 macro_rules! bitmask_with_width {
@@ -69,7 +69,7 @@ macro_rules! deserialize {
     };
 }
 
-pub trait BitVec: Unsigned {
+pub trait BitVec: Integral {
     fn test_bit(self, bit: Self) -> bool;
     fn test_bits(self, bitmask: Self) -> bool;
     fn set_bit(&mut self, bit: Self);
@@ -80,7 +80,7 @@ pub trait BitVec: Unsigned {
     fn map_bits(&mut self, bitmask: Self, cond: bool);
 }
 
-impl<T: Unsigned> BitVec for T {
+impl<T: Integral> BitVec for T {
     #[inline(always)]
     fn test_bit(self, bit: T) -> bool {
         self.test_bits(T::ONE << bit)

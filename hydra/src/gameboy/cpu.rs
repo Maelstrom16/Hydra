@@ -1,18 +1,17 @@
 mod ime;
 mod opcode;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use futures::FutureExt;
 use genawaiter::stack::Co;
 
 use crate::{
-    gameboy::{
+    common::bit::BitVec, gameboy::{
         AGBRevision, CGBRevision, GBRevision, InterruptEnable, InterruptFlags, Model, SGBRevision, cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}}, memory::{
             MemoryMap, MemoryMappedIo, rom::Rom
         }
-    },
-    gen_all,
+    }, gen_all
 };
 
 /// A Game Boy CPU.
@@ -176,17 +175,19 @@ impl Cpu {
 
     async fn fetch_opcode(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, debug: bool) {
         self.ir = gen_all!(&co, |co_inner| self.step_u8(memory, co_inner));
-        if debug {println!(
-            "{:#06X}: {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
-            self.pc - 1,
-            self.ir,
-            self.af[1],
-            self.af[0],
-            u16::from_le_bytes(self.bc),
-            u16::from_le_bytes(self.de),
-            u16::from_le_bytes(self.hl),
-            self.sp
-        )}
+        if debug {
+            println!(
+                "{:#06X}: {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
+                self.pc - 1,
+                self.ir,
+                self.af[1],
+                self.af[0],
+                u16::from_le_bytes(self.bc),
+                u16::from_le_bytes(self.de),
+                u16::from_le_bytes(self.hl),
+                self.sp
+            );
+        }
         gen_all!(&co, |co_inner| opcode::OP_TABLE[self.ir as usize](self, memory, co_inner));
     }
 
@@ -240,6 +241,9 @@ impl Cpu {
 
     pub async fn coro(&mut self, memory: Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, debug: bool) {
         loop {
+            if debug && self.af[0] & 0xF != 0 {
+                panic!("Invalid value written to flag register!");
+            }
             // Skip this iteration if halted and there are no interrupts pending
             if self.interrupt_handler.halted {
                 if self.interrupt_handler.interrupt_pending() {
@@ -449,7 +453,7 @@ impl Cpu {
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
-            n=(false),
+            n=(true),
             h=(half_carry),
             c=(carry)
         );
@@ -463,7 +467,7 @@ impl Cpu {
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
-            n=(false),
+            n=(true),
             h=(half_carry),
             c=(carry)
         );
@@ -513,7 +517,7 @@ impl Cpu {
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
             z=(result == 0),
-            n=(false),
+            n=(true),
             h=(half_carry),
             c=(carry)
         );
@@ -582,7 +586,6 @@ impl Cpu {
         );
 
         self.af[1] = result;
-        // 0x94 + 0x07 = 0x9B (should be 01; add 0x06)
     }
 
     #[inline(always)]
@@ -595,11 +598,11 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn rlc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
+    async fn rlc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O, sets_z: bool) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.rotate_left(1);
         set_flags!(self;
-            z=(false),
+            z=(sets_z && result == 0),
             n=(false),
             h=(false),
             c=(result & 0b00000001 != 0)
@@ -608,11 +611,11 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn rrc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
+    async fn rrc<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O, sets_z: bool) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
         let result = o.rotate_right(1);
         set_flags!(self;
-            z=(false),
+            z=(sets_z && result == 0),
             n=(false),
             h=(false),
             c=(result & 0b10000000 != 0)
@@ -621,35 +624,38 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn rl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
+    async fn rl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O, sets_z: bool) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
-        let (result, carry) = o.overflowing_shl(1);
+        let carry = o.test_bit(7);
+        let result = (o << 1) | get_flag!(self; c) as u8;
         set_flags!(self;
-            z=(false),
+            z=(sets_z && result == 0),
             n=(false),
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result | get_flag!(self; c) as u8, self, memory, co_inner));
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
-    async fn rr<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
+    async fn rr<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O, sets_z: bool) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
-        let (result, carry) = o.overflowing_shr(1);
+        let carry = o.test_bit(0);
+        let result = (o >> 1) | ((get_flag!(self; c) as u8) << 7);
         set_flags!(self;
-            z=(false),
+            z=(sets_z && result == 0),
             n=(false),
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result | (get_flag!(self; c) as u8) << 7, self, memory, co_inner));
+        gen_all!(co, |co_inner| operand.set(result, self, memory, co_inner));
     }
 
     #[inline(always)]
     async fn sla<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
-        let (result, carry) = o.overflowing_shl(1);
+        let carry = o.test_bit(7);
+        let result = o << 1;
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -662,7 +668,8 @@ impl Cpu {
     #[inline(always)]
     async fn sra<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner)) as i8;
-        let (result, carry) = o.overflowing_shr(1);
+        let carry = o.test_bit(0);
+        let result = o >> 1;
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -688,7 +695,8 @@ impl Cpu {
     #[inline(always)]
     async fn srl<O: IntOperand<u8>>(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, operand: O) {
         let o = gen_all!(co, |co_inner| operand.get(self, memory, co_inner));
-        let (result, carry) = o.overflowing_shr(1);
+        let carry = o.test_bit(0);
+        let result = o >> 1;
         set_flags!(self;
             z=(result == 0),
             n=(false),
