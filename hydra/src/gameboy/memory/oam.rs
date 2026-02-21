@@ -83,11 +83,11 @@ pub struct ObjectOamMetadata {
 
 impl ObjectOamMetadata {
     pub fn occupies_x(&self, x: u8) -> bool {
-        ((self.x - 8)..(self.x)).contains(&x)
+        ((self.x.saturating_sub(8))..(self.x)).contains(&x)
     }
 
     pub fn occupies_y(&self, y: u8, obj_height: ObjectHeight) -> bool {
-        ((self.y - 16)..(self.y - 16 + obj_height as u8)).contains(&y)
+        ((self.y.saturating_sub(16))..((self.y + obj_height as u8).saturating_sub(16))).contains(&y)
     }
 }
 
