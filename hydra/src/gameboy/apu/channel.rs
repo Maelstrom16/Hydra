@@ -243,9 +243,15 @@ impl Into<u8> for Direction {
 
 
 pub struct Wave {
+    dac_enabled: bool,
     enabled: bool,
 
-    wave_table: [u8; 16],
+    period_timer: DynamicModuloCounter<u16, u16, Resettable<u16>>,
+
+    volume: u8,
+
+    wavetable: [u8; 32],
+    wavetable_index: ModuloCounter<usize>,
 
     length_timer: OverflowCounter<u8>,
     length_timer_enabled: bool,
@@ -254,18 +260,30 @@ pub struct Wave {
 impl Wave {
     pub(super) fn new() -> Self {
         Wave { 
+            dac_enabled: false,
             enabled: false,
 
-            wave_table: [0x00; 16], 
+            period_timer: DynamicModuloCounter::with_reset_value(0, 0x7FF, 0b11111111111.into()),
+
+            volume: 0b00,
+
+            wavetable: [0x00; 32], 
+            wavetable_index: ModuloCounter::new(0, 32), 
 
             length_timer: OverflowCounter::new(0b11111111), 
             length_timer_enabled: false
         }
     }
 
+    const VOLUME_SHIFT_TABLE: [u8; 4] = [4, 0, 1, 2];
+
     pub fn tick_and_sample(&mut self) -> f32 {
-        if self.enabled {
-            0.0
+        if self.dac_enabled && self.enabled {
+            if self.period_timer.increment() {
+                self.wavetable_index.increment();
+            }
+            self.period_timer.reset_value.reset();
+            ((self.wavetable[self.wavetable_index.value] >> Self::VOLUME_SHIFT_TABLE[self.volume as usize]) * 0x11).to_sample::<f32>()
         } else {
             Sample::EQUILIBRIUM
         }
@@ -275,6 +293,87 @@ impl Wave {
         if self.length_timer_enabled && self.length_timer.increment() {
             self.enabled = false;
         }
+    }
+}
+
+impl Wave {
+    pub fn read_nr30(&self) -> u8 {
+        serialize!(
+            (self.dac_enabled as u8) =>> 7;
+            0b01111111;
+        )
+    }
+
+    pub fn write_nr30(&mut self, val: u8) {
+        deserialize!(val;
+            7 as bool =>> (self.dac_enabled);
+        );
+    }
+
+    pub fn read_nr31(&self) -> u8 {
+        0b11111111 // Write-only
+    }
+
+    pub fn write_nr31(&mut self, val: u8) {
+        self.length_timer.reset_value = val
+    }
+
+    pub fn read_nr32(&self) -> u8 {
+        serialize!(
+            (self.volume) =>> 6..=5;
+        )
+    }
+
+    pub fn write_nr32(&mut self, val: u8) {
+        deserialize!(val;
+            6..=5 =>> (self.volume);
+        );
+    }
+
+    pub fn read_nr33(&self) -> u8 {
+        0b11111111 // Write-only
+    }
+
+    pub fn write_nr33(&mut self, val: u8) {
+        self.period_timer.reset_value.reset_value = (self.period_timer.reset_value.reset_value & 0b11100000000) | val as u16
+    }
+    
+    pub fn read_nr34(&self) -> u8 {
+        serialize!(
+            0b10111111;
+            (self.length_timer_enabled as u8) =>> 6;
+        )
+    }
+
+    pub fn write_nr34(&mut self, val: u8) {
+        deserialize!(val;
+            7 as bool =>> trigger;
+            6 as bool =>> (self.length_timer_enabled);
+            2..=0 =>> period_high;
+        );
+
+        self.period_timer.reset_value.reset_value = ((period_high as u16) << 8) | (self.period_timer.reset_value.reset_value & 0b00011111111);
+        
+        if trigger {
+            self.enabled = true;
+            self.length_timer.reset();
+            self.period_timer.reset();
+        }
+    }
+
+    pub fn read_waveram(&self, address: usize) -> u8 {
+        let index = address * 2;
+        self.wavetable[index] << 4 | self.wavetable[index + 1]
+    }
+
+    pub fn write_waveram(&mut self, val: u8, address: usize) {
+        let index = address * 2;
+        deserialize!(val;
+            7..=4 =>> wave_high;
+            3..=0 =>> wave_low;
+        );
+        self.wavetable[index] = wave_high;
+        self.wavetable[index + 1] = wave_low;
     }
 }
 

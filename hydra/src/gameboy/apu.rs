@@ -42,10 +42,11 @@ impl Apu {
 
     /// Tick function to be called on every machine cycle to generate audio samples.
     pub fn system_tick(&mut self) {
-        let pulse1_sample = self.pulse1.borrow_mut().tick_and_sample().to_sample::<f32>();
-        let pulse2_sample = self.pulse2.borrow_mut().tick_and_sample().to_sample::<f32>();
-        let wave_sample = self.wave.borrow_mut().tick_and_sample().to_sample::<f32>();
-        let noise_sample = self.noise.borrow_mut().tick_and_sample().to_sample::<f32>();
+        let pulse1_sample = self.pulse1.borrow_mut().tick_and_sample();
+        let pulse2_sample = self.pulse2.borrow_mut().tick_and_sample();
+        let _ = self.wave.borrow_mut().tick_and_sample(); // Hacky solution to tick at twice the rate. TODO: Potentially make cleaner?
+        let wave_sample = self.wave.borrow_mut().tick_and_sample();
+        let noise_sample = self.noise.borrow_mut().tick_and_sample();
         let sample = (pulse1_sample + pulse2_sample + wave_sample + noise_sample) / 4.0;
         self.local_buffer.push(sample);
     }

@@ -11,7 +11,7 @@ use crate::{
         InterruptEnable, InterruptFlags, Joypad, Model, apu::{Apu, channel::{Noise, Pulse, Wave}}, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer
     },
 };
-use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc};
+use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, time::Duration};
 
 pub struct MemoryMap {
     cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
@@ -123,6 +123,12 @@ impl MemoryMap {
             0xFF17 => Ok(<Pulse as MemoryMappedIo<0xFF12>>::read(&*self.pulse2.borrow())),
             0xFF18 => Ok(<Pulse as MemoryMappedIo<0xFF13>>::read(&*self.pulse2.borrow())),
             0xFF19 => Ok(<Pulse as MemoryMappedIo<0xFF14>>::read(&*self.pulse2.borrow())),
+            0xFF1A => Ok(self.wave.borrow().read_nr30()),
+            0xFF1B => Ok(self.wave.borrow().read_nr31()),
+            0xFF1C => Ok(self.wave.borrow().read_nr32()),
+            0xFF1D => Ok(self.wave.borrow().read_nr33()),
+            0xFF1E => Ok(self.wave.borrow().read_nr34()),
+            0xFF30..=0xFF3F => Ok(self.wave.borrow().read_waveram(address as usize - 0xFF30)),
             0xFF40 => Ok(<LcdController as MemoryMappedIo<0xFF40>>::read(&*self.lcd_controller.borrow())),
             0xFF41 => Ok(<PpuState as MemoryMappedIo<0xFF41>>::read(&*self.ppu_state.borrow())),
             0xFF42 => Ok(self.scy.get()),
@@ -178,6 +184,12 @@ impl MemoryMap {
             0xFF17 => Ok(<Pulse as MemoryMappedIo<0xFF12>>::write(&mut *self.pulse2.borrow_mut(), value)),
             0xFF18 => Ok(<Pulse as MemoryMappedIo<0xFF13>>::write(&mut *self.pulse2.borrow_mut(), value)),
             0xFF19 => Ok(<Pulse as MemoryMappedIo<0xFF14>>::write(&mut *self.pulse2.borrow_mut(), value)),
+            0xFF1A => Ok(self.wave.borrow_mut().write_nr30(value)),
+            0xFF1B => Ok(self.wave.borrow_mut().write_nr31(value)),
+            0xFF1C => Ok(self.wave.borrow_mut().write_nr32(value)),
+            0xFF1D => Ok(self.wave.borrow_mut().write_nr33(value)),
+            0xFF1E => Ok(self.wave.borrow_mut().write_nr34(value)),
+            0xFF30..=0xFF3F => Ok(self.wave.borrow_mut().write_waveram(value, address as usize - 0xFF30)),
             0xFF40 => Ok(<LcdController as MemoryMappedIo<0xFF40>>::write(&mut *self.lcd_controller.borrow_mut(), value)),
             0xFF41 => Ok(<PpuState as MemoryMappedIo<0xFF41>>::write(&mut *self.ppu_state.borrow_mut(), value)),
             0xFF42 => Ok(self.scy.set(value)),
