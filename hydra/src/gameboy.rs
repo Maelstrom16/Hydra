@@ -174,10 +174,10 @@ impl Emulator for GameBoy {
         // Main loop
         'main: loop {
             self.clock.borrow_mut().tick();
+            self.apu.borrow_mut().dot_tick();
             self.memory.borrow_mut().tick_dma();
             if self.clock.borrow().is_system_cycle() {
                 cpu_coro.resume();
-                self.apu.borrow_mut().system_tick();
             }
             self.clock.borrow_mut().refresh_tima_if_overflowing();
             ppu_coro.resume();

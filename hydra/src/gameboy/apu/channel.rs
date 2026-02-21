@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cpal::{Sample, Stream};
 
-use crate::{audio::Audio, common::{audio, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
+use crate::{audio::Audio, common::{audio, bit::BitVec, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
 
 pub struct Pulse {
     enabled: bool,
@@ -41,7 +41,7 @@ impl Pulse {
         Pulse { 
             enabled: false, 
 
-            period_timer: DynamicModuloCounter::with_reset_value(0, 0x7FF, 0b11111111111.into()),
+            period_timer: DynamicModuloCounter::with_reset_value(0, 0x800, 0b11111111111.into()),
             period_sweep_direction: Direction::Decreasing, 
             period_sweep_timer: DynamicModuloCounter::new(0, 0.into()),
             period_sweep_step: 0, 
@@ -263,7 +263,7 @@ impl Wave {
             dac_enabled: false,
             enabled: false,
 
-            period_timer: DynamicModuloCounter::with_reset_value(0, 0x7FF, 0b11111111111.into()),
+            period_timer: DynamicModuloCounter::with_reset_value(0, 0x800, 0b11111111111.into()),
 
             volume: 0b00,
 
@@ -380,8 +380,20 @@ impl Wave {
 pub struct Noise {
     enabled: bool,
 
+    volume: Resettable<u8>,
+    volume_sweep_timer: DynamicModuloCounter<u8, Resettable<u8>, u8>,
+    volume_sweep_direction: Resettable<Direction>,
+
+    initial_shift: u8,
+    initial_divider: u8,
+    lfsr_timer: DynamicModuloCounter<u32, Resettable<u32>, u32>,
+    lfsr: u16,
+    use_bit_7: bool,
+
     length_timer: ModuloCounter<u8>,
     length_timer_enabled: bool,
+
+    shifted_out: bool,
 }
 
 impl Noise {
@@ -389,22 +401,131 @@ impl Noise {
         Noise { 
             enabled: false,
 
+            volume: 0b0000.into(),
+            volume_sweep_timer: DynamicModuloCounter::new(0, 0.into()),
+            volume_sweep_direction: Direction::Decreasing.into(), 
+
+            initial_divider: 0,
+            initial_shift: 0,
+            lfsr_timer: DynamicModuloCounter::new(0, 1.into()),
+            lfsr: 0,
+            use_bit_7: false,
+
             length_timer: ModuloCounter::new(0b111111, 64), 
-            length_timer_enabled: false
+            length_timer_enabled: false,
+
+            shifted_out: false,
         }
     }
 
     pub fn tick_and_sample(&mut self) -> f32 {
         if self.enabled {
-            0.0
+            if self.lfsr_timer.increment() {
+                self.lfsr_timer.modulus.reset();
+                let bit0 = self.lfsr.test_bit(0);
+                let xnor = !(bit0 ^ self.lfsr.test_bit(1));
+                self.lfsr.map_bit(15, xnor);
+                if self.use_bit_7 {
+                    self.lfsr.map_bit(7, xnor);
+                }
+                self.lfsr >>= 1;
+                self.shifted_out = bit0;
+            }
+            (!self.shifted_out as u8 * self.volume.current * 0x11).to_sample::<f32>()
         } else {
             Sample::EQUILIBRIUM
+        }
+    }
+
+    pub fn envelope_sweep(&mut self) {
+        if self.volume_sweep_timer.increment() {
+            self.volume.current = (self.volume.current.saturating_add_signed(self.volume_sweep_direction.current as i8)).min(0xF)
         }
     }
 
     pub fn tick_length(&mut self) {
         if self.length_timer_enabled && self.length_timer.increment() {
             self.enabled = false;
+        }
+    }
+}
+
+impl Noise {
+    pub fn read_nr41(&self) -> u8 {
+        0b11111111 // Write-only
+    }
+
+    pub fn write_nr41(&mut self, val: u8) {
+        deserialize!(val;
+            5..=0 =>> (self.length_timer.reset_value);
+        );
+    }
+    
+    pub fn read_nr42(&self) -> u8 {
+        serialize!(
+            (self.volume.reset_value) =>> 7..=4;
+            (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> 3;
+            (self.volume_sweep_timer.modulus.reset_value) =>> 2..=0;
+        )
+    }
+
+    pub fn write_nr42(&mut self, val: u8) {
+        deserialize!(val;
+            7..=4 =>> volume;
+            3 as bool =>> volume_sweep_direction;
+            2..=0 =>> volume_sweep_interval;
+        );
+
+        self.volume.reset_value = volume;
+        self.volume_sweep_direction.reset_value = if volume_sweep_direction {Direction::Increasing} else {Direction::Decreasing};
+        self.volume_sweep_timer.modulus.reset_value = volume_sweep_interval;
+
+        if volume == 0 && !volume_sweep_direction {
+            self.enabled = false;
+        }
+    }
+    
+    pub fn read_nr43(&self) -> u8 {
+        serialize!(
+            (self.initial_shift) =>> 7..=4;
+            (self.use_bit_7 as u8) =>> 3;
+            (self.initial_divider) =>> 2..=0;
+        )
+    }
+
+    pub fn write_nr43(&mut self, val: u8) {
+        deserialize!(val;
+            7..=4 =>> (self.initial_shift);
+            3 as bool =>> (self.use_bit_7);
+            2..=0 =>> (self.initial_divider);
+        );
+        
+        let divider = if self.initial_divider != 0 {self.initial_divider as u32 * 2} else {1};
+        self.lfsr_timer.modulus.reset_value = divider * 2u32.pow(self.initial_shift as u32);
+    }
+    
+    pub fn read_nr44(&self) -> u8 {
+        serialize!(
+            0b10111111;
+            (self.length_timer_enabled as u8) =>> 6;
+        )
+    }
+
+    pub fn write_nr44(&mut self, val: u8) {
+        deserialize!(val;
+            7 as bool =>> trigger;
+            6 as bool =>> (self.length_timer_enabled);
+        );
+        
+        if trigger {
+            self.enabled = true;
+            self.length_timer.reset();
+            self.volume.reset();
+            self.volume_sweep_direction.reset();
+            self.volume_sweep_timer.modulus.reset();
+            self.volume_sweep_timer.reset();
+            self.lfsr = 0;
+            self.lfsr_timer.modulus.reset();
         }
     }
 }
