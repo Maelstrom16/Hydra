@@ -215,7 +215,7 @@ impl Ppu {
             let tile_y = map_y % 8;
             let tile_x = map_x % 8;
             
-            (self.resolve_color_index(tile_x, tile_y, data_address, &tile_attributes), tile_attributes.bg_priority)
+            (self.resolve_color_index(tile_x, tile_y, data_address, &tile_attributes, false), tile_attributes.bg_priority)
         } else {
             (0, false)
         };
@@ -241,7 +241,7 @@ impl Ppu {
 
                 let tile_y = screen_y + 16 - oam_meta.y;
                 let tile_x = screen_x - oam_meta.x;
-                let obj_color_index = self.resolve_color_index(tile_x, tile_y, data_address, &render_meta.attributes);
+                let obj_color_index = self.resolve_color_index(tile_x, tile_y, data_address, &render_meta.attributes, true);
 
                 if obj_color_index != 0 {
                     return match render_meta.attributes.bg_priority && bg_can_override {
@@ -256,13 +256,13 @@ impl Ppu {
         return bg_color
     }
 
-    fn resolve_color_index(&self, tile_x: u8, tile_y: u8, tile_address: u16, attributes: &TileAttributes) -> u8 {
+    fn resolve_color_index(&self, tile_x: u8, tile_y: u8, tile_address: u16, attributes: &TileAttributes, is_object: bool) -> u8 {
         let tile_x = match attributes.x_flip {
             true => 7 - tile_x,
             false => tile_x
         };
         let tile_y = match attributes.y_flip {
-            true => 7 - tile_y,
+            true => (if !is_object || self.lcdc.borrow().object_size != ObjectHeight::Tall {7} else {15}) - tile_y,
             false => tile_y
         };
 
