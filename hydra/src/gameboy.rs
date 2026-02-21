@@ -2,6 +2,7 @@ mod apu;
 mod cpu;
 mod memory;
 mod ppu;
+mod serial;
 mod timer;
 
 use genawaiter::stack::let_gen_using;
