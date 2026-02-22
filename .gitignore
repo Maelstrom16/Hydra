@@ -7,6 +7,10 @@ src-future
 # Test ROM and tag highlights
 *.gb
 *.gb.tags
+*.gbc
+*.gbc.tags
+*.gba
+*.gba.tags
 
 # Prerequisites
 *.d
