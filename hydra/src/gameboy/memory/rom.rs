@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use crate::{common::errors::HydraIOError, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2}, sram::Sram}};
+use crate::{common::errors::HydraIOError, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc5::MBC5}, sram::Sram}};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;
@@ -33,7 +33,7 @@ impl Rom {
             0x05..=0x06 => Ok(Box::new(MBC2::from_rom(self)?)),
             0x0B..=0x0D => panic!("MMM01 not yet supported"),
             0x0F..=0x13 => panic!("MBC3 not yet supported"),
-            0x19..=0x1E => panic!("MBC5 not yet supported"),
+            0x19..=0x1E => Ok(Box::new(MBC5::from_rom(self)?)),
             0x20 => panic!("MBC6 not yet supported"),
             0x22 => panic!("MBC7 not yet supported"),
             0xFC => panic!("POCKET CAMERA not yet supported"),
