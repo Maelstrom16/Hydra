@@ -3,9 +3,11 @@ use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
+use crate::gameboy::memory::{MMIO, MemoryMappedIo};
 use crate::gameboy::ppu::PpuMode;
 use crate::gameboy::ppu::attributes::TileAttributes;
 use crate::gameboy::ppu::lcdc::LcdController;
+use crate::{deserialize, serialize};
 
 pub const ADDRESS_OFFSET: u16 = 0x8000;
 
@@ -72,5 +74,20 @@ impl Vram {
 
     const fn localize_address(address: u16) -> usize {
         (address - ADDRESS_OFFSET) as usize
+    }
+}
+
+impl MemoryMappedIo<{MMIO::VBK as u16}> for Vram {
+    fn read(&self) -> u8 {
+        serialize!(
+            0b11111110;
+            (self.vbk) =>> 0;
+        )
+    }
+
+    fn write(&mut self, val: u8) {
+        deserialize!(val;
+            0 =>> (self.vbk);
+        );
     }
 }

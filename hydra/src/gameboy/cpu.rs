@@ -1,4 +1,3 @@
-mod ime;
 mod opcode;
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -7,40 +6,12 @@ use futures::FutureExt;
 use genawaiter::stack::Co;
 
 use crate::{
-    common::bit::BitVec, gameboy::{
-        AGBRevision, CGBRevision, GBRevision, InterruptEnable, InterruptFlags, Model, SGBRevision, cpu::{ime::InterruptHandler, opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}}, memory::{
-            MemoryMap, MemoryMappedIo, rom::Rom
-        }
+    common::{bit::BitVec, timing::{DelayedTickCounter, ModuloCounter}}, gameboy::{
+        AGBRevision, CGBRevision, GBRevision, Interrupt, InterruptEnable, InterruptFlags, Joypad, Model, SGBRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}, memory::{
+            MMIO, MemoryMap, MemoryMappedIo, rom::Rom
+        }, timer::MasterTimer
     }, gen_all
 };
-
-/// A Game Boy CPU.
-///
-/// Note: Registers are stored in little-endian byte arrays, so the representation in code may be misleading.
-/// The AF register, for example, is indexed as follows:
-/// ```
-/// let af: u16 = u16::from_le_bytes(cpu.af);
-/// let a: u8 = cpu.af[1];
-/// let f: u8 = cpu.af[0];
-/// let z: bool = (cpu.af[0] & 0b10000000) != 0;
-/// let n: bool = (cpu.af[0] & 0b01000000) != 0;
-/// let h: bool = (cpu.af[0] & 0b00100000) != 0;
-/// let c: bool = (cpu.af[0] & 0b00010000) != 0;
-///
-/// cpu.af[0] &= 0b01111111; // Reset zero flag
-/// cpu.af[0] |= 0b00010000; // Set carry flag
-/// cpu.af[0] = ((true as u8) << 5) | (cpu.af[0] & 0b11011111) // Set/reset half-carry flag based on bool
-/// ```
-pub struct Cpu {
-    af: [u8; 2],
-    bc: [u8; 2],
-    de: [u8; 2],
-    hl: [u8; 2],
-    sp: u16,
-    pc: u16,
-    ir: u8,
-    interrupt_handler: InterruptHandler,
-}
 
 pub enum Register8 {
     A,
@@ -61,16 +32,52 @@ pub enum Register16 {
     PC,
 }
 
+/// A Game Boy CPU.
+///
+/// Note: Registers are stored in little-endian byte arrays, so the representation in code may be misleading.
+/// The AF register, for example, is indexed as follows:
+/// ```
+/// let af: u16 = u16::from_le_bytes(cpu.af);
+/// let a: u8 = cpu.af[1];
+/// let f: u8 = cpu.af[0];
+/// let z: bool = (cpu.af[0] & 0b10000000) != 0;
+/// let n: bool = (cpu.af[0] & 0b01000000) != 0;
+/// let h: bool = (cpu.af[0] & 0b00100000) != 0;
+/// let c: bool = (cpu.af[0] & 0b00010000) != 0;
+///
+/// cpu.af[0] &= 0b01111111; // Reset zero flag
+/// cpu.af[0] |= 0b00010000; // Set carry flag
+/// cpu.af[0] = ((true as u8) << 5) | (cpu.af[0] & 0b11011111) // Set/reset half-carry flag based on bool
+/// ```
+pub struct Cpu {
+    mode: CpuMode,
+
+    af: [u8; 2],
+    bc: [u8; 2],
+    de: [u8; 2],
+    hl: [u8; 2],
+    sp: u16,
+    pc: u16,
+    ir: u8,
+
+    interrupt_flags: Rc<RefCell<InterruptFlags>>,
+    interrupt_enable: Rc<RefCell<InterruptEnable>>,
+    
+    ime: bool,
+    cycles_until_ime: Option<u8>,
+    cycles_until_halt_bug: Option<u8>,
+    unhalt_timer: DelayedTickCounter<u16>,
+
+    joypad: Rc<RefCell<Joypad>>,
+    timer: Rc<RefCell<MasterTimer>>
+}
+
 impl Cpu {
-    pub fn new(rom: &Rom, model: &Rc<Model>, interrupt_flags: Rc<RefCell<InterruptFlags>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Self {
+    pub fn new(rom: &Rom, model: &Rc<Model>, interrupt_flags: Rc<RefCell<InterruptFlags>>, interrupt_enable: Rc<RefCell<InterruptEnable>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>) -> Self {
         let af;
         let bc;
         let de;
         let hl;
-        let sp: u16 = 0xFFFE;
-        let pc: u16 = 0x0100;
-        let ir: u8 = 0x00;
-        let interrupt_handler = InterruptHandler::new(interrupt_flags, interrupt_enable);
         match **model {
             Model::GameBoy(Some(GBRevision::DMG0)) => {
                 af = [0b0000 << 4, 0x01];
@@ -157,15 +164,49 @@ impl Cpu {
             _ => panic!("Attempt to initialize Game Boy CPU without a proper revision"),
         }
         Cpu {
+            mode: CpuMode::Normal,
+
             af,
             bc,
             de,
             hl,
-            sp,
-            pc,
-            ir,
-            interrupt_handler,
+            sp: 0xFFFE,
+            pc: 0x0100,
+            ir: 0x00,
+
+            interrupt_flags,
+            interrupt_enable,
+
+            ime: false, 
+            cycles_until_ime: None,
+            cycles_until_halt_bug: None,
+            unhalt_timer: DelayedTickCounter::new(None),
+
+            joypad,
+            timer
         }
+    }
+
+    pub fn queue_ime(&mut self) {
+        self.cycles_until_ime = Some(2)
+    }
+    pub fn cancel_ime(&mut self) {
+        self.cycles_until_ime = None
+    }
+
+    pub fn queue_halt_bug(&mut self) {
+        self.cycles_until_halt_bug = Some(2)
+    }
+    
+    pub fn refresh_interrupt_handler(&mut self, pc_old: u16) {
+        let decrements_to_zero = |n: &mut u8| {*n -= 1; *n == 0};
+        if let Some(_) = self.cycles_until_ime.take_if(decrements_to_zero) {self.ime = true;}
+        if let Some(_) = self.cycles_until_halt_bug.take_if(decrements_to_zero) {self.pc = pc_old;}
+    }
+
+    #[inline(always)]
+    pub fn interrupt_pending(&self) -> bool {
+        self.interrupt_enable.borrow().read() & self.interrupt_flags.borrow().read() != 0
     }
 
     fn fetch_interrupt(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, jump_addr: u16) -> impl Future<Output = ()> {
@@ -193,9 +234,9 @@ impl Cpu {
 
     #[inline(always)]
     fn fetch<'a>(&mut self, debug: bool) -> LocalOpcodeFn<'a> {
-        if self.interrupt_handler.ime && self.interrupt_handler.interrupt_pending() { 
+        if self.ime && self.interrupt_pending() { 
             // Generate call instruction from handled interrupt
-            let composite = self.interrupt_handler.interrupt_enable.borrow().read() & self.interrupt_handler.interrupt_flags.borrow().read();
+            let composite = self.interrupt_enable.borrow().read() & self.interrupt_flags.borrow().read();
             for shift_width in 0..=4 {
                 let bitmask = 1 << shift_width;
                 if composite & bitmask == 0 {
@@ -203,8 +244,8 @@ impl Cpu {
                     continue;
                 } else {
                     // Handle interrupt and return call instruction
-                    self.interrupt_handler.ime = false;
-                    self.interrupt_handler.interrupt_flags.borrow_mut().get_inner().reset_bits(bitmask);
+                    self.ime = false;
+                    self.interrupt_flags.borrow_mut().get_inner().reset_bits(bitmask);
                     let jump_addr = (shift_width * 0x8) + 0x40;
                     
                     return Box::new(move |cpu_inner: &'a mut Cpu, memory_inner, co_inner| cpu_inner.fetch_interrupt(memory_inner, co_inner, jump_addr).boxed_local())
@@ -244,23 +285,25 @@ impl Cpu {
             if debug && self.af[0] & 0xF != 0 {
                 panic!("Invalid value written to flag register!");
             }
-            // Skip this iteration if halted and there are no interrupts pending
-            if self.interrupt_handler.halted {
-                if self.interrupt_handler.interrupt_pending() {
-                    self.interrupt_handler.halted = false;
-                } else {
+            
+            // Skip iterations if halted or stopped
+            self.mode = match self.mode {
+                CpuMode::Normal => CpuMode::Normal,
+                CpuMode::Halted if self.interrupt_pending() || self.unhalt_timer.increment() => CpuMode::Normal,
+                CpuMode::Stopped if self.interrupt_flags.borrow().is_requested(Interrupt::Joypad) => CpuMode::Normal,
+                _ => {
                     co.yield_(()).await;
                     continue;  
                 }
-            }
+            };
 
             // Fetch cycle
-            let pc = self.pc;
+            let pc_old = self.pc;
             let next = self.fetch(debug);
 
             // Execute cycle(s)
             gen_all!(&co, |co_inner| next(self, &memory, co_inner));
-            self.interrupt_handler.refresh(&mut self.pc, pc);
+            self.refresh_interrupt_handler(pc_old);
         }
     }
 }
@@ -768,37 +811,68 @@ impl Cpu {
     #[inline(always)]
     async fn reti(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         gen_all!(&co, |co_inner| self.ret(memory, co_inner, CondOperand::Unconditional));
-        self.interrupt_handler.ime = true;
+        self.ime = true;
     }
 
     #[inline(always)]
     async fn ei(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        self.interrupt_handler.queue_ime();
+        self.queue_ime();
     }
 
     #[inline(always)]
     async fn di(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        self.interrupt_handler.ime = false;
-        self.interrupt_handler.cancel_ime();
+        self.ime = false;
+        self.cancel_ime();
     }
 
     #[inline(always)]
     async fn halt(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        self.interrupt_handler.halted = true;
+        self.mode = CpuMode::Halted;
 
         // If IME is off but an interrupt is already pending, trigger halt bug
-        if !self.interrupt_handler.ime && self.interrupt_handler.interrupt_pending() {
-            self.interrupt_handler.queue_halt_bug();
+        if !self.ime && self.interrupt_pending() {
+            self.queue_halt_bug();
         }
     }
 
     #[inline(always)]
     async fn stop(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        todo!() //TODO
+        let (mode, speed_switch, extra_cycle, reset_div) = match (self.joypad.borrow().is_input_active(), self.interrupt_pending(), self.timer.borrow().is_speed_switch_requested(), self.ime) {
+            (true, true, _, _) => (CpuMode::Normal, false, false, false),
+            (true, false, _, _) => (CpuMode::Halted, false, true, false),
+            (false, true, false, _) => (CpuMode::Stopped, false, false, true),
+            (false, false, false, _) => (CpuMode::Stopped, false, true, true),
+            (false, false, true, _) => {self.unhalt_timer.count_to(0xFFFF); (CpuMode::Halted, true, true, true)},
+            (false, true, true, true) => (CpuMode::Normal, true, false, true), // TODO: Change delay to be 0x20000 master clock cycles
+            (false, true, true, false) => panic!("Triggered undefined STOP opcode behavior"),
+        };
+        
+        println!("Mode: {:?}, Speed: {}, Cycle: {}, Div: {}", mode, speed_switch, extra_cycle, reset_div);
+
+        if extra_cycle {
+            let _ = gen_all!(co, |co_inner| self.step_u8(memory, co_inner));
+        }
+
+        self.mode = mode;
+        
+        if speed_switch {
+            self.timer.borrow_mut().toggle_speed();
+        }
+        
+        if reset_div {
+            <MasterTimer as MemoryMappedIo<{MMIO::DIV as u16}>>::write(&mut *self.timer.borrow_mut(), 0);
+        }
     }
 
     #[inline(always)]
     async fn inavlidop(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
         panic!("Unknown opcode")
     }
+}
+
+#[derive(Debug)]
+enum CpuMode {
+    Normal,
+    Halted,
+    Stopped,
 }

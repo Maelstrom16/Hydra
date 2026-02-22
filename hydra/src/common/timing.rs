@@ -25,6 +25,35 @@ impl<T> Borrow<T> for Resettable<T> {
     }
 }
 
+/// A counter that increases until a specific target value, then emits a single pulse.
+pub struct DelayedTickCounter<T> {
+    value: T,
+    target: Option<T>
+}
+
+impl<T: Unsigned> DelayedTickCounter<T> {
+    pub fn new(target: Option<T>) -> Self {
+        DelayedTickCounter { value: T::ZERO, target }
+    }
+
+    pub fn count_to(&mut self, target: T) {
+        self.value = T::ZERO;
+        self.target = Some(target);
+    }
+
+    pub fn increment(&mut self) -> bool {
+        if let Some(target) = self.target {
+            self.value = (self.value + T::ONE) % target;
+            if self.value == T::ZERO {
+                self.target = None;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+
 pub type ModuloCounter<T> = DynamicModuloCounter<T, T, T>;
 
 /// A counter with preset overflow and reset values.

@@ -147,6 +147,9 @@ impl MemoryMap {
             0xFF49 => Ok(<ColorMap as MemoryMappedIo<0xFF49>>::read(&*self.color_map.borrow())),
             0xFF4A => Ok(self.wy.get()),
             0xFF4B => Ok(self.wx.get()),
+            0xFF4D => Ok(<MasterTimer as MemoryMappedIo<0xFF4D>>::read(&*self.timer.borrow())),
+            0xFF4F => Ok(<Vram as MemoryMappedIo<0xFF4F>>::read(&*self.vram.borrow())),
+            0xFF70 => Ok(<Wram as MemoryMappedIo<0xFF70>>::read(&*self.wram.borrow())),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             0xFFFF => Ok(<InterruptEnable as MemoryMappedIo<0xFFFF>>::read(&*self.interrupt_enable.borrow())),
             _ => Err(HydraIOError::OpenBusAccess)
@@ -156,7 +159,7 @@ impl MemoryMap {
         }};
         match read_result {
             Ok(value) => self.data_bus.set(value),
-            Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Read from open bus at address {:#06X}", address),
+            Err(HydraIOError::OpenBusAccess) => println!("Warning: Read from open bus at address {:#06X}", address),
             Err(e) => panic!("Error reading from memory.\n{}", e),
         }
 
@@ -212,6 +215,9 @@ impl MemoryMap {
             0xFF49 => Ok(<ColorMap as MemoryMappedIo<0xFF49>>::write(&mut *self.color_map.borrow_mut(), value)),
             0xFF4A => Ok(self.wy.set(value)),
             0xFF4B => Ok(self.wx.set(value)),
+            0xFF4D => Ok(<MasterTimer as MemoryMappedIo<0xFF4D>>::write(&mut *self.timer.borrow_mut(), value)),
+            0xFF4F => Ok(<Vram as MemoryMappedIo<0xFF4F>>::write(&mut *self.vram.borrow_mut(), value)),
+            0xFF70 => Ok(<Wram as MemoryMappedIo<0xFF70>>::write(&mut *self.wram.borrow_mut(), value)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = value),
             0xFFFF => Ok(<InterruptEnable as MemoryMappedIo<0xFFFF>>::write(&mut *self.interrupt_enable.borrow_mut(), value)),
             _ => Err(HydraIOError::OpenBusAccess)
@@ -221,7 +227,7 @@ impl MemoryMap {
         }};
         match write_result {
             Ok(_) => {}
-            Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Write to open bus at address {:#06X}", address),
+            Err(HydraIOError::OpenBusAccess) => println!("Warning: Write to open bus at address {:#06X}", address),
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
     }

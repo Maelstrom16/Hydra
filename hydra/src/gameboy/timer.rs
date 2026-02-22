@@ -117,6 +117,10 @@ impl MasterTimer {
             }
         }
     }
+
+    pub fn is_speed_switch_requested(&self) -> bool {
+        self.speed_switch_queued
+    }
 }
 
 impl MemoryMappedIo<{MMIO::DIV as u16}> for MasterTimer {
@@ -185,6 +189,21 @@ impl MemoryMappedIo<{MMIO::TAC as u16}> for MasterTimer {
     }
 }
 
+impl MemoryMappedIo<{MMIO::KEY1 as u16}> for MasterTimer {
+    fn read(&self) -> u8 {
+        serialize!(
+            (self.system_speed.as_u1()) =>> 7;
+            (self.speed_switch_queued as u8) =>> 0;
+        )
+    }
+
+    fn write(&mut self, val: u8) {
+        deserialize!(val;
+            0 as bool =>> (self.speed_switch_queued); 
+        );
+    }
+}
+
 enum InterruptStatus {
     Idle,
     Queued,
@@ -196,6 +215,15 @@ enum InterruptStatus {
 enum SystemSpeed {
     Standard  = 0b010000000000,
     CgbDouble = 0b100000000000,
+}
+
+impl SystemSpeed {
+    pub fn as_u1(&self) -> u8 {
+        match self {
+            Self::Standard => 0,
+            Self::CgbDouble => 1,
+        }
+    }
 }
 
 #[repr(u16)]

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::gameboy::Model;
+use crate::{deserialize, gameboy::{Model, memory::{MMIO, MemoryMappedIo}}, serialize};
 
 pub const ADDRESS_OFFSET: u16 = 0xC000;
 
@@ -19,7 +19,7 @@ impl Wram {
 
         Wram {
             model,
-            wram: vec![[0; 0x1000]; 2].into_boxed_slice(),
+            wram: vec![[0; 0x1000]; bank_count].into_boxed_slice(),
             wbk: 0
         }
     }
@@ -45,5 +45,20 @@ impl Wram {
 
     const fn localize_address(address: u16) -> usize {
         (address - ADDRESS_OFFSET) as usize
+    }
+}
+
+impl MemoryMappedIo<{MMIO::SVBK as u16}> for Wram {
+    fn read(&self) -> u8 {
+        serialize!(
+            0b11111110;
+            (self.wbk) =>> 2..=0;
+        )
+    }
+
+    fn write(&mut self, val: u8) {
+        deserialize!(val;
+            2..=0 =>> (self.wbk);
+        );
     }
 }

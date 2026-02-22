@@ -23,7 +23,10 @@ impl ColorMap {
                 bgp: [0b00, 0b11, 0b11, 0b11],
                 obp: [[0b11, 0b11, 0b11, 0b11], [0b11, 0b11, 0b11, 0b11]] // Uninitialized, but 0xFF is a common value
             },
-            false => panic!("GBC Palette mapping not yet supported"),
+            false => ColorMap { 
+                bgp: [0b11, 0b11, 0b11, 0b11],
+                obp: [[0b11, 0b11, 0b11, 0b11], [0b11, 0b11, 0b11, 0b11]]
+            },
         }
     }
 
