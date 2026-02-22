@@ -112,9 +112,9 @@ impl GameBoy {
             let joypad = Rc::new(RefCell::new(Joypad::new(interrupt_flags.clone())));
             let cpu = Some(cpu::Cpu::new(&rom, &model, interrupt_flags.clone(), interrupt_enable.clone()));
             let ppu_mode = Rc::new(RefCell::new(PpuMode::OAMScan));
-            let vram = Rc::new(RefCell::new(Vram::new(model.clone(), ppu_mode.clone())));
-            let wram = Rc::new(RefCell::new(Wram::new(model.clone())));
             let lcd_controller = Rc::new(RefCell::new(LcdController::new()));
+            let vram = Rc::new(RefCell::new(Vram::new(model.clone(), ppu_mode.clone(), lcd_controller.clone())));
+            let wram = Rc::new(RefCell::new(Wram::new(model.clone())));
             let ppu_state = Rc::new(RefCell::new(PpuState::new(&model, ppu_mode.clone(), interrupt_flags.clone())));
             let apu = Rc::new(RefCell::new(Apu::new(audio)));
             let clock = Rc::new(RefCell::new(MasterTimer::new(model.clone(), apu.clone(), ppu_state.clone(), interrupt_flags.clone())));

@@ -28,6 +28,10 @@ impl LcdController {
             object_size: ObjectHeight::Standard
         }
     }
+
+    pub fn is_lcd_enabled(&self) -> bool {
+        self.lcd_enabled
+    }
 }
 
 impl MemoryMappedIo<{MMIO::LCDC as u16}> for LcdController {
