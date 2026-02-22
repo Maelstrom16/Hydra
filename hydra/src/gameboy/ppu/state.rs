@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, memory::{MMIO, MemoryMappedIo}, ppu::PpuMode}, serialize};
+use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, ppu::PpuMode}, serialize};
 
 pub struct PpuState {
     ppu_mode: Rc<RefCell<PpuMode>>,
@@ -76,8 +76,8 @@ impl PpuState {
     }
 }
 
-impl MemoryMappedIo<{MMIO::STAT as u16}> for PpuState {
-    fn read(&self) -> u8 {
+impl PpuState {
+    pub fn read_stat(&self) -> u8 {
         serialize!(
             0b10000000;
             (self.stat_interrupt_select) => 6..=3;
@@ -86,29 +86,25 @@ impl MemoryMappedIo<{MMIO::STAT as u16}> for PpuState {
         )
     }
     
-    fn write(&mut self, val: u8) {
+    pub fn write_stat(&mut self, val: u8) {
         deserialize!(val;
             6..=3 => (self.stat_interrupt_select);
         );
     }
-}
-
-impl MemoryMappedIo<{MMIO::LY as u16}> for PpuState {
-    fn read(&self) -> u8 {
+    
+    pub fn read_ly(&self) -> u8 {
         self.ly
     }
     
-    fn write(&mut self, _val: u8) {
+    pub fn write_ly(&mut self, _val: u8) {
         // Do nothing -- readonly
     }
-}
-
-impl MemoryMappedIo<{MMIO::LYC as u16}> for PpuState {
-    fn read(&self) -> u8 {
+    
+    pub fn read_lyc(&self) -> u8 {
         self.lyc
     }
     
-    fn write(&mut self, lyc: u8) {
+    pub fn write_lyc(&mut self, lyc: u8) {
         self.ly_eq_lyc_check(self.ly == lyc);
         self.lyc = lyc;
     }

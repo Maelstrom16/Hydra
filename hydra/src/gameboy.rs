@@ -12,7 +12,7 @@ use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
     },
-    gameboy::{apu::Apu, cpu::Cpu, memory::{MMIO, MemoryMap, MemoryMappedIo, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer},
+    gameboy::{apu::Apu, cpu::Cpu, memory::{MemoryMap, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer},
     window::HydraApp
 };
 use std::{
@@ -275,12 +275,12 @@ impl Joypad {
     }
 }
 
-impl MemoryMappedIo<{MMIO::JOYP as u16}> for Joypad {   
-    fn read(&self) -> u8 {
+impl Joypad {   
+    pub fn read_joyp(&self) -> u8 {
         self.joyp.read()
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_joyp(&mut self, val: u8) {
         self.joyp.write(val);
         self.refresh();
     }
@@ -324,14 +324,12 @@ impl InterruptFlags {
     pub fn get_inner(&mut self) -> &mut MaskedBitVec<u8, true> {
         &mut self.interrupts
     }
-}
-
-impl MemoryMappedIo<{MMIO::IF as u16}> for InterruptFlags{
-    fn read(&self) -> u8 {
+    
+    pub fn read_if(&self) -> u8 {
         self.interrupts.read()
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_if(&mut self, val: u8) {
         self.interrupts.write(val);
     }
 }
@@ -346,14 +344,12 @@ impl InterruptEnable {
             interrupts: MaskedBitVec::new(0b00000000, 0b00011111, 0b00011111)
         }
     }
-}
-
-impl MemoryMappedIo<{MMIO::IE as u16}> for InterruptEnable {
-    fn read(&self) -> u8 {
+    
+    pub fn read_ie(&self) -> u8 {
         self.interrupts.read()
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_ie(&mut self, val: u8) {
         self.interrupts.write(val)
     }
 }

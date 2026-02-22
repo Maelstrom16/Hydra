@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::timing::ModuloCounter, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, apu::Apu, memory::{MMIO, MemoryMappedIo}, ppu::state::PpuState}, serialize};
+use crate::{common::timing::ModuloCounter, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, apu::Apu, ppu::state::PpuState}, serialize};
 
 pub struct MasterTimer {
     model: Rc<Model>,
@@ -123,45 +123,40 @@ impl MasterTimer {
     }
 }
 
-impl MemoryMappedIo<{MMIO::DIV as u16}> for MasterTimer {
-    fn read(&self) -> u8 {
+impl MasterTimer {
+    pub fn read_div(&self) -> u8 {
         (self.div_full >> 6) as u8 & 0xFF
     }
-    fn write(&mut self, _val: u8) {
+    pub fn write_div(&mut self, _val: u8) {
         self.update_div(0);
     }
-}
-
-impl MemoryMappedIo<{MMIO::TIMA as u16}> for MasterTimer {
-    fn read(&self) -> u8 {
+    
+    pub fn read_tima(&self) -> u8 {
         self.tima
     }
-    fn write(&mut self, val: u8) {
+    pub fn write_tima(&mut self, val: u8) {
         self.tima = val;
         if let InterruptStatus::Queued = self.timer_interrupt_status {
             self.timer_interrupt_status = InterruptStatus::Idle;
         }
     }
-}
-
-impl MemoryMappedIo<{MMIO::TMA as u16}> for MasterTimer {
-    fn read(&self) -> u8 {
+    
+    pub fn read_tma(&self) -> u8 {
         self.tma
     }
-    fn write(&mut self, val: u8) {
+    pub fn write_tma(&mut self, val: u8) {
         self.tma = val
     }
-}
-
-impl MemoryMappedIo<{MMIO::TAC as u16}> for MasterTimer {
-    fn read(&self) -> u8 {
+    
+    pub fn read_tac(&self) -> u8 {
         serialize!(
             0b11111000;
             (self.tima_enabled as u8) =>> 2;
             (self.tima_speed.as_u2()) =>> 1..=0;
         )
     }
-    fn write(&mut self, val: u8) {
+    
+    pub fn write_tac(&mut self, val: u8) {
         deserialize!(val;
             2 as bool =>> tima_enabled;
             1..=0 =>> tima_speed;
@@ -187,17 +182,15 @@ impl MemoryMappedIo<{MMIO::TAC as u16}> for MasterTimer {
         self.tima_speed = tima_speed;
         self.tima_enabled = tima_enabled;
     }
-}
-
-impl MemoryMappedIo<{MMIO::KEY1 as u16}> for MasterTimer {
-    fn read(&self) -> u8 {
+    
+    pub fn read_key1(&self) -> u8 {
         serialize!(
             (self.system_speed.as_u1()) =>> 7;
             (self.speed_switch_queued as u8) =>> 0;
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_key1(&mut self, val: u8) {
         deserialize!(val;
             0 as bool =>> (self.speed_switch_queued); 
         );

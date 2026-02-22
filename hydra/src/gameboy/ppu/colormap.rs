@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{deserialize, gameboy::{Model, memory::{MMIO, MemoryMappedIo}}, serialize};
+use crate::{deserialize, gameboy::Model, serialize};
 
 pub struct ColorMap {
     bgp: [u8; 4],
@@ -39,8 +39,8 @@ impl ColorMap {
     }
 }
 
-impl MemoryMappedIo<{MMIO::BGP as u16}> for ColorMap {
-    fn read(&self) -> u8 {
+impl ColorMap {
+    pub fn read_bgp(&self) -> u8 {
         serialize!(
             (self.bgp[3]) =>> 7..=6;
             (self.bgp[2]) =>> 5..=4;
@@ -49,7 +49,7 @@ impl MemoryMappedIo<{MMIO::BGP as u16}> for ColorMap {
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_bgp(&mut self, val: u8) {
         deserialize!(val;
             7..=6 =>> (self.bgp[3]);
             5..=4 =>> (self.bgp[2]);
@@ -57,44 +57,22 @@ impl MemoryMappedIo<{MMIO::BGP as u16}> for ColorMap {
             1..=0 =>> (self.bgp[0]);
         );
     }
-}
-
-impl MemoryMappedIo<{MMIO::OBP0 as u16}> for ColorMap {
-    fn read(&self) -> u8 {
+    
+    pub fn read_obp(&self, palette_index: usize) -> u8 {
         serialize!(
-            (self.obp[0][3]) =>> 7..=6;
-            (self.obp[0][2]) =>> 5..=4;
-            (self.obp[0][1]) =>> 3..=2;
-            (self.obp[0][0]) =>> 1..=0;
+            (self.obp[palette_index][3]) =>> 7..=6;
+            (self.obp[palette_index][2]) =>> 5..=4;
+            (self.obp[palette_index][1]) =>> 3..=2;
+            (self.obp[palette_index][0]) =>> 1..=0;
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_obp(&mut self, val: u8, palette_index: usize) {
         deserialize!(val;
-            7..=6 =>> (self.obp[0][3]);
-            5..=4 =>> (self.obp[0][2]);
-            3..=2 =>> (self.obp[0][1]);
-            1..=0 =>> (self.obp[0][0]);
-        );
-    }
-}
-
-impl MemoryMappedIo<{MMIO::OBP1 as u16}> for ColorMap {
-    fn read(&self) -> u8 {
-        serialize!(
-            (self.obp[1][3]) =>> 7..=6;
-            (self.obp[1][2]) =>> 5..=4;
-            (self.obp[1][1]) =>> 3..=2;
-            (self.obp[1][0]) =>> 1..=0;
-        )
-    }
-
-    fn write(&mut self, val: u8) {
-        deserialize!(val;
-            7..=6 =>> (self.obp[1][3]);
-            5..=4 =>> (self.obp[1][2]);
-            3..=2 =>> (self.obp[1][1]);
-            1..=0 =>> (self.obp[1][0]);
+            7..=6 =>> (self.obp[palette_index][3]);
+            5..=4 =>> (self.obp[palette_index][2]);
+            3..=2 =>> (self.obp[palette_index][1]);
+            1..=0 =>> (self.obp[palette_index][0]);
         );
     }
 }

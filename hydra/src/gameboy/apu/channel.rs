@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cpal::{Sample, Stream};
 
-use crate::{audio::Audio, common::{audio, bit::BitVec, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
+use crate::{audio::Audio, common::{audio, bit::BitVec, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, serialize};
 
 pub struct Pulse {
     enabled: bool,
@@ -104,8 +104,8 @@ impl Pulse {
     }
 }
 
-impl MemoryMappedIo<{MMIO::NR10 as u16}> for Pulse {
-    fn read(&self) -> u8 {
+impl Pulse {
+    pub fn read_nr10(&self) -> u8 {
         serialize!(
             (self.period_sweep_timer.modulus.reset_value) =>> 6..=4;
             (<Direction as Into<u8>>::into(self.period_sweep_direction)) =>> 3;
@@ -113,7 +113,7 @@ impl MemoryMappedIo<{MMIO::NR10 as u16}> for Pulse {
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_nr10(&mut self, val: u8) {
         deserialize!(val;
             6..=4 =>> period_sweep_interval;
             3 as bool =>> period_sweep_direction;
@@ -123,17 +123,15 @@ impl MemoryMappedIo<{MMIO::NR10 as u16}> for Pulse {
         self.period_sweep_timer.modulus.reset();
         self.period_sweep_direction = if period_sweep_direction {Direction::Increasing} else {Direction::Decreasing};
     }
-}
-
-impl MemoryMappedIo<{MMIO::NR11 as u16}> for Pulse {
-    fn read(&self) -> u8 {
+    
+    pub fn read_nrx1(&self) -> u8 {
         serialize!(
             (self.duty_index as u8) =>> 7..=6;
             0b00111111;
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_nrx1(&mut self, val: u8) {
         deserialize!(val;
             7..=6 =>> duty_index;
             5..=0 =>> initial_length_timer;
@@ -141,10 +139,8 @@ impl MemoryMappedIo<{MMIO::NR11 as u16}> for Pulse {
         self.duty_index = duty_index as usize;
         self.length_timer.reset_value = initial_length_timer;
     }
-}
-
-impl MemoryMappedIo<{MMIO::NR12 as u16}> for Pulse {
-    fn read(&self) -> u8 {
+    
+    pub fn read_nrx2(&self) -> u8 {
         serialize!(
             (self.volume.reset_value) =>> 7..=4;
             (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> 3;
@@ -152,7 +148,7 @@ impl MemoryMappedIo<{MMIO::NR12 as u16}> for Pulse {
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_nrx2(&mut self, val: u8) {
         deserialize!(val;
             7..=4 =>> volume;
             3 as bool =>> volume_sweep_direction;
@@ -167,27 +163,23 @@ impl MemoryMappedIo<{MMIO::NR12 as u16}> for Pulse {
             self.enabled = false;
         }
     }
-}
-
-impl MemoryMappedIo<{MMIO::NR13 as u16}> for Pulse {
-    fn read(&self) -> u8 {
+    
+    pub fn read_nrx3(&self) -> u8 {
         0b11111111 // Write-only
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_nrx3(&mut self, val: u8) {
         self.period_timer.reset_value.reset_value = (self.period_timer.reset_value.reset_value & 0b11100000000) | val as u16
     }
-}
-
-impl MemoryMappedIo<{MMIO::NR14 as u16}> for Pulse {
-    fn read(&self) -> u8 {
+    
+    pub fn read_nrx4(&self) -> u8 {
         serialize!(
             0b10111111;
             (self.length_timer_enabled as u8) =>> 6;
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_nrx4(&mut self, val: u8) {
         deserialize!(val;
             7 as bool =>> trigger;
             6 as bool =>> (self.length_timer_enabled);

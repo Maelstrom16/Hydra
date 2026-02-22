@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
-use crate::gameboy::memory::{MMIO, MemoryMappedIo};
 use crate::gameboy::ppu::PpuMode;
 use crate::gameboy::ppu::attributes::TileAttributes;
 use crate::gameboy::ppu::lcdc::LcdController;
@@ -77,15 +76,15 @@ impl Vram {
     }
 }
 
-impl MemoryMappedIo<{MMIO::VBK as u16}> for Vram {
-    fn read(&self) -> u8 {
+impl Vram {
+    pub fn read_vbk(&self) -> u8 {
         serialize!(
             0b11111110;
             (self.vbk) =>> 0;
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_vbk(&mut self, val: u8) {
         deserialize!(val;
             0 =>> (self.vbk);
         );

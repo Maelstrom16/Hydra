@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{deserialize, gameboy::{Model, memory::{MMIO, MemoryMappedIo}}, serialize};
+use crate::{deserialize, gameboy::Model, serialize};
 
 pub const ADDRESS_OFFSET: u16 = 0xC000;
 
@@ -48,15 +48,15 @@ impl Wram {
     }
 }
 
-impl MemoryMappedIo<{MMIO::SVBK as u16}> for Wram {
-    fn read(&self) -> u8 {
+impl Wram {
+    pub fn read_wbk(&self) -> u8 {
         serialize!(
             0b11111110;
             (self.wbk) =>> 2..=0;
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_wbk(&mut self, val: u8) {
         deserialize!(val;
             2..=0 =>> (self.wbk);
         );

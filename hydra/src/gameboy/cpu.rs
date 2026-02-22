@@ -8,7 +8,7 @@ use genawaiter::stack::Co;
 use crate::{
     common::{bit::BitVec, timing::{DelayedTickCounter, ModuloCounter}}, gameboy::{
         AGBRevision, CGBRevision, GBRevision, Interrupt, InterruptEnable, InterruptFlags, Joypad, Model, SGBRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}, memory::{
-            MMIO, MemoryMap, MemoryMappedIo, rom::Rom
+            MemoryMap, rom::Rom
         }, timer::MasterTimer
     }, gen_all
 };
@@ -206,7 +206,7 @@ impl Cpu {
 
     #[inline(always)]
     pub fn interrupt_pending(&self) -> bool {
-        self.interrupt_enable.borrow().read() & self.interrupt_flags.borrow().read() != 0
+        self.interrupt_enable.borrow().read_ie() & self.interrupt_flags.borrow().read_if() != 0
     }
 
     fn fetch_interrupt(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>, jump_addr: u16) -> impl Future<Output = ()> {
@@ -236,7 +236,7 @@ impl Cpu {
     fn fetch<'a>(&mut self, debug: bool) -> LocalOpcodeFn<'a> {
         if self.ime && self.interrupt_pending() { 
             // Generate call instruction from handled interrupt
-            let composite = self.interrupt_enable.borrow().read() & self.interrupt_flags.borrow().read();
+            let composite = self.interrupt_enable.borrow().read_ie() & self.interrupt_flags.borrow().read_if();
             for shift_width in 0..=4 {
                 let bitmask = 1 << shift_width;
                 if composite & bitmask == 0 {
@@ -860,7 +860,7 @@ impl Cpu {
         }
         
         if reset_div {
-            <MasterTimer as MemoryMappedIo<{MMIO::DIV as u16}>>::write(&mut *self.timer.borrow_mut(), 0);
+            self.timer.borrow_mut().write_div(0);
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::{deserialize, gameboy::memory::{MMIO, MemoryMappedIo}, serialize};
+use crate::{deserialize, serialize};
 
 pub struct LcdController {
     pub(super) lcd_enabled: bool,
@@ -34,8 +34,8 @@ impl LcdController {
     }
 }
 
-impl MemoryMappedIo<{MMIO::LCDC as u16}> for LcdController {
-    fn read(&self) -> u8 {
+impl LcdController {
+    pub fn read_lcdc(&self) -> u8 {
         serialize!(
             (self.lcd_enabled as u8) =>> 7;
             ((self.win_map_area == TileMapArea::Map1) as u8) =>> 6;
@@ -48,7 +48,7 @@ impl MemoryMappedIo<{MMIO::LCDC as u16}> for LcdController {
         )
     }
 
-    fn write(&mut self, val: u8) {
+    pub fn write_lcdc(&mut self, val: u8) {
         deserialize!(val;
             7 as bool =>> (self.lcd_enabled);
             6 as bool =>> win_map_area;
