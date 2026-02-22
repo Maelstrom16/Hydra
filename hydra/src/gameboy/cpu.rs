@@ -846,8 +846,6 @@ impl Cpu {
             (false, true, true, true) => (CpuMode::Normal, true, false, true), // TODO: Change delay to be 0x20000 master clock cycles
             (false, true, true, false) => panic!("Triggered undefined STOP opcode behavior"),
         };
-        
-        println!("Mode: {:?}, Speed: {}, Cycle: {}, Div: {}", mode, speed_switch, extra_cycle, reset_div);
 
         if extra_cycle {
             let _ = gen_all!(co, |co_inner| self.step_u8(memory, co_inner));
@@ -862,11 +860,6 @@ impl Cpu {
         if reset_div {
             self.timer.borrow_mut().write_div(0);
         }
-    }
-
-    #[inline(always)]
-    async fn inavlidop(&mut self, memory: &Rc<RefCell<MemoryMap>>, co: Co<'_, ()>) {
-        panic!("Unknown opcode")
     }
 }
 

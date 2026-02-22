@@ -18,7 +18,6 @@ use crate::{
 
 pub struct Ppu {
     model: Rc<Model>,
-    timer: Rc<RefCell<MasterTimer>>,
     fifo: Vec<ObjectOamMetadata>,
     screen_buffer: Box<[u8]>,
     next_frame_instant: Instant,
@@ -32,8 +31,6 @@ pub struct Ppu {
     wy: Rc<Cell<u8>>,
     wx: Rc<Cell<u8>>,
     color_map: Rc<RefCell<ColorMap>>,
-
-    interrupt_flags: Rc<RefCell<InterruptFlags>>,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -66,11 +63,10 @@ const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl Ppu {
-    pub fn new(model: Rc<Model>, vram: Rc<RefCell<Vram>>, oam: Rc<RefCell<Oam>>, lcdc: Rc<RefCell<LcdController>>, status: Rc<RefCell<PpuState>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(model: Rc<Model>, vram: Rc<RefCell<Vram>>, oam: Rc<RefCell<Oam>>, lcdc: Rc<RefCell<LcdController>>, status: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
         let mut result = Ppu {
             model,
-            timer,
             fifo: Vec::with_capacity(10),
             screen_buffer,
             next_frame_instant: Instant::now(),
@@ -84,8 +80,6 @@ impl Ppu {
             wy,
             wx,
             color_map,
-
-            interrupt_flags,
 
             graphics,
             proxy,
