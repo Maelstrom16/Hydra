@@ -39,7 +39,6 @@ pub struct MemoryMap {
 
     dma_source: u8,
     dma_cycle: Option<u8>,
-    data_bus: Cell<u8>,
 }
 
 impl MemoryMap {
@@ -74,7 +73,6 @@ impl MemoryMap {
                 false => 0x00,
             },
             dma_cycle: None,
-            data_bus: Cell::new(0),
         })
     }
 
@@ -157,17 +155,15 @@ impl MemoryMap {
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             _ => Err(HydraIOError::OpenBusAccess)
         }};
+
         match read_result {
-            Ok(value) => self.data_bus.set(value),
-            Err(HydraIOError::OpenBusAccess) => println!("Warning: Read from open bus at address {:#06X}", address),
+            Ok(value) => value,
+            Err(HydraIOError::OpenBusAccess) => 0xFF, //println!("Warning: Read from open bus at address {:#06X}", address),
             Err(e) => panic!("Error reading from memory.\n{}", e),
         }
-
-        return self.data_bus.get();
     }
 
     pub fn write_u8(&mut self, value: u8, address: u16, is_dma: bool) -> () {
-        self.data_bus.set(value);
         let mem_accessible = is_dma || matches!(self.dma_cycle, None);
         let write_result = if mem_accessible { match address {
             0x0000..=0x7FFF => self.cartridge.as_mut().map(|this| this.write_rom_u8(value, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
@@ -227,7 +223,7 @@ impl MemoryMap {
         }};
         match write_result {
             Ok(_) => {}
-            Err(HydraIOError::OpenBusAccess) => println!("Warning: Write to open bus at address {:#06X}", address),
+            Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Write to open bus at address {:#06X}", address),
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
     }

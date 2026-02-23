@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use crate::{common::errors::HydraIOError, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc5::MBC5}, sram::Sram}};
+use crate::{common::errors::HydraIOError, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5}, sram::Sram}};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;
@@ -32,7 +32,7 @@ impl Rom {
             0x01..=0x03 => Ok(Box::new(MBC1::from_rom(self)?)),
             0x05..=0x06 => Ok(Box::new(MBC2::from_rom(self)?)),
             0x0B..=0x0D => panic!("MMM01 not yet supported"),
-            0x0F..=0x13 => panic!("MBC3 not yet supported"),
+            0x0F..=0x13 => Ok(Box::new(MBC3::from_rom(self)?)),
             0x19..=0x1E => Ok(Box::new(MBC5::from_rom(self)?)),
             0x20 => panic!("MBC6 not yet supported"),
             0x22 => panic!("MBC7 not yet supported"),
@@ -42,7 +42,7 @@ impl Rom {
             0xFF => panic!("HuC1 not yet supported"),
             _ => Err(HydraIOError::MalformedROM("Undefined cartridge hardware identifier").into()),
         }
-    }
+    }    
 
     /// Reads the byte from this ROM at the provided address and bank. 
     pub fn read_bank(&self, address: u16, bank: usize) -> u8 {
@@ -52,6 +52,14 @@ impl Rom {
     /// Reads the cartridge's title from this ROM's header.
     pub fn get_title(&self) -> &[u8] {
         &self.0[0][TITLE_ADDRESS]
+    }
+
+    /// Constructs a new `RealTimeClock` if the provided ROM indicates a need for one.
+    pub fn get_rtc(&self) -> Option<RealTimeClock> {
+        match self.0[0][HARDWARE_ADDRESS] {
+            0x0F..=0x10 => Some(RealTimeClock::new()),
+            _ => None,
+        }
     }
 
     /// Reads the ROM size (in bytes) from a byte vector, treating it as a ROM cartridge header.
