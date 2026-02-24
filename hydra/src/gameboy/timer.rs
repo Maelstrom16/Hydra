@@ -222,10 +222,10 @@ impl SystemSpeed {
 #[repr(u16)]
 #[derive(Copy, Clone)]
 enum TimaSpeed {
-    Fastest = 0b000000100,
-    Fast    = 0b000010000,
-    Slow    = 0b001000000,
-    Slowest = 0b100000000,
+    Fastest = 0b00000010,
+    Fast    = 0b00001000,
+    Slow    = 0b00100000,
+    Slowest = 0b10000000,
 }
 
 impl TimaSpeed {

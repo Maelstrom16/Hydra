@@ -35,7 +35,7 @@ impl IntOperand<u8> for RegisterOperand8 {
     async fn set(&self, value: u8, cpu: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         match self.0 {
             cpu::Register8::A => cpu.af[1] = value,
-            cpu::Register8::F => cpu.af[0] = value,
+            cpu::Register8::F => cpu.af[0] = value & 0xF0,
             cpu::Register8::B => cpu.bc[1] = value,
             cpu::Register8::C => cpu.bc[0] = value,
             cpu::Register8::D => cpu.de[1] = value,
@@ -167,7 +167,7 @@ impl IntOperand<u16> for RegisterOperand16 {
     #[inline(always)]
     async fn set(&self, value: u16, cpu: &mut Cpu, _: &Rc<RefCell<MemoryMap>>, _co: Co<'_, ()>) {
         match self.0 {
-            cpu::Register16::AF => cpu.af = u16::to_le_bytes(value),
+            cpu::Register16::AF => cpu.af = u16::to_le_bytes(value & 0xFFF0),
             cpu::Register16::BC => cpu.bc = u16::to_le_bytes(value),
             cpu::Register16::DE => cpu.de = u16::to_le_bytes(value),
             cpu::Register16::HL => cpu.hl = u16::to_le_bytes(value),
