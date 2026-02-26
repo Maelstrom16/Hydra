@@ -133,6 +133,7 @@ impl GameBoy {
         // Build Game Boy on a new thread
         thread::spawn(move || {
             let model = Rc::new(model);
+            let mode = Rc::new(mode);
             let interrupt_flags = Rc::new(RefCell::new(InterruptFlags::new()));
             let interrupt_enable = Rc::new(RefCell::new(InterruptEnable::new()));
             let joypad = Rc::new(RefCell::new(Joypad::new(interrupt_flags.clone())));
@@ -150,7 +151,7 @@ impl GameBoy {
             let color_map = colormap::from_mode(&mode);
             let oam = Rc::new(RefCell::new(Oam::new(model.clone())));
             let ppu = Some(Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), apu.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, mode.clone(), vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), apu.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
             let cpu = Some(Cpu::new(&rom, &model, &mode, memory.clone(), interrupt_flags.clone(), interrupt_enable.clone(), joypad.clone(), clock.clone()));
             memory.borrow_mut().hot_swap_rom(rom);
             GameBoy {

@@ -14,6 +14,8 @@ use crate::{
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, time::Duration};
 
 pub struct MemoryMap {
+    mode: Rc<GbMode>,
+
     cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
     vram: Rc<RefCell<Vram>>,
     wram: Rc<RefCell<Wram>>,
@@ -39,12 +41,18 @@ pub struct MemoryMap {
 
     dma_source: u8,
     dma_cycle: Option<u8>,
+
+    hdma_source: u16,
+    hdma_destination: u16,
+    hdma_length: u8,
 }
 
 impl MemoryMap {
-    pub fn new(model: &Rc<Model>, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, oam: Rc<RefCell<Oam>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, apu: Rc<RefCell<Apu>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<dyn ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
+    pub fn new(model: &Rc<Model>, mode: Rc<GbMode>, vram: Rc<RefCell<Vram>>, wram: Rc<RefCell<Wram>>, oam: Rc<RefCell<Oam>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, apu: Rc<RefCell<Apu>>, lcd_controller: Rc<RefCell<LcdController>>, ppu_state: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, color_map: Rc<RefCell<dyn ColorMap>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, interrupt_enable: Rc<RefCell<InterruptEnable>>) -> Result<MemoryMap, HydraIOError> {
         let (pulse1, pulse2, wave, noise) = apu.borrow().clone_pointers();
         Ok(MemoryMap {
+            mode,
+
             cartridge: None,
             vram,
             wram,
@@ -73,6 +81,10 @@ impl MemoryMap {
                 false => 0x00,
             },
             dma_cycle: None,
+
+            hdma_source: 0xFFF0,
+            hdma_destination: 0x1FF0,
+            hdma_length: 0xFF,
         })
     }
 
@@ -123,6 +135,11 @@ impl MemoryMap {
             0xFF4A => Ok(self.wy.get()),
             0xFF4B => Ok(self.wx.get()),
             0xFF4F => Ok(self.vram.borrow().read_vbk()),
+            0xFF51 => Ok(0xFF),
+            0xFF52 => Ok(0xFF),
+            0xFF53 => Ok(0xFF),
+            0xFF54 => Ok(0xFF),
+            0xFF55 => Ok(self.hdma_length),
             0xFF70 => Ok(self.wram.borrow().read_wbk()),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             0xFFFF => self.interrupt_enable.borrow().read(address),
@@ -167,6 +184,11 @@ impl MemoryMap {
             0xFF4A => Ok(self.wy.set(val)),
             0xFF4B => Ok(self.wx.set(val)),
             0xFF4F => Ok(self.vram.borrow_mut().write_vbk(val)),
+            0xFF51 => Ok(self.hdma_source = (self.hdma_source & 0xFF) | ((val as u16) << 8)),
+            0xFF52 => Ok(self.hdma_source = (self.hdma_source & 0xFF00) | (val as u16)),
+            0xFF53 => Ok(self.hdma_destination = (self.hdma_destination & 0xFF) | ((val as u16 & 0x1F) << 8)),
+            0xFF54 => Ok(self.hdma_destination = (self.hdma_destination & 0xFF00) | (val as u16)),
+            0xFF55 => Ok({self.hdma_length = val; self.hdma();}),
             0xFF70 => Ok(self.wram.borrow_mut().write_wbk(val)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = val),
             0xFFFF => self.interrupt_enable.borrow_mut().write(val, address),
@@ -180,6 +202,19 @@ impl MemoryMap {
             Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Write to open bus at address {:#06X}", address),
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
+    }
+}
+
+impl MemoryMap {
+    fn hdma(&mut self) {
+        if matches!(*self.mode, GbMode::DMG) {return;}
+        let length = (self.hdma_length as u16 + 1) * 0x10;
+        let destination = self.hdma_destination + 0x8000;
+        for i in 0..length {
+            let val = self.read_u8(self.hdma_source + i, false);
+            self.write_u8(val, destination + i, false);
+        }
+        self.hdma_length = 0xFF;
     }
 }
 
