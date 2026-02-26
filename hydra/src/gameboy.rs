@@ -97,9 +97,6 @@ pub struct GameBoy {
     cpu: Option<Cpu>,
     memory: Rc<RefCell<MemoryMap>>,
     ppu: Option<Ppu>,
-    clock: Rc<RefCell<MasterTimer>>,
-
-    joypad: Rc<RefCell<Joypad>>,
 
     channel: Receiver<EmuMessage>,
 }
@@ -134,33 +131,17 @@ impl GameBoy {
         thread::spawn(move || {
             let model = Rc::new(model);
             let mode = Rc::new(mode);
-            let interrupt_flags = Rc::new(RefCell::new(InterruptFlags::new()));
-            let interrupt_enable = Rc::new(RefCell::new(InterruptEnable::new()));
-            let joypad = Rc::new(RefCell::new(Joypad::new(interrupt_flags.clone())));
-            let ppu_mode = Rc::new(RefCell::new(PpuMode::OAMScan));
-            let lcd_controller = Rc::new(RefCell::new(LcdController::new()));
-            let vram = Rc::new(RefCell::new(Vram::new(model.clone(), ppu_mode.clone(), lcd_controller.clone())));
-            let wram = Rc::new(RefCell::new(Wram::new(model.clone())));
-            let ppu_state = Rc::new(RefCell::new(PpuState::new(&model, ppu_mode.clone(), interrupt_flags.clone())));
-            let apu = Rc::new(RefCell::new(Apu::new(audio)));
-            let clock = Rc::new(RefCell::new(MasterTimer::new(model.clone(), apu.clone(), ppu_state.clone(), interrupt_flags.clone())));
-            let scy = Rc::new(Cell::new(0x00));
-            let scx = Rc::new(Cell::new(0x00));
-            let wy = Rc::new(Cell::new(0x00));
-            let wx = Rc::new(Cell::new(0x00));
-            let color_map = colormap::from_mode(&mode);
-            let oam = Rc::new(RefCell::new(Oam::new(model.clone())));
-            let ppu = Some(Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, mode.clone(), vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), apu.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
-            let cpu = Some(Cpu::new(&rom, &model, &mode, memory.clone(), interrupt_flags.clone(), interrupt_enable.clone(), joypad.clone(), clock.clone()));
+
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, mode.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let ppu = Some(Ppu::new(model.clone(), memory.clone(), graphics, proxy));
+            let apu = Rc::new(RefCell::new(Apu::new(memory.clone(), audio)));
+            let cpu = Some(Cpu::new(&rom, &model, &mode, memory.clone()));
             memory.borrow_mut().hot_swap_rom(rom);
             GameBoy {
                 apu,
                 cpu,
                 memory,
                 ppu,
-                clock,
-                joypad,
                 channel: recv,
             }.main_thread();
         });
@@ -190,17 +171,30 @@ impl Emulator for GameBoy {
 
         // Main loop
         'main: loop {
-            self.clock.borrow_mut().tick();
-            self.apu.borrow_mut().dot_tick();
-            self.memory.borrow_mut().tick_dma();
-            if self.clock.borrow().is_system_cycle() {
+            {
+                let memory = &mut *self.memory.borrow_mut();
+                memory.tick_dma();
+
+                let interrupt_flags = &mut memory.interrupt_flags;
+                let ppu_state = &mut memory.ppu_state;
+                let apu_state = &mut memory.apu_state;
+
+                memory.timer.tick(interrupt_flags, ppu_state, apu_state);
+                self.apu.borrow_mut().dot_tick(apu_state);
+            }
+            if self.memory.borrow_mut().timer.is_system_cycle() {
                 cpu_coro.resume();
             }
-            self.clock.borrow_mut().refresh_tima_if_overflowing();
+            self.memory.borrow_mut().timer.refresh_tima_if_overflowing();
             ppu_coro.resume();
 
+            let memory = &mut *self.memory.borrow_mut();
+            let interrupt_flags = &mut memory.interrupt_flags;
+            let ppu_state = &mut memory.ppu_state;
+            let apu_state = &mut memory.apu_state;
+            
             // Every frame
-            if self.clock.borrow().get_ppu_dots() == 0 {
+            if memory.timer.get_ppu_dots(ppu_state) == 0 {
 
                 // Send audio for playback
                 self.apu.borrow_mut().frame();
@@ -210,20 +204,20 @@ impl Emulator for GameBoy {
                     match msg {
                         // TODO: Allow remapping controls in the future
                         EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
-                            KeyCode::KeyW => self.joypad.borrow_mut().press_dpad(Dpad::Up, state.is_pressed()),
-                            KeyCode::KeyS => self.joypad.borrow_mut().press_dpad(Dpad::Down, state.is_pressed()),
-                            KeyCode::KeyA => self.joypad.borrow_mut().press_dpad(Dpad::Left, state.is_pressed()),
-                            KeyCode::KeyD => self.joypad.borrow_mut().press_dpad(Dpad::Right, state.is_pressed()),
-                            KeyCode::KeyK => self.joypad.borrow_mut().press_button(Button::A, state.is_pressed()),
-                            KeyCode::KeyJ => self.joypad.borrow_mut().press_button(Button::B, state.is_pressed()),
-                            KeyCode::Enter => self.joypad.borrow_mut().press_button(Button::Start, state.is_pressed()),
-                            KeyCode::ShiftRight => self.joypad.borrow_mut().press_button(Button::Select, state.is_pressed()),
+                            KeyCode::KeyW => memory.joypad.press_dpad(Dpad::Up, state.is_pressed(), interrupt_flags),
+                            KeyCode::KeyS => memory.joypad.press_dpad(Dpad::Down, state.is_pressed(), interrupt_flags),
+                            KeyCode::KeyA => memory.joypad.press_dpad(Dpad::Left, state.is_pressed(), interrupt_flags),
+                            KeyCode::KeyD => memory.joypad.press_dpad(Dpad::Right, state.is_pressed(), interrupt_flags),
+                            KeyCode::KeyK => memory.joypad.press_button(Button::A, state.is_pressed(), interrupt_flags),
+                            KeyCode::KeyJ => memory.joypad.press_button(Button::B, state.is_pressed(), interrupt_flags),
+                            KeyCode::Enter => memory.joypad.press_button(Button::Start, state.is_pressed(), interrupt_flags),
+                            KeyCode::ShiftRight => memory.joypad.press_button(Button::Select, state.is_pressed(), interrupt_flags),
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
-                            if let Err(e) = read_rom(path).and_then(|rom| self.memory.borrow_mut().hot_swap_rom(rom)) {
-                                println!("{}", e);
-                            }
+                            // if let Err(e) = read_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
+                            //     println!("{}", e);
+                            // }
                         },
                         EmuMessage::Stop => break 'main,
                         _ => {} // Do nothing

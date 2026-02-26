@@ -12,7 +12,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        GbMode, Model, memory::{oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::{Color, ColorMap}, lcdc::{LcdController, ObjectHeight}, state::PpuState}, timer::MasterTimer
+        GbMode, Model, memory::{MemoryMap, oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::{Color, ColorMap}, lcdc::{LcdController, ObjectHeight}, state::PpuState}, timer::MasterTimer
     }, graphics::Graphics, window::UserEvent
 };
 
@@ -22,15 +22,7 @@ pub struct Ppu {
     screen_buffer: Box<[u8]>,
     next_frame_instant: Instant,
 
-    vram: Rc<RefCell<Vram>>,
-    oam: Rc<RefCell<Oam>>,
-    lcdc: Rc<RefCell<LcdController>>,
-    status: Rc<RefCell<PpuState>>,
-    scy: Rc<Cell<u8>>,
-    scx: Rc<Cell<u8>>,
-    wy: Rc<Cell<u8>>,
-    wx: Rc<Cell<u8>>,
-    color_map: Rc<RefCell<dyn ColorMap>>,
+    memory: Rc<RefCell<MemoryMap>>,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -63,7 +55,7 @@ const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl Ppu {
-    pub fn new(model: Rc<Model>, vram: Rc<RefCell<Vram>>, oam: Rc<RefCell<Oam>>, lcdc: Rc<RefCell<LcdController>>, status: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, color_map: Rc<RefCell<dyn ColorMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(model: Rc<Model>, memory: Rc<RefCell<MemoryMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
         let mut result = Ppu {
             model,
@@ -71,15 +63,7 @@ impl Ppu {
             screen_buffer,
             next_frame_instant: Instant::now(),
 
-            vram,
-            oam,
-            lcdc,
-            status,
-            scy,
-            scx,
-            wy,
-            wx,
-            color_map,
+            memory,
 
             graphics,
             proxy,
@@ -95,30 +79,35 @@ impl Ppu {
     #[inline(always)]
     pub async fn coro(&mut self, co: Co<'_, ()>) {
         loop {
-            let (lx, ly) = self.status.borrow().get_dot_coords();
+            let (lx, ly) = self.memory.borrow().ppu_state.get_dot_coords();
 
             // Perform mode-specific behavior
-            match {self.status.borrow().get_mode()} {
+            match {self.memory.borrow().ppu_state.get_mode()} {
                 PpuMode::HBlank => {
                     if ly == SCREEN_HEIGHT {
-                        self.status.borrow_mut().set_mode(PpuMode::VBlank);
+                        {
+                            let memory = &mut *self.memory.borrow_mut();
+                            memory.ppu_state.set_mode(PpuMode::VBlank, &mut memory.interrupt_flags);
+                        }
                         self.push_to_viewport();
                     } else if lx == 0 {
-                        self.status.borrow_mut().set_mode(PpuMode::OAMScan);
+                        let memory = &mut *self.memory.borrow_mut();
+                        memory.ppu_state.set_mode(PpuMode::OAMScan, &mut memory.interrupt_flags);
                     }
                 }
                 PpuMode::VBlank => {
                     if ly == 0 {
-                        self.status.borrow_mut().set_mode(PpuMode::OAMScan);
+                        let memory = &mut *self.memory.borrow_mut();
+                        memory.ppu_state.set_mode(PpuMode::OAMScan, &mut memory.interrupt_flags);
                     }
                 }
                 PpuMode::OAMScan => {
                     // Collect all objects which fall on this scanline
                     self.fifo.clear();
                     for obj_address in (0xFE00..=0xFE9F).step_by(4) {
-                        let obj = self.oam.borrow().get_oam_meta(obj_address);
+                        let obj = self.memory.borrow().oam.get_oam_meta(obj_address);
                         co.yield_(()).await;
-                        if obj.occupies_y(ly, self.lcdc.borrow().object_size) {
+                        if obj.occupies_y(ly, self.memory.borrow().lcd_controller.object_size) {
                             self.fifo.push(obj);
                         }
                         co.yield_(()).await;
@@ -130,20 +119,21 @@ impl Ppu {
                         self.fifo.sort_by(|obj1, obj2| obj1.x.cmp(&obj2.x));
                     }
                     // Update mode when complete
-                    self.status.borrow_mut().set_mode(PpuMode::Render);
+                    let memory = &mut *self.memory.borrow_mut();
+                    memory.ppu_state.set_mode(PpuMode::Render, &mut memory.interrupt_flags);
                 }
                 PpuMode::Render => {
                     // Screen texture generation
 
                     // Slight delay in rendering depending on horizontal scroll
-                    for _ in 0..(self.scx.get() % 8) {
+                    for _ in 0..(self.memory.borrow().scx % 8) {
                         co.yield_(()).await;
                     }
 
                     // Begin rendering at 
                     let screen_y = ly;
                     for screen_x in 0..SCREEN_WIDTH {
-                        let color = if self.lcdc.borrow().lcd_enabled {
+                        let color = if self.memory.borrow().lcd_controller.lcd_enabled {
                             self.resolve_color(screen_x, screen_y)
                         } else {
                             colormap::LCD_OFF_COLOR
@@ -156,7 +146,8 @@ impl Ppu {
                     }
 
                     // Return to HBlank upon completion of the scanline
-                    self.status.borrow_mut().set_mode(PpuMode::HBlank);
+                    let memory = &mut *self.memory.borrow_mut();
+                    memory.ppu_state.set_mode(PpuMode::HBlank, &mut memory.interrupt_flags);
                 }
             }
             co.yield_(()).await;
@@ -167,7 +158,7 @@ impl Ppu {
         // Delay thread
         const SECS_PER_FRAME: f64 = 1f64 / 60f64;
         let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
-        println!("Finished with {}% remaining", (duration_until_next.as_secs_f32())/(1.0/60.0));
+        // println!("Finished with {}% remaining", (duration_until_next.as_secs_f32())/(1.0/60.0));
         thread::sleep(duration_until_next);
         self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
 
@@ -179,20 +170,20 @@ impl Ppu {
 
     fn resolve_color(&self, screen_x: u8, screen_y: u8) -> Color {
         // Check BG/window color first
-        let (bg_palette_index, bg_color_index, bg_priority) = if self.lcdc.borrow().tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
-            let is_window = self.lcdc.borrow().window_enabled && screen_x >= self.wx.get().saturating_sub(7) && screen_y >= self.wy.get();
+        let (bg_palette_index, bg_color_index, bg_priority) = if self.memory.borrow().lcd_controller.tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
+            let is_window = self.memory.borrow().lcd_controller.window_enabled && screen_x >= self.memory.borrow().wx.saturating_sub(7) && screen_y >= self.memory.borrow().wy;
 
-            let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
+            let data_low_address = self.memory.borrow().lcd_controller.tilemaps_data_area as u16;
             let (map_address, map_x, map_y) = match is_window {
                 false => (
-                    self.lcdc.borrow().bg_map_area as u16,
-                    screen_x.wrapping_add(self.scx.get()),
-                    screen_y.wrapping_add(self.scy.get()),
+                    self.memory.borrow().lcd_controller.bg_map_area as u16,
+                    screen_x.wrapping_add(self.memory.borrow().scx),
+                    screen_y.wrapping_add(self.memory.borrow().scy),
                 ),
                 true => (
-                    self.lcdc.borrow().win_map_area as u16,
-                    screen_x - self.wx.get() + 7,
-                    screen_y - self.wy.get(),
+                    self.memory.borrow().lcd_controller.win_map_area as u16,
+                    screen_x - self.memory.borrow().wx + 7,
+                    screen_y - self.memory.borrow().wy,
                 ),
             };
 
@@ -200,7 +191,7 @@ impl Ppu {
             let map_index_y = (map_y / 8) as u16;
             let data_index_address = map_address + map_index_x + (map_index_y * MAP_WIDTH as u16);
 
-            let (data_index, tile_attributes) = self.vram.borrow().read_tile_map(data_index_address);
+            let (data_index, tile_attributes) = self.memory.borrow().vram.read_tile_map(data_index_address);
             let data_address = if data_index < 0x80 {
                 data_low_address + (data_index as u16 * 16)
             } else {
@@ -216,7 +207,7 @@ impl Ppu {
         };
 
         // Return early if BG color has priority over any potential objects
-        let bg_color = self.color_map.borrow().get_tile_color(bg_palette_index, bg_color_index);
+        let bg_color = self.memory.borrow().color_map.get_tile_color(bg_palette_index, bg_color_index);
         let bg_can_override = bg_color_index != 0;
         if bg_priority && bg_can_override {
             return bg_color;
@@ -224,11 +215,11 @@ impl Ppu {
 
         // If background does not have inherent priority, check for opaque object pixels
         let valid_objects = self.fifo.iter().filter(|obj| obj.occupies_x(screen_x));
-        if self.lcdc.borrow().objects_enabled { 
+        if self.memory.borrow().lcd_controller.objects_enabled { 
             for oam_meta in valid_objects {
-                let mut render_meta = self.oam.borrow().resolve_oam_meta(oam_meta);
+                let mut render_meta = self.memory.borrow().oam.resolve_oam_meta(oam_meta);
                 // Ignore LSB of tile index if objects are tall
-                if self.lcdc.borrow().object_size == ObjectHeight::Tall {
+                if self.memory.borrow().lcd_controller.object_size == ObjectHeight::Tall {
                     render_meta.data_index &= 0b11111110; 
                 }
 
@@ -241,7 +232,7 @@ impl Ppu {
                 if obj_color_index != 0 {
                     return match render_meta.attributes.bg_priority && bg_can_override {
                         true => bg_color,
-                        false => self.color_map.borrow().get_object_color(render_meta.attributes.palette, obj_color_index)
+                        false => self.memory.borrow().color_map.get_object_color(render_meta.attributes.palette, obj_color_index)
                     }
                 }
             }
@@ -257,13 +248,13 @@ impl Ppu {
             false => tile_x
         };
         let tile_y = match attributes.y_flip {
-            true => (if !is_object || self.lcdc.borrow().object_size != ObjectHeight::Tall {7} else {15}) - tile_y,
+            true => (if !is_object || self.memory.borrow().lcd_controller.object_size != ObjectHeight::Tall {7} else {15}) - tile_y,
             false => tile_y
         };
 
         let byte_address = tile_address + (tile_y as u16 * 2);
-        let data = [self.vram.borrow().read_tile_data(byte_address, attributes.bank_index),
-            self.vram.borrow().read_tile_data(byte_address + 1, attributes.bank_index)];
+        let data = [self.memory.borrow().vram.read_tile_data(byte_address, attributes.bank_index),
+            self.memory.borrow().vram.read_tile_data(byte_address + 1, attributes.bank_index)];
 
         let color_index_bits = data.map(|byte| (byte >> (7 - tile_x)) & 1);
         color_index_bits[1] << 1 | color_index_bits[0]

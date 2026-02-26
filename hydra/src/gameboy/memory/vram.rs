@@ -14,12 +14,10 @@ pub struct Vram {
     model: Rc<Model>,
     vram: Box<[[u8; 0x2000]]>,
     vbk: u8,
-    ppu_mode: Rc<RefCell<PpuMode>>,
-    lcdc: Rc<RefCell<LcdController>>
 }
 
 impl Vram {
-    pub fn new(model: Rc<Model>, ppu_mode: Rc<RefCell<PpuMode>>, lcdc: Rc<RefCell<LcdController>>) -> Self {
+    pub fn new(model: Rc<Model>) -> Self {
         let bank_count = match model.is_monochrome() {
             true => 1,
             false => 2
@@ -29,25 +27,15 @@ impl Vram {
             model,
             vram: vec![[0; 0x2000]; bank_count].into_boxed_slice(),
             vbk: 0,
-            ppu_mode,
-            lcdc
         }
     }
 
     pub fn read_u8(&self, address: u16) -> Result<u8, HydraIOError> {
-        if self.is_accessible() {
-            Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)])
-        } else {
-            Err(HydraIOError::OpenBusAccess)
-        }
+        Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)])
     }
 
     pub fn write_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError> {
-        if self.is_accessible() {
-            Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)] = value)
-        } else {
-            Err(HydraIOError::OpenBusAccess)
-        }
+        Ok(self.vram[self.get_bank_id() as usize][Vram::localize_address(address)] = value)
     }
 
     pub fn read_tile_data(&self, address: u16, bank: u8) -> u8 {
@@ -60,11 +48,6 @@ impl Vram {
             true => TileAttributes::default(),
             false => TileAttributes::from_u8(self.vram[1][address], &self.model)
         }) 
-    }
-
-    fn is_accessible(&self) -> bool {
-        // VRAM is inaccessible during PPU mode 3 when LCD is enabled
-        *self.ppu_mode.borrow() != PpuMode::Render || !self.lcdc.borrow().is_lcd_enabled()
     }
 
     fn get_bank_id(&self) -> u8 {

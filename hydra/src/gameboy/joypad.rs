@@ -1,21 +1,19 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy::{interrupt::{Interrupt, InterruptFlags}, memory::MemoryMapped}};
+use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy::{interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}};
 
 pub struct Joypad {
     button_vector: u8,
     dpad_vector: u8,
     joyp: MaskedBitVec<u8, true>,
-    interrupt_flags: Rc<RefCell<InterruptFlags>>
 }
 
 impl Joypad {
-    pub fn new(interrupt_flags: Rc<RefCell<InterruptFlags>>) -> Self {
+    pub fn new() -> Self {
         Joypad { 
             button_vector: 0b0000,
             dpad_vector: 0b0000,
             joyp: MaskedBitVec::new(0xCF, 0b00111111, 0b00110000),
-            interrupt_flags 
         }
     }
 
@@ -27,26 +25,26 @@ impl Joypad {
         !self.joyp.test_bit(4)
     }
 
-    fn refresh(&mut self) {
+    fn refresh(&mut self, interrupt_flags: &mut InterruptFlags) {
         let mut after = 0b0000;
         if self.is_polling_buttons() {after |= self.button_vector}
         if self.is_polling_dpad() {after |= self.dpad_vector}
         
         if *self.joyp & after != 0 {
-            self.interrupt_flags.borrow_mut().request(Interrupt::Joypad);
+            interrupt_flags.request(Interrupt::Joypad);
         }
 
         *self.joyp = (*self.joyp & 0b00110000) | (after ^ 0b1111);
     }
 
-    pub fn press_button(&mut self, button: Button, is_pressed: bool) {
+    pub fn press_button(&mut self, button: Button, is_pressed: bool, interrupt_flags: &mut InterruptFlags) {
         self.button_vector.map_bits(button as u8, is_pressed);
-        self.refresh();
+        self.refresh(interrupt_flags);
     }
 
-    pub fn press_dpad(&mut self, dpad: Dpad, is_pressed: bool) {
+    pub fn press_dpad(&mut self, dpad: Dpad, is_pressed: bool, interrupt_flags: &mut InterruptFlags) {
         self.dpad_vector.map_bits(dpad as u8, is_pressed);
-        self.refresh();
+        self.refresh(interrupt_flags);
     }
 
     pub fn is_input_active(&self) -> bool {
@@ -59,27 +57,27 @@ impl Joypad {
         self.joyp.read()
     }
 
-    pub fn write_joyp(&mut self, val: u8) {
+    pub fn write_joyp(&mut self, val: u8, interrupt_flags: &mut InterruptFlags) {
         self.joyp.write(val);
-        self.refresh();
+        self.refresh(interrupt_flags);
     }
 }
 
-impl MemoryMapped for Joypad {
-    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
-        match address {
-            0xFF00 => Ok(self.read_joyp()),
-            _ => Err(HydraIOError::OpenBusAccess)
-        }
-    }
+// impl MemoryMapped for Joypad {
+//     fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+//         match address {
+//             0xFF00 => Ok(self.read_joyp()),
+//             _ => Err(HydraIOError::OpenBusAccess)
+//         }
+//     }
 
-    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
-        match address {
-            0xFF00 => Ok(self.write_joyp(val)),
-            _ => Err(HydraIOError::OpenBusAccess)
-        }
-    }
-}
+//     fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+//         match address {
+//             0xFF00 => Ok(self.write_joyp(val)),
+//             _ => Err(HydraIOError::OpenBusAccess)
+//         }
+//     }
+// }
 
 #[repr(u8)]
 pub enum Dpad {

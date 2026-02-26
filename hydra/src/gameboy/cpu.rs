@@ -59,9 +59,6 @@ pub struct Cpu {
     sp: u16,
     pc: u16,
     ir: u8,
-
-    interrupt_flags: Rc<RefCell<InterruptFlags>>,
-    interrupt_enable: Rc<RefCell<InterruptEnable>>,
     
     ime: bool,
     cycles_until_ime: Option<u8>,
@@ -69,12 +66,10 @@ pub struct Cpu {
     unhalt_timer: DelayedTickCounter<u16>,
 
     memory: Rc<RefCell<MemoryMap>>,
-    joypad: Rc<RefCell<Joypad>>,
-    timer: Rc<RefCell<MasterTimer>>
 }
 
 impl Cpu {
-    pub fn new(rom: &Rom, model: &Rc<Model>, mode: &GbMode, memory: Rc<RefCell<MemoryMap>>, interrupt_flags: Rc<RefCell<InterruptFlags>>, interrupt_enable: Rc<RefCell<InterruptEnable>>, joypad: Rc<RefCell<Joypad>>, timer: Rc<RefCell<MasterTimer>>) -> Self {
+    pub fn new(rom: &Rom, model: &Rc<Model>, mode: &GbMode, memory: Rc<RefCell<MemoryMap>>) -> Self {
         let dmg_mode = matches!(mode, GbMode::DMG);
         
         let af;
@@ -177,17 +172,12 @@ impl Cpu {
             pc: 0x0100,
             ir: 0x00,
 
-            interrupt_flags,
-            interrupt_enable,
-
             ime: false, 
             cycles_until_ime: None,
             cycles_until_halt_bug: None,
             unhalt_timer: DelayedTickCounter::new(None),
 
             memory,
-            joypad,
-            timer
         }
     }
 
@@ -210,7 +200,7 @@ impl Cpu {
 
     #[inline(always)]
     pub fn interrupt_pending(&self) -> bool {
-        self.interrupt_enable.borrow().read_ie() & self.interrupt_flags.borrow().read_if() != 0
+        self.memory.borrow().interrupt_enable.read_ie() & self.memory.borrow().interrupt_flags.read_if() != 0
     }
 
     fn fetch_interrupt(&mut self, co: Co<'_, ()>, jump_addr: u16) -> impl Future<Output = ()> {
@@ -240,7 +230,7 @@ impl Cpu {
     fn fetch<'a>(&mut self, debug: bool) -> LocalOpcodeFn<'a> {
         if self.ime && self.interrupt_pending() { 
             // Generate call instruction from handled interrupt
-            let composite = self.interrupt_enable.borrow().read_ie() & self.interrupt_flags.borrow().read_if();
+            let composite = self.memory.borrow().interrupt_enable.read_ie() & self.memory.borrow().interrupt_flags.read_if();
             for shift_width in 0..=4 {
                 let bitmask = 1 << shift_width;
                 if composite & bitmask == 0 {
@@ -249,7 +239,7 @@ impl Cpu {
                 } else {
                     // Handle interrupt and return call instruction
                     self.ime = false;
-                    self.interrupt_flags.borrow_mut().get_inner().reset_bits(bitmask);
+                    self.memory.borrow_mut().interrupt_flags.get_inner().reset_bits(bitmask);
                     let jump_addr = (shift_width * 0x8) + 0x40;
                     
                     return Box::new(move |cpu_inner: &'a mut Cpu, co_inner| cpu_inner.fetch_interrupt(co_inner, jump_addr).boxed_local())
@@ -290,7 +280,7 @@ impl Cpu {
             self.mode = match self.mode {
                 CpuMode::Normal => CpuMode::Normal,
                 CpuMode::Halted if self.interrupt_pending() || self.unhalt_timer.increment() => CpuMode::Normal,
-                CpuMode::Stopped if self.interrupt_flags.borrow().is_requested(Interrupt::Joypad) => CpuMode::Normal,
+                CpuMode::Stopped if self.memory.borrow().interrupt_flags.is_requested(Interrupt::Joypad) => CpuMode::Normal,
                 _ => {
                     co.yield_(()).await;
                     continue;  
@@ -856,7 +846,7 @@ impl Cpu {
 
     #[inline(always)]
     async fn stop(&mut self, co: Co<'_, ()>) {
-        let (mode, speed_switch, extra_cycle, reset_div) = match (self.joypad.borrow().is_input_active(), self.interrupt_pending(), self.timer.borrow().is_speed_switch_requested(), self.ime) {
+        let (mode, speed_switch, extra_cycle, reset_div) = match (self.memory.borrow().joypad.is_input_active(), self.interrupt_pending(), self.memory.borrow().timer.is_speed_switch_requested(), self.ime) {
             (true, true, _, _) => (CpuMode::Normal, false, false, false),
             (true, false, _, _) => (CpuMode::Halted, false, true, false),
             (false, true, false, _) => (CpuMode::Stopped, false, false, true),
@@ -873,11 +863,11 @@ impl Cpu {
         self.mode = mode;
         
         if speed_switch {
-            self.timer.borrow_mut().toggle_speed();
+            self.memory.borrow_mut().timer.toggle_speed(&mut self.memory.borrow_mut().apu_state);
         }
         
         if reset_div {
-            self.timer.borrow_mut().write_div(0);
+            self.memory.borrow_mut().timer.write_div(&mut self.memory.borrow_mut().apu_state);
         }
     }
 }

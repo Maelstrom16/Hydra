@@ -1,22 +1,21 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Model, interrupt::{Interrupt, InterruptFlags}, ppu::PpuMode}, serialize};
+use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Model, interrupt::{Interrupt, InterruptFlags}, memory::MemoryMap, ppu::PpuMode}, serialize};
 
 pub struct PpuState {
-    ppu_mode: Rc<RefCell<PpuMode>>,
+    ppu_mode: PpuMode,
     
     dots: u32,
     ly: u8,
     lyc: u8,
 
     stat_interrupt_select: u8,
-    interrupt_flags: Rc<RefCell<InterruptFlags>>
 }
 
 impl PpuState {
-    pub fn new(model: &Rc<Model>, ppu_mode: Rc<RefCell<PpuMode>>, interrupt_flags: Rc<RefCell<InterruptFlags>>) -> Self {
+    pub fn new(model: &Rc<Model>) -> Self {
         PpuState { 
-            ppu_mode, 
+            ppu_mode: PpuMode::OAMScan,
             ly: match **model {
                 Model::GameBoy(GBRevision::DMG0) => 0x91,
                 Model::GameBoy(_) => 0x00,
@@ -25,46 +24,44 @@ impl PpuState {
             dots: 0,
             lyc: 0,
             stat_interrupt_select: 0,
-
-            interrupt_flags
         }
     }
 
     const DOTS_PER_SCANLINE: u32 = 456;
     const DOTS_PER_FRAME: u32 = 70224;
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags) {
         self.dots = (self.dots + 1) % Self::DOTS_PER_FRAME;
         let ly = (self.dots / Self::DOTS_PER_SCANLINE) as u8;
-        self.ly_eq_lyc_check(ly == self.lyc);
+        self.ly_eq_lyc_check(ly == self.lyc, interrupt_flags);
         self.ly = ly;
     }
 
-    fn ly_eq_lyc_check(&mut self, new_ly_eq_lyc: bool) {
+    fn ly_eq_lyc_check(&mut self, new_ly_eq_lyc: bool, interrupt_flags: &mut InterruptFlags) {
         // Detect rising edge on stat interrupt line
         if (new_ly_eq_lyc && self.ly != self.lyc && self.stat_interrupt_select.test_bit(6))
-        && (!self.stat_interrupt_select.test_bits(self.ppu_mode.borrow().as_stat_line_flag())) {
-            self.interrupt_flags.borrow_mut().request(Interrupt::Stat);
+        && (!self.stat_interrupt_select.test_bits(self.ppu_mode.as_stat_line_flag())) {
+            interrupt_flags.request(Interrupt::Stat);
         }
     }
 
     pub fn get_mode(&self) -> PpuMode {
-        *self.ppu_mode.borrow()
+        self.ppu_mode
     }
 
-    pub fn set_mode(&mut self, ppu_mode: PpuMode) {
+    pub fn set_mode(&mut self, ppu_mode: PpuMode, interrupt_flags: &mut InterruptFlags) {
         if ppu_mode == PpuMode::VBlank {
-            self.interrupt_flags.borrow_mut().request(Interrupt::Vblank);
+            interrupt_flags.request(Interrupt::Vblank);
         }
 
         // Detect rising edge on stat interrupt line
         if (self.ly != self.lyc || !self.stat_interrupt_select.test_bit(6))
-        && (!self.stat_interrupt_select.test_bits(self.ppu_mode.borrow().as_stat_line_flag()))
+        && (!self.stat_interrupt_select.test_bits(self.ppu_mode.as_stat_line_flag()))
         && (self.stat_interrupt_select.test_bits(ppu_mode.as_stat_line_flag())) {
-            self.interrupt_flags.borrow_mut().request(Interrupt::Stat);
+            interrupt_flags.request(Interrupt::Stat);
         }
         
-        self.ppu_mode.replace(ppu_mode);
+        self.ppu_mode = ppu_mode;
     }
 
     pub fn get_dots(&self) -> u32 {
@@ -82,7 +79,7 @@ impl PpuState {
             0b10000000;
             (self.stat_interrupt_select) => 6..=3;
             ((self.ly == self.lyc) as u8) =>> 2;
-            (*self.ppu_mode.borrow() as u8) =>> 1..=0;
+            (self.ppu_mode as u8) =>> 1..=0;
         )
     }
     
@@ -104,8 +101,8 @@ impl PpuState {
         self.lyc
     }
     
-    pub fn write_lyc(&mut self, lyc: u8) {
-        self.ly_eq_lyc_check(self.ly == lyc);
+    pub fn write_lyc(&mut self, lyc: u8, interrupt_flags: &mut InterruptFlags) {
+        self.ly_eq_lyc_check(self.ly == lyc, interrupt_flags);
         self.lyc = lyc;
     }
 }

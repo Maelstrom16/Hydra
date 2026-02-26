@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, gameboy::{GBRevision, Model, apu::Apu, interrupt::{Interrupt, InterruptFlags}, memory::MemoryMapped, ppu::state::PpuState}, serialize};
+use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, gameboy::{GBRevision, Model, apu::{Apu, state::ApuState}, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::state::PpuState}, serialize};
 
 pub struct MasterTimer {
     model: Rc<Model>,
@@ -15,14 +15,10 @@ pub struct MasterTimer {
 
     system_speed: SystemSpeed,
     speed_switch_queued: bool,
-
-    apu: Rc<RefCell<Apu>>,
-    ppu_state: Rc<RefCell<PpuState>>,
-    interrupt_flags: Rc<RefCell<InterruptFlags>>,
 }
 
 impl MasterTimer {
-    pub fn new(model: Rc<Model>, apu: Rc<RefCell<Apu>>, ppu_state: Rc<RefCell<PpuState>>, interrupt_flags: Rc<RefCell<InterruptFlags>>) -> Self {
+    pub fn new(model: Rc<Model>) -> Self {
         MasterTimer { 
             machine_cycle_timer: ModuloCounter::new(0, 4),
             div_full: match *model { 
@@ -40,10 +36,6 @@ impl MasterTimer {
 
             system_speed: SystemSpeed::Standard,
             speed_switch_queued: false,
-
-            apu,
-            ppu_state,
-            interrupt_flags,
         }
     }
     
@@ -52,29 +44,29 @@ impl MasterTimer {
     const DIV_HZ: u32 = Self::SYSTEM_HZ / 64;
     pub const PPU_DOTS_PER_FRAME: u32 = 70224;
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags, ppu_state: &mut PpuState, apu_state: &mut ApuState) {
         if self.machine_cycle_timer.increment() {
-            self.update_div(self.div_full.wrapping_add(1));
+            self.update_div(self.div_full.wrapping_add(1), apu_state);
 
             self.timer_interrupt_status = match self.timer_interrupt_status {
                 InterruptStatus::Idle | InterruptStatus::Requesting => InterruptStatus::Idle,
                 InterruptStatus::Queued => {
                     self.tima = self.tma;
-                    self.interrupt_flags.borrow_mut().request(Interrupt::Timer);
+                    interrupt_flags.request(Interrupt::Timer);
                     InterruptStatus::Requesting
                 }
             };
         }
 
-        self.ppu_state.borrow_mut().tick();
+        ppu_state.tick(interrupt_flags);
     }
 
     pub fn is_system_cycle(&self) -> bool {
         self.machine_cycle_timer.has_completed_cycle()
     }
 
-    pub fn get_ppu_dots(&self) -> u32 {
-        self.ppu_state.borrow().get_dots()
+    pub fn get_ppu_dots(&self, ppu_state: &mut PpuState) -> u32 {
+        ppu_state.get_dots()
     }
 
     pub fn refresh_tima_if_overflowing(&mut self) {
@@ -83,10 +75,10 @@ impl MasterTimer {
         }
     }
 
-    fn update_div(&mut self, new_div: u16) {
+    fn update_div(&mut self, new_div: u16, apu_state: &mut ApuState) {
         let falling_edges = self.div_full & !new_div;
         if falling_edges & self.system_speed as u16 != 0 {
-            self.apu.borrow_mut().apu_tick();
+            apu_state.apu_tick();
         }
         if self.tima_enabled && falling_edges & self.tima_speed as u16 != 0 {
             self.tick_tima();
@@ -103,7 +95,7 @@ impl MasterTimer {
         }
     }
 
-    pub fn toggle_speed(&mut self) {
+    pub fn toggle_speed(&mut self, apu_state: &mut ApuState) {
         if self.speed_switch_queued {
             self.speed_switch_queued = false;
             let new_system_speed = match self.system_speed {
@@ -113,7 +105,7 @@ impl MasterTimer {
 
             // Tick APU timer if falling edge detected
             if (self.div_full & self.system_speed as u16 != 0) && (self.div_full & new_system_speed as u16 == 0) {
-                self.apu.borrow_mut().apu_tick();
+                apu_state.apu_tick();
             }
         }
     }
@@ -127,8 +119,8 @@ impl MasterTimer {
     pub fn read_div(&self) -> u8 {
         (self.div_full >> 6) as u8 & 0xFF
     }
-    pub fn write_div(&mut self, _val: u8) {
-        self.update_div(0);
+    pub fn write_div(&mut self, apu_state: &mut ApuState) {
+        self.update_div(0, apu_state);
     }
     
     pub fn read_tima(&self) -> u8 {
@@ -197,8 +189,8 @@ impl MasterTimer {
     }
 }
 
-impl MemoryMapped for MasterTimer {
-    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+impl MasterTimer {
+    pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
         match address {
             0xFF04 => Ok(self.read_div()),
             0xFF05 => Ok(self.read_tima()),
@@ -209,9 +201,9 @@ impl MemoryMapped for MasterTimer {
         }
     }
 
-    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+    pub fn write(&mut self, val: u8, address: u16, apu_state: &mut ApuState) -> Result<(), HydraIOError> {
         match address {
-            0xFF04 => Ok(self.write_div(val)),
+            0xFF04 => Ok(self.write_div(apu_state)),
             0xFF05 => Ok(self.write_tima(val)),
             0xFF06 => Ok(self.write_tma(val)),
             0xFF07 => Ok(self.write_tac(val)),

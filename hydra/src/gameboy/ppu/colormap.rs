@@ -20,10 +20,10 @@ pub trait ColorMap: MemoryMapped {
     fn get_object_color(&self, palette_index: u8, color_index: u8) -> Color;
 }
 
-pub fn from_mode(mode: &GbMode) -> Rc<RefCell<dyn ColorMap>> {
+pub fn from_mode(mode: &GbMode) -> Box<dyn ColorMap> {
     match mode {
-        GbMode::DMG => Rc::new(RefCell::new(DmgColorMap::new())),
-        GbMode::CGB => Rc::new(RefCell::new(CgbColorMap::new())),
+        GbMode::DMG => Box::new(DmgColorMap::new()),
+        GbMode::CGB => Box::new(CgbColorMap::new()),
     }
 }
 
