@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, ppu::PpuMode}, serialize};
+use crate::{common::bit::BitVec, deserialize, gameboy::{GBRevision, Model, interrupt::{Interrupt, InterruptFlags}, ppu::PpuMode}, serialize};
 
 pub struct PpuState {
     ppu_mode: Rc<RefCell<PpuMode>>,
@@ -18,7 +18,7 @@ impl PpuState {
         PpuState { 
             ppu_mode, 
             ly: match **model {
-                Model::GameBoy(Some(GBRevision::DMG0)) => 0x91,
+                Model::GameBoy(GBRevision::DMG0) => 0x91,
                 Model::GameBoy(_) => 0x00,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
             }, 

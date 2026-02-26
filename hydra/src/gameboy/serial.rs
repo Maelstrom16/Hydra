@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{deserialize, gameboy::Model, serialize};
+use crate::{common::errors::HydraIOError, deserialize, gameboy::{Model, memory::MemoryMapped}, serialize};
 
 pub struct SerialConnection {
     model: Rc<Model>,
@@ -48,5 +48,23 @@ impl SerialConnection {
             0 as bool =>> (self.local_clock);
         );
         self.high_speed = self.model.is_color() && high_speed;
+    }
+}
+
+impl MemoryMapped for SerialConnection {
+    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        match address {
+            0xFF01 => Ok(self.read_sb()),
+            0xFF02 => Ok(self.read_sc()),
+            _ => Err(HydraIOError::OpenBusAccess),
+        }
+    }
+
+    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+        match address {
+            0xFF01 => Ok(self.write_sb(val)),
+            0xFF02 => Ok(self.write_sc(val)),
+            _ => Err(HydraIOError::OpenBusAccess),
+        }
     }
 }

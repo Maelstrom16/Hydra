@@ -1,9 +1,10 @@
 use std::ops::RangeInclusive;
 
-use crate::{common::errors::HydraIOError, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5}, sram::Sram}};
+use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5}, sram::Sram}};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;
+pub const CGB_FLAG_ADDRESS: usize = 0x0143;
 pub const NEW_LICENSEE_CODE_ADDRESS: usize = 0x0144;
 pub const HARDWARE_ADDRESS: usize = 0x0147;
 pub const ROM_SIZE_ADDRESS: usize = 0x0148;
@@ -52,6 +53,10 @@ impl Rom {
     /// Reads the cartridge's title from this ROM's header.
     pub fn get_title(&self) -> &[u8] {
         &self.0[0][TITLE_ADDRESS]
+    }
+
+    pub fn supports_cgb_mode(&self) -> bool {
+        self.0[0][CGB_FLAG_ADDRESS].test_bit(7)
     }
 
     /// Constructs a new `RealTimeClock` if the provided ROM indicates a need for one.

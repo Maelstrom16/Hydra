@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cpal::{Sample, Stream};
 
-use crate::{audio::Audio, common::{audio, bit::BitVec, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, serialize};
+use crate::{audio::Audio, common::{audio, bit::BitVec, errors::HydraIOError, timing::{DynamicModuloCounter, DynamicOverflowCounter, ModuloCounter, OverflowCounter, Resettable}}, deserialize, gameboy::memory::MemoryMapped, serialize};
 
 pub struct Pulse {
     enabled: bool,
@@ -202,6 +202,30 @@ impl Pulse {
     }
 }
 
+impl MemoryMapped for Pulse {
+    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        match address {
+            0xFF10 => Ok(self.read_nr10()),
+            0xFF11 | 0xFF16 => Ok(self.read_nrx1()),
+            0xFF12 | 0xFF17 => Ok(self.read_nrx2()),
+            0xFF13 | 0xFF18 => Ok(self.read_nrx3()),
+            0xFF14 | 0xFF19 => Ok(self.read_nrx4()),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }
+    }
+
+    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+        match address {
+            0xFF10 => Ok(self.write_nr10(val)),
+            0xFF11 | 0xFF16 => Ok(self.write_nrx1(val)),
+            0xFF12 | 0xFF17 => Ok(self.write_nrx2(val)),
+            0xFF13 | 0xFF18 => Ok(self.write_nrx3(val)),
+            0xFF14 | 0xFF19 => Ok(self.write_nrx4(val)),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }
+    }
+}
+
 pub(super) enum PulseType {
     Pulse1,
     Pulse2
@@ -369,6 +393,32 @@ impl Wave {
     }
 }
 
+impl MemoryMapped for Wave {
+    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        match address {
+            0xFF1A => Ok(self.read_nr30()),
+            0xFF1B => Ok(self.read_nr31()),
+            0xFF1C => Ok(self.read_nr32()),
+            0xFF1D => Ok(self.read_nr33()),
+            0xFF1E => Ok(self.read_nr34()),
+            0xFF30..=0xFF3F => Ok(self.read_waveram(address as usize - 0xFF30)),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }
+    }
+
+    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+        match address {
+            0xFF1A => Ok(self.write_nr30(val)),
+            0xFF1B => Ok(self.write_nr31(val)),
+            0xFF1C => Ok(self.write_nr32(val)),
+            0xFF1D => Ok(self.write_nr33(val)),
+            0xFF1E => Ok(self.write_nr34(val)),
+            0xFF30..=0xFF3F => Ok(self.write_waveram(val, address as usize - 0xFF30)),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }
+    }
+}
+
 pub struct Noise {
     enabled: bool,
 
@@ -518,6 +568,28 @@ impl Noise {
             self.volume_sweep_timer.reset();
             self.lfsr = 0;
             self.lfsr_timer.modulus.reset();
+        }
+    }
+}
+
+impl MemoryMapped for Noise {
+    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        match address {
+            0xFF20 => Ok(self.read_nr41()),
+            0xFF21 => Ok(self.read_nr42()),
+            0xFF22 => Ok(self.read_nr43()),
+            0xFF23 => Ok(self.read_nr44()),
+            _ => Err(HydraIOError::OpenBusAccess)
+        }
+    }
+
+    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+        match address {
+            0xFF20 => Ok(self.write_nr41(val)),
+            0xFF21 => Ok(self.write_nr42(val)),
+            0xFF22 => Ok(self.write_nr43(val)),
+            0xFF23 => Ok(self.write_nr44(val)),
+            _ => Err(HydraIOError::OpenBusAccess)
         }
     }
 }

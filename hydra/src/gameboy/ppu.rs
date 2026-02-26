@@ -12,7 +12,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     gameboy::{
-        InterruptFlags, Model, memory::{oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::ColorMap, lcdc::{LcdController, ObjectHeight}, state::PpuState}, timer::MasterTimer
+        GbMode, Model, memory::{oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::{Color, ColorMap}, lcdc::{LcdController, ObjectHeight}, state::PpuState}, timer::MasterTimer
     }, graphics::Graphics, window::UserEvent
 };
 
@@ -30,7 +30,7 @@ pub struct Ppu {
     scx: Rc<Cell<u8>>,
     wy: Rc<Cell<u8>>,
     wx: Rc<Cell<u8>>,
-    color_map: Rc<RefCell<ColorMap>>,
+    color_map: Rc<RefCell<dyn ColorMap>>,
 
     graphics: Arc<RwLock<Graphics>>,
     proxy: EventLoopProxy<UserEvent>
@@ -63,7 +63,7 @@ const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl Ppu {
-    pub fn new(model: Rc<Model>, vram: Rc<RefCell<Vram>>, oam: Rc<RefCell<Oam>>, lcdc: Rc<RefCell<LcdController>>, status: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, color_map: Rc<RefCell<ColorMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(model: Rc<Model>, vram: Rc<RefCell<Vram>>, oam: Rc<RefCell<Oam>>, lcdc: Rc<RefCell<LcdController>>, status: Rc<RefCell<PpuState>>, scy: Rc<Cell<u8>>, scx: Rc<Cell<u8>>, wy: Rc<Cell<u8>>, wx: Rc<Cell<u8>>, color_map: Rc<RefCell<dyn ColorMap>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
         let mut result = Ppu {
             model,
@@ -146,11 +146,11 @@ impl Ppu {
                         let color = if self.lcdc.borrow().lcd_enabled {
                             self.resolve_color(screen_x, screen_y)
                         } else {
-                            &ColorMap::LCD_OFF_COLOR
+                            colormap::LCD_OFF_COLOR
                         };
 
                         let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
-                        self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(color);
+                        self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(&color);
 
                         co.yield_(()).await;
                     }
@@ -167,6 +167,7 @@ impl Ppu {
         // Delay thread
         const SECS_PER_FRAME: f64 = 1f64 / 60f64;
         let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
+        println!("Finished with {}% remaining", (duration_until_next.as_secs_f32())/(1.0/60.0));
         thread::sleep(duration_until_next);
         self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
 
@@ -176,10 +177,10 @@ impl Ppu {
         self.proxy.send_event(UserEvent::RedrawRequest).expect("Unable to render Game Boy graphics: Main event loop closed unexpectedly");
     }
 
-    fn resolve_color(&self, screen_x: u8, screen_y: u8) -> &'static [u8] {
+    fn resolve_color(&self, screen_x: u8, screen_y: u8) -> Color {
         // Check BG/window color first
-        let (bg_color_index, bg_priority) = if self.lcdc.borrow().tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
-            let is_window = self.lcdc.borrow().window_enabled && screen_x >= self.wx.get() - 7 && screen_y >= self.wy.get();
+        let (bg_palette_index, bg_color_index, bg_priority) = if self.lcdc.borrow().tilemaps_enabled { // TODO: use tilemaps_enabled for priority in CGB mode
+            let is_window = self.lcdc.borrow().window_enabled && screen_x >= self.wx.get().saturating_sub(7) && screen_y >= self.wy.get();
 
             let data_low_address = self.lcdc.borrow().tilemaps_data_area as u16;
             let (map_address, map_x, map_y) = match is_window {
@@ -209,13 +210,13 @@ impl Ppu {
             let tile_y = map_y % 8;
             let tile_x = map_x % 8;
             
-            (self.resolve_color_index(tile_x, tile_y, data_address, &tile_attributes, false), tile_attributes.bg_priority)
+            (tile_attributes.palette, self.resolve_color_index(tile_x, tile_y, data_address, &tile_attributes, false), tile_attributes.bg_priority)
         } else {
-            (0, false)
+            (0, 0, false)
         };
 
         // Return early if BG color has priority over any potential objects
-        let bg_color = self.color_map.borrow().get_tile_color(bg_color_index);
+        let bg_color = self.color_map.borrow().get_tile_color(bg_palette_index, bg_color_index);
         let bg_can_override = bg_color_index != 0;
         if bg_priority && bg_can_override {
             return bg_color;

@@ -116,7 +116,7 @@ impl HydraApp {
 
     fn try_init_gameboy(&mut self, model: gameboy::Model) {
         self.try_init_emulator(&[GB_FILE_FILTER], |path, this| {
-            gameboy::GameBoy::from_model(path, model, this)
+            gameboy::GameBoy::new(path, model, this)
         })
     }
 }
@@ -167,16 +167,16 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
                     "load_rom" => self.try_init_generic(),
-                    "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(None)),
-                    "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
-                    "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
-                    "load_gb_mgb" => self.try_init_gameboy(gameboy::Model::GameBoy(Some(gameboy::GBRevision::DMG0))),
-                    "load_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(None)),
-                    "load_sgb_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(Some(gameboy::SGBRevision::SGB))),
-                    "load_sgb_sgb2" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(Some(gameboy::SGBRevision::SGB2))),
-                    "load_gbc" => self.try_init_gameboy(gameboy::Model::GameBoyColor(None)),
-                    "load_gbc_cgb0" => self.try_init_gameboy(gameboy::Model::GameBoyColor(Some(gameboy::CGBRevision::CGB0))),
-                    "load_gbc_cgb" => self.try_init_gameboy(gameboy::Model::GameBoyColor(Some(gameboy::CGBRevision::CGB))),
+                    "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(self.config.gb.default_models.dmg)),
+                    "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(gameboy::GBRevision::DMG0)),
+                    "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(gameboy::GBRevision::DMG0)),
+                    "load_gb_mgb" => self.try_init_gameboy(gameboy::Model::GameBoy(gameboy::GBRevision::DMG0)),
+                    "load_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(self.config.gb.default_models.sgb)),
+                    "load_sgb_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(gameboy::SGBRevision::SGB)),
+                    "load_sgb_sgb2" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(gameboy::SGBRevision::SGB2)),
+                    "load_gbc" => self.try_init_gameboy(gameboy::Model::GameBoyColor(self.config.gb.default_models.cgb)),
+                    "load_gbc_cgb0" => self.try_init_gameboy(gameboy::Model::GameBoyColor(gameboy::CGBRevision::CGB0)),
+                    "load_gbc_cgb" => self.try_init_gameboy(gameboy::Model::GameBoyColor(gameboy::CGBRevision::CGB)),
                     // "load_gba" Will be implemented later
                     "toggle_revisions" => self.ui.as_ref().unwrap().toggle_revisions(&mut self.config),
 

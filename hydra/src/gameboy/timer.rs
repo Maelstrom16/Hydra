@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::timing::ModuloCounter, deserialize, gameboy::{GBRevision, Interrupt, InterruptFlags, Model, apu::Apu, ppu::state::PpuState}, serialize};
+use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, gameboy::{GBRevision, Model, apu::Apu, interrupt::{Interrupt, InterruptFlags}, memory::MemoryMapped, ppu::state::PpuState}, serialize};
 
 pub struct MasterTimer {
     model: Rc<Model>,
@@ -26,7 +26,7 @@ impl MasterTimer {
         MasterTimer { 
             machine_cycle_timer: ModuloCounter::new(0, 4),
             div_full: match *model { 
-                Model::GameBoy(Some(GBRevision::DMG0)) => 0x18,
+                Model::GameBoy(GBRevision::DMG0) => 0x18,
                 Model::GameBoy(_) => 0xAB,
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles,
             } << 6,
@@ -194,6 +194,30 @@ impl MasterTimer {
         deserialize!(val;
             0 as bool =>> (self.speed_switch_queued); 
         );
+    }
+}
+
+impl MemoryMapped for MasterTimer {
+    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+        match address {
+            0xFF04 => Ok(self.read_div()),
+            0xFF05 => Ok(self.read_tima()),
+            0xFF06 => Ok(self.read_tma()),
+            0xFF07 => Ok(self.read_tac()),
+            0xFF4D => Ok(self.read_key1()),
+            _ => Err(HydraIOError::OpenBusAccess),
+        }
+    }
+
+    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+        match address {
+            0xFF04 => Ok(self.write_div(val)),
+            0xFF05 => Ok(self.write_tima(val)),
+            0xFF06 => Ok(self.write_tma(val)),
+            0xFF07 => Ok(self.write_tac(val)),
+            0xFF4D => Ok(self.write_key1(val)),
+            _ => Err(HydraIOError::OpenBusAccess),
+        }
     }
 }
 

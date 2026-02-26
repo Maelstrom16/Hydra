@@ -1,5 +1,7 @@
 mod apu;
 mod cpu;
+mod interrupt;
+mod joypad;
 mod memory;
 mod ppu;
 mod serial;
@@ -12,7 +14,7 @@ use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
     },
-    gameboy::{apu::Apu, cpu::Cpu, memory::{MemoryMap, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::ColorMap, lcdc::LcdController, state::PpuState}, timer::MasterTimer},
+    gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, lcdc::LcdController, state::PpuState}, timer::MasterTimer},
     window::HydraApp
 };
 use std::{
@@ -21,30 +23,32 @@ use std::{
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Model {
-    // A model with no revision specifies a target console (i.e. any revision).
-    GameBoy(Option<GBRevision>),
-    SuperGameBoy(Option<SGBRevision>),
-    GameBoyColor(Option<CGBRevision>),
-    GameBoyAdvance(Option<AGBRevision>),
+    GameBoy(GBRevision),
+    SuperGameBoy(SGBRevision),
+    GameBoyColor(CGBRevision),
+    GameBoyAdvance(AGBRevision),
 }
 impl Model {
     const fn as_str(&self) -> &'static str {
         match self {
-            Model::GameBoy(Some(GBRevision::DMG0)) => "Game Boy (DMG0)",
-            Model::GameBoy(Some(GBRevision::DMG)) => "Game Boy (DMG)",
-            Model::GameBoy(Some(GBRevision::MGB)) => "Game Boy Pocket",
-            Model::GameBoy(Some(GBRevision::CGBdmg)) => "Game Boy Color (DMG compat mode)",
-            Model::GameBoy(Some(GBRevision::AGBdmg)) => "Game Boy Advance (DMG compat mode)",
-            Model::GameBoy(None) => "Game Boy",
-            Model::SuperGameBoy(Some(SGBRevision::SGB)) => "Super Game Boy",
-            Model::SuperGameBoy(Some(SGBRevision::SGB2)) => "Super Game Boy 2",
-            Model::SuperGameBoy(None) => "Super Game Boy",
-            Model::GameBoyColor(Some(CGBRevision::CGB0)) => "Game Boy Color (CGB0)",
-            Model::GameBoyColor(Some(CGBRevision::CGB)) => "Game Boy Color (CGB)",
-            Model::GameBoyColor(None) => "Game Boy Color",
-            Model::GameBoyAdvance(Some(AGBRevision::AGB0)) => "Game Boy Advance (AGB0)",
-            Model::GameBoyAdvance(Some(AGBRevision::AGB)) => "Game Boy Advance (AGB)",
-            Model::GameBoyAdvance(None) => "Game Boy Advance",
+            Model::GameBoy(GBRevision::DMG0) => "Game Boy (DMG0)",
+            Model::GameBoy(GBRevision::DMG) => "Game Boy (DMG)",
+            Model::GameBoy(GBRevision::MGB) => "Game Boy Pocket",
+            Model::SuperGameBoy(SGBRevision::SGB) => "Super Game Boy",
+            Model::SuperGameBoy(SGBRevision::SGB2) => "Super Game Boy 2",
+            Model::GameBoyColor(CGBRevision::CGB0) => "Game Boy Color (CGB0)",
+            Model::GameBoyColor(CGBRevision::CGB) => "Game Boy Color (CGB)",
+            Model::GameBoyAdvance(AGBRevision::AGB0) => "Game Boy Advance (AGB0)",
+            Model::GameBoyAdvance(AGBRevision::AGB) => "Game Boy Advance (AGB)",
+        }
+    }
+
+    fn is_extension_valid(&self, ext: Option<&str>) -> bool {
+        match self {
+            Model::GameBoy(_) => matches!(ext, Some("gb" | "gbc")),
+            Model::SuperGameBoy(_) => matches!(ext, Some("gb" | "gbc")),
+            Model::GameBoyColor(_) => matches!(ext, Some("gb" | "gbc")),
+            Model::GameBoyAdvance(_) => matches!(ext, Some("gb" | "gbc" | "gba")),
         }
     }
 
@@ -62,8 +66,6 @@ pub enum GBRevision {
     DMG0,
     DMG,
     MGB,
-    CGBdmg, // Special mode to specify Game Boy Color running original GB game in compatibility mode.
-    AGBdmg, // Special mode to specify Game Boy Advance running original GB game in compatibility mode.
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -84,6 +86,12 @@ pub enum AGBRevision {
     AGB,
 }
 
+pub enum GbMode {
+    DMG,
+    CGB
+}
+
+
 pub struct GameBoy {
     apu: Rc<RefCell<Apu>>,
     cpu: Option<Cpu>,
@@ -96,9 +104,27 @@ pub struct GameBoy {
     channel: Receiver<EmuMessage>,
 }
 
+fn read_rom(path: &Path) -> Result<Rom, HydraIOError> {
+    Ok(Rom::from_vec(fs::read(path)?)?)
+}
+
 impl GameBoy {
-    fn from_revision(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
-        let rom = Rom::from_vec(fs::read(path)?)?;
+    pub fn new(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
+        let ext = path.extension().and_then(OsStr::to_str);
+        if !model.is_extension_valid(ext) {
+            return Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string)));
+        }
+
+        let rom = read_rom(path)?;
+        let mode = match model.is_color() && rom.supports_cgb_mode() {
+            true => GbMode::CGB,
+            false => GbMode::DMG
+        };
+
+        GameBoy::with_mode(rom, model, mode, app)
+    }
+
+    fn with_mode(rom: Rom, model: Model, mode: GbMode, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let (send, recv) = channel();
         let graphics = app.clone_graphics();
         let audio = app.clone_audio();
@@ -117,15 +143,16 @@ impl GameBoy {
             let ppu_state = Rc::new(RefCell::new(PpuState::new(&model, ppu_mode.clone(), interrupt_flags.clone())));
             let apu = Rc::new(RefCell::new(Apu::new(audio)));
             let clock = Rc::new(RefCell::new(MasterTimer::new(model.clone(), apu.clone(), ppu_state.clone(), interrupt_flags.clone())));
-            let cpu = Some(cpu::Cpu::new(&rom, &model, interrupt_flags.clone(), interrupt_enable.clone(), joypad.clone(), clock.clone()));
             let scy = Rc::new(Cell::new(0x00));
             let scx = Rc::new(Cell::new(0x00));
             let wy = Rc::new(Cell::new(0x00));
             let wx = Rc::new(Cell::new(0x00));
-            let color_map = Rc::new(RefCell::new(ColorMap::new(&model)));
+            let color_map = colormap::from_mode(&mode);
             let oam = Rc::new(RefCell::new(Oam::new(model.clone())));
-            let ppu = Some(ppu::Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, rom, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), apu.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let ppu = Some(Ppu::new(model.clone(), vram.clone(), oam.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), wy.clone(), wx.clone(), color_map.clone(), graphics, proxy));
+            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, vram, wram, oam, joypad.clone(), clock.clone(), interrupt_flags.clone(), apu.clone(), lcd_controller.clone(), ppu_state.clone(), scy.clone(), scx.clone(), color_map.clone(), wy.clone(), wx.clone(), interrupt_enable.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
+            let cpu = Some(Cpu::new(&rom, &model, &mode, memory.clone(), interrupt_flags.clone(), interrupt_enable.clone(), joypad.clone(), clock.clone()));
+            memory.borrow_mut().hot_swap_rom(rom);
             GameBoy {
                 apu,
                 cpu,
@@ -138,19 +165,7 @@ impl GameBoy {
         });
         Ok(send)
     }
-    pub fn from_model(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
-        // If file extension is valid for the given model, initialize the emulator
-        // Otherwise, return an InvalidExtension error
-        let model = match (path.extension().and_then(OsStr::to_str), model) {
-            (Some("gb") | Some("gbc"), Model::GameBoy(revision)) => Model::GameBoy(Some(revision.unwrap_or(app.get_config().gb.default_models.dmg))),
-            (Some("gb") | Some("gbc"), Model::SuperGameBoy(revision)) => Model::SuperGameBoy(Some(revision.unwrap_or(app.get_config().gb.default_models.sgb))),
-            (Some("gb") | Some("gbc"), Model::GameBoyColor(revision)) => Model::GameBoyColor(Some(revision.unwrap_or(app.get_config().gb.default_models.cgb))),
-            (Some("gb") | Some("gbc") | Some("gba"), Model::GameBoyAdvance(revision)) => Model::GameBoyAdvance(Some(revision.unwrap_or(app.get_config().gb.default_models.agb))),
-            (ext, model) => return Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string))),
-        };
 
-        Self::from_revision(path, model, app)
-    }
     fn dump_mem(&self) {
         for y in 0..=0xFFF {
             print!("{:#06X}:   ", y << 4);
@@ -169,7 +184,7 @@ impl Emulator for GameBoy {
         // Generate Coroutines
         let mut cpu = self.cpu.take().unwrap();
         let mut ppu = self.ppu.take().unwrap();
-        let_gen_using!(cpu_coro, |co| cpu.coro(self.memory.clone(), co, false));
+        let_gen_using!(cpu_coro, |co| cpu.coro(co, false));
         let_gen_using!(ppu_coro, |co| ppu.coro(co));
 
         // Main loop
@@ -205,7 +220,7 @@ impl Emulator for GameBoy {
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
-                            if let Err(e) = self.memory.borrow_mut().hot_swap_rom(path) {
+                            if let Err(e) = read_rom(path).and_then(|rom| self.memory.borrow_mut().hot_swap_rom(rom)) {
                                 println!("{}", e);
                             }
                         },
@@ -221,144 +236,4 @@ impl Emulator for GameBoy {
         // Dump memory (for debugging)
         self.dump_mem();
     }
-}
-
-pub struct Joypad {
-    button_vector: u8,
-    dpad_vector: u8,
-    joyp: MaskedBitVec<u8, true>,
-    interrupt_flags: Rc<RefCell<InterruptFlags>>
-}
-
-impl Joypad {
-    pub fn new(interrupt_flags: Rc<RefCell<InterruptFlags>>) -> Self {
-        Joypad { 
-            button_vector: 0b0000,
-            dpad_vector: 0b0000,
-            joyp: MaskedBitVec::new(0xCF, 0b00111111, 0b00110000),
-            interrupt_flags 
-        }
-    }
-
-    fn is_polling_buttons(&self) -> bool {
-        !self.joyp.test_bit(5)
-    }
-    
-    fn is_polling_dpad(&self) -> bool {
-        !self.joyp.test_bit(4)
-    }
-
-    fn refresh(&mut self) {
-        let mut after = 0b0000;
-        if self.is_polling_buttons() {after |= self.button_vector}
-        if self.is_polling_dpad() {after |= self.dpad_vector}
-        
-        if *self.joyp & after != 0 {
-            self.interrupt_flags.borrow_mut().request(Interrupt::Joypad);
-        }
-
-        *self.joyp = (*self.joyp & 0b00110000) | (after ^ 0b1111);
-    }
-
-    pub(self) fn press_button(&mut self, button: Button, is_pressed: bool) {
-        self.button_vector.map_bits(button as u8, is_pressed);
-        self.refresh();
-    }
-
-    pub(self) fn press_dpad(&mut self, dpad: Dpad, is_pressed: bool) {
-        self.dpad_vector.map_bits(dpad as u8, is_pressed);
-        self.refresh();
-    }
-
-    pub fn is_input_active(&self) -> bool {
-        !self.joyp.read() & 0xF != 0
-    }
-}
-
-impl Joypad {   
-    pub fn read_joyp(&self) -> u8 {
-        self.joyp.read()
-    }
-
-    pub fn write_joyp(&mut self, val: u8) {
-        self.joyp.write(val);
-        self.refresh();
-    }
-}
-
-#[repr(u8)]
-enum Dpad {
-    Right = 0b00000001,
-    Left  = 0b00000010,
-    Up    = 0b00000100,
-    Down  = 0b00001000,
-}
-
-#[repr(u8)]
-enum Button {
-    A      = 0b00000001,
-    B      = 0b00000010,
-    Select = 0b00000100,
-    Start  = 0b00001000,
-}
-
-pub struct InterruptFlags {
-    interrupts: MaskedBitVec<u8, true>
-}
-
-impl InterruptFlags {
-    pub fn new() -> Self {
-        InterruptFlags {
-            interrupts: MaskedBitVec::new(0b11100001, 0b00011111, 0b00011111)
-        }
-    }
-
-    pub fn request(&mut self, interrupt: Interrupt) {
-        *self.interrupts |= interrupt as u8
-    }
-
-    pub fn is_requested(&self, interrupt: Interrupt) -> bool {
-        *self.interrupts & interrupt as u8 != 0
-    }
-
-    pub fn get_inner(&mut self) -> &mut MaskedBitVec<u8, true> {
-        &mut self.interrupts
-    }
-    
-    pub fn read_if(&self) -> u8 {
-        self.interrupts.read()
-    }
-
-    pub fn write_if(&mut self, val: u8) {
-        self.interrupts.write(val);
-    }
-}
-
-pub struct InterruptEnable {
-    interrupts: MaskedBitVec<u8, false> // TODO: false assumed due to startup value -- verify this
-}
-
-impl InterruptEnable {
-    pub fn new() -> Self {
-        InterruptEnable {
-            interrupts: MaskedBitVec::new(0b00000000, 0b00011111, 0b00011111)
-        }
-    }
-    
-    pub fn read_ie(&self) -> u8 {
-        self.interrupts.read()
-    }
-
-    pub fn write_ie(&mut self, val: u8) {
-        self.interrupts.write(val)
-    }
-}
-
-#[repr(u8)]
-pub enum Interrupt {
-    Vblank = 0b00000001,
-    Stat   = 0b00000010,
-    Timer  = 0b00000100,
-    Serial = 0b00001000,
-    Joypad = 0b00010000,
 }
