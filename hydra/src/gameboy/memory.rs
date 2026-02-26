@@ -16,11 +16,10 @@ use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, time::Duration};
 pub struct MemoryMap {
     mode: Rc<GbMode>,
 
-    cartridge: Option<Box<dyn mbc::MemoryBankController>>, // ROM, SRAM
+    cartridge: Option<Box<dyn mbc::MemoryBankController>>,
     vram: Rc<RefCell<Vram>>,
     wram: Rc<RefCell<Wram>>,
     oam: Rc<RefCell<Oam>>,
-    hram: [u8; 0x7F],
 
     joypad: Rc<RefCell<Joypad>>,
     serial: SerialConnection,
@@ -37,7 +36,6 @@ pub struct MemoryMap {
     color_map: Rc<RefCell<dyn ColorMap>>,
     wy: Rc<Cell<u8>>,
     wx: Rc<Cell<u8>>,
-    interrupt_enable: Rc<RefCell<InterruptEnable>>,
 
     dma_source: u8,
     dma_cycle: Option<u8>,
@@ -45,6 +43,9 @@ pub struct MemoryMap {
     hdma_source: u16,
     hdma_destination: u16,
     hdma_length: u8,
+
+    hram: [u8; 0x7F],
+    interrupt_enable: Rc<RefCell<InterruptEnable>>,
 }
 
 impl MemoryMap {
@@ -57,7 +58,6 @@ impl MemoryMap {
             vram,
             wram,
             oam,
-            hram: [0; 0x7F],
 
             joypad,
             serial: SerialConnection::new(model.clone()),
@@ -74,7 +74,6 @@ impl MemoryMap {
             color_map,
             wy,
             wx,
-            interrupt_enable,
 
             dma_source: match model.is_monochrome() {
                 true => 0xFF,
@@ -85,6 +84,9 @@ impl MemoryMap {
             hdma_source: 0xFFF0,
             hdma_destination: 0x1FF0,
             hdma_length: 0xFF,
+
+            hram: [0; 0x7F],
+            interrupt_enable,
         })
     }
 
