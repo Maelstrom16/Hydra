@@ -3,14 +3,13 @@ mod opcode;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use futures::FutureExt;
-use genawaiter::stack::Co;
 
 use crate::{
     common::{bit::BitVec, timing::{DelayedTickCounter, ModuloCounter}}, gameboy::{
-        AGBRevision, CGBRevision, GBRevision, GbMode, Joypad, Model, SGBRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, LocalOpcodeFn}, interrupt::{Interrupt, InterruptEnable, InterruptFlags}, memory::{
+        AGBRevision, CGBRevision, GBRevision, GameBoy, GbMode, Joypad, Model, SGBRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, OpcodeFn}, interrupt::{Interrupt, InterruptEnable, InterruptFlags}, memory::{
             MemoryMap, rom::Rom
         }, timer::MasterTimer
-    }, gen_all
+    },
 };
 
 pub enum Register8 {
@@ -64,12 +63,10 @@ pub struct Cpu {
     cycles_until_ime: Option<u8>,
     cycles_until_halt_bug: Option<u8>,
     unhalt_timer: DelayedTickCounter<u16>,
-
-    memory: Rc<RefCell<MemoryMap>>,
 }
 
 impl Cpu {
-    pub fn new(rom: &Rom, model: &Rc<Model>, mode: &GbMode, memory: Rc<RefCell<MemoryMap>>) -> Self {
+    pub fn new(rom: &Rom, model: &Rc<Model>, mode: &GbMode) -> Self {
         let dmg_mode = matches!(mode, GbMode::DMG);
         
         let af;
@@ -176,8 +173,6 @@ impl Cpu {
             cycles_until_ime: None,
             cycles_until_halt_bug: None,
             unhalt_timer: DelayedTickCounter::new(None),
-
-            memory,
         }
     }
 
@@ -199,38 +194,15 @@ impl Cpu {
     }
 
     #[inline(always)]
-    pub fn interrupt_pending(&self) -> bool {
-        self.memory.borrow().interrupt_enable.read_ie() & self.memory.borrow().interrupt_flags.read_if() != 0
-    }
-
-    fn fetch_interrupt(&mut self, co: Co<'_, ()>, jump_addr: u16) -> impl Future<Output = ()> {
-        // TODO: Verify cycle accuracy
-        self.call(co, CondOperand::Unconditional, ConstOperand16(jump_addr))
-    }
-
-    async fn fetch_opcode(&mut self, co: Co<'_, ()>, debug: bool) {
-        self.ir = gen_all!(&co, |co_inner| self.step_u8(co_inner));
-        if debug {
-            println!(
-                "{:#06X}: {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
-                self.pc - 1,
-                self.ir,
-                self.af[1],
-                self.af[0],
-                u16::from_le_bytes(self.bc),
-                u16::from_le_bytes(self.de),
-                u16::from_le_bytes(self.hl),
-                self.sp
-            );
-        }
-        gen_all!(&co, |co_inner| Self::OP_TABLE[self.ir as usize](self, co_inner));
+    pub fn interrupt_pending(&self, system: &mut GameBoy) -> bool {
+        system.memory.interrupt_enable.read_ie() & system.memory.interrupt_flags.read_if() != 0
     }
 
     #[inline(always)]
-    fn fetch<'a>(&mut self, debug: bool) -> LocalOpcodeFn<'a> {
-        if self.ime && self.interrupt_pending() { 
+    fn fetch(&mut self, system: &mut GameBoy, debug: bool) {
+        if self.ime && self.interrupt_pending(system) { 
             // Generate call instruction from handled interrupt
-            let composite = self.memory.borrow().interrupt_enable.read_ie() & self.memory.borrow().interrupt_flags.read_if();
+            let composite = system.memory.interrupt_enable.read_ie() & system.memory.interrupt_flags.read_if();
             for shift_width in 0..=4 {
                 let bitmask = 1 << shift_width;
                 if composite & bitmask == 0 {
@@ -239,60 +211,73 @@ impl Cpu {
                 } else {
                     // Handle interrupt and return call instruction
                     self.ime = false;
-                    self.memory.borrow_mut().interrupt_flags.get_inner().reset_bits(bitmask);
+                    system.memory.interrupt_flags.get_inner().reset_bits(bitmask);
                     let jump_addr = (shift_width * 0x8) + 0x40;
                     
-                    return Box::new(move |cpu_inner: &'a mut Cpu, co_inner| cpu_inner.fetch_interrupt(co_inner, jump_addr).boxed_local())
-                        as LocalOpcodeFn<'a>;
+                    // TODO: Verify cycle accuracy
+                    self.call(system, CondOperand::Unconditional, ConstOperand16(jump_addr));
+                    return;
                 }
             }
             unreachable!() // Interrupt should've been handled
         } else {
-            // Fetch instruction from self.memory
-            return Box::new(move |cpu_inner: &'a mut Cpu, co_inner| cpu_inner.fetch_opcode(co_inner, debug).boxed_local())
-                as LocalOpcodeFn<'a>;
+            // Fetch instruction from memory
+            self.ir = self.step_u8(system);
+            if debug {
+                println!(
+                    "{:#06X}: {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
+                    self.pc - 1,
+                    self.ir,
+                    self.af[1],
+                    self.af[0],
+                    u16::from_le_bytes(self.bc),
+                    u16::from_le_bytes(self.de),
+                    u16::from_le_bytes(self.hl),
+                    self.sp
+                );
+            }
+            Self::OP_TABLE[self.ir as usize](self, system);
         }
     }
 
     #[inline(always)]
-    async fn step_u8(&mut self, co: Co<'_, ()>) -> u8 {
-        let result = self.memory.borrow().read_u8(self.pc, false);
+    fn step_u8(&mut self, system: &mut GameBoy) -> u8 {
+        let result = system.memory.read_u8(self.pc, false);
         self.pc += 1;
-        co.yield_(()).await;
+        system.cycle_components();
         result
     }
 
     #[inline(always)]
-    async fn read_u8(&self, address: u16, co: Co<'_, ()>) -> u8 {
-        co.yield_(()).await;
-        self.memory.borrow().read_u8(address, false)
+    fn read_u8(&self, address: u16, system: &mut GameBoy) -> u8 {
+        system.cycle_components();
+        system.memory.read_u8(address, false)
     }
 
     #[inline(always)]
-    async fn write_u8(&self, address: u16, value: u8, co: Co<'_, ()>) -> () {
-        co.yield_(()).await;
-        self.memory.borrow_mut().write_u8(value, address, false);
+    fn write_u8(&self, address: u16, value: u8, system: &mut GameBoy) -> () {
+        system.cycle_components();
+        system.memory.write_u8(value, address, false);
     }
 
-    pub async fn coro(&mut self, co: Co<'_, ()>, debug: bool) {
+    pub fn coro(&mut self, system: &mut GameBoy, debug: bool) {
         loop {
             // Skip iterations if halted or stopped
             self.mode = match self.mode {
                 CpuMode::Normal => CpuMode::Normal,
-                CpuMode::Halted if self.interrupt_pending() || self.unhalt_timer.increment() => CpuMode::Normal,
-                CpuMode::Stopped if self.memory.borrow().interrupt_flags.is_requested(Interrupt::Joypad) => CpuMode::Normal,
+                CpuMode::Halted if self.interrupt_pending(system) || self.unhalt_timer.increment() => CpuMode::Normal,
+                CpuMode::Stopped if system.memory.interrupt_flags.is_requested(Interrupt::Joypad) => CpuMode::Normal,
                 _ => {
-                    co.yield_(()).await;
+                    system.cycle_components();
                     continue;  
                 }
             };
 
             // Fetch cycle
             let pc_old = self.pc;
-            let next = self.fetch(debug);
+            self.fetch(system, debug);
 
             // Execute cycle(s)
-            gen_all!(&co, |co_inner| next(self, co_inner));
             self.refresh_interrupt_handler(pc_old);
         }
     }
@@ -367,13 +352,13 @@ macro_rules! reg {
 
 impl Cpu {
     #[inline(always)]
-    async fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, co: Co<'_, ()>, dest: O1, src: O2) {
-        let value = gen_all!(co, |co_inner| src.get(self, co_inner));
-        gen_all!(co, |co_inner| dest.set(value, self, co_inner));
+    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, system: &mut GameBoy, dest: O1, src: O2) {
+        let value = src.get(self, system);
+        dest.set(value, self, system);
     }
     #[inline(always)]
-    async fn ld_hlspe(&mut self, co: Co<'_, ()>) {
-        let e = gen_all!(&co, |co_inner| self.step_u8(co_inner));
+    fn ld_hlspe(&mut self, system: &mut GameBoy) {
+        let e = self.step_u8(system);
 
         let [sp_lsb, sp_msb] = self.sp.to_le_bytes();
         let (sp_half_carry, e_half_carry, adjustment) = match e.test_bit(7) {
@@ -389,15 +374,15 @@ impl Cpu {
             h=(half_carry),
             c=(carry)
         );
-        co.yield_(()).await;
+        system.cycle_components();
 
         let (result_h, _) = sp_msb.carrying_add(adjustment, carry);
         reg!(self.H) = result_h;
     }
 
     #[inline(always)]
-    async fn inc<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn inc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let (result, _) = o.overflowing_add(1);
         let (_, half_carry) = (o | 0xF0).overflowing_add(1);
         set_flags!(self;
@@ -405,19 +390,19 @@ impl Cpu {
             n=(false),
             h=(half_carry)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
     #[inline(always)]
-    async fn inc16<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn inc16<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let result = o.wrapping_add(1);
-        co.yield_(()).await;
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        system.cycle_components();
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn dec<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn dec<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let (result, _) = o.overflowing_sub(1);
         let (_, half_carry) = (o & 0x0F).overflowing_sub(1);
         set_flags!(self;
@@ -425,19 +410,19 @@ impl Cpu {
             n=(true),
             h=(half_carry)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
     #[inline(always)]
-    async fn dec16<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn dec16<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let result = o.wrapping_sub(1);
-        co.yield_(()).await;
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        system.cycle_components();
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn add<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let (a, operand) = (reg!(self.A), gen_all!(co, |co_inner| operand.get(self, co_inner)));
+    fn add<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand & 0x0F);
         set_flags!(self;
@@ -449,8 +434,8 @@ impl Cpu {
         reg!(self.A) = result;
     }
     #[inline(always)]
-    async fn add_hl<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let (hl, operand) = (u16::from_le_bytes(self.hl), gen_all!(co, |co_inner| operand.get(self, co_inner)));
+    fn add_hl<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+        let (hl, operand) = (u16::from_le_bytes(self.hl), operand.get(self, system));
         let (result, carry) = hl.overflowing_add(operand);
         let (_, half_carry) = (hl | 0xF000).overflowing_add(operand & 0x0FFF);
         set_flags!(self;
@@ -461,8 +446,8 @@ impl Cpu {
         self.hl = u16::to_le_bytes(result);
     }
     #[inline(always)]
-    async fn add_spe(&mut self, co: Co<'_, ()>) {
-        let e = gen_all!(&co, |co_inner| self.step_u8(co_inner));
+    fn add_spe(&mut self, system: &mut GameBoy) {
+        let e = self.step_u8(system);
 
         let [sp_lsb, sp_msb] = self.sp.to_le_bytes();
         let (sp_half_carry, e_half_carry, adjustment) = match e.test_bit(7) {
@@ -477,17 +462,17 @@ impl Cpu {
             h=(half_carry),
             c=(carry)
         );
-        co.yield_(()).await;
+        system.cycle_components();
 
         let (result_h, _) = sp_msb.carrying_add(adjustment, carry);
-        co.yield_(()).await;
+        system.cycle_components();
 
         self.sp = u16::from_le_bytes([result_l, result_h]);
     }
 
     #[inline(always)]
-    async fn adc<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let (a, operand) = (reg!(self.A), gen_all!(co, |co_inner| operand.get(self, co_inner)));
+    fn adc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.carrying_add(operand, get_flag!(self; c));
         let (_, half_carry) = (a | 0xF0).carrying_add(operand & 0x0F, get_flag!(self; c));
         set_flags!(self;
@@ -500,8 +485,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn sub<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let (a, operand) = (reg!(self.A), gen_all!(co, |co_inner| operand.get(self, co_inner)));
+    fn sub<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
@@ -514,8 +499,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn sbc<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let (a, operand) = (reg!(self.A), gen_all!(co, |co_inner| operand.get(self, co_inner)));
+    fn sbc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry1) = a.overflowing_sub(operand);
         let (result, carry2) = result.overflowing_sub(get_flag!(self; c) as u8);
         let (hc_result, half_carry1) = (a & 0x0F).overflowing_sub(operand & 0x0F);
@@ -530,8 +515,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn and<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let result = reg!(self.A) & gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn and<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let result = reg!(self.A) & operand.get(self, system);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -542,8 +527,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn or<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let result = reg!(self.A) | gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn or<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let result = reg!(self.A) | operand.get(self, system);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -554,8 +539,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn xor<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let result = reg!(self.A) ^ gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn xor<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let result = reg!(self.A) ^ operand.get(self, system);
         set_flags!(self;
             z=(result == 0),
             n=(false),
@@ -566,8 +551,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn cp<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let (a, operand) = (reg!(self.A), gen_all!(co, |co_inner| operand.get(self, co_inner)));
+    fn cp<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
         set_flags!(self;
@@ -579,27 +564,27 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn push<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let bytes = u16::to_le_bytes(gen_all!(co, |co_inner| operand.get(self, co_inner)));
-        co.yield_(()).await;
+    fn push<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+        let bytes = u16::to_le_bytes(operand.get(self, system));
+        system.cycle_components();
         self.sp -= 1;
-        gen_all!(&co, |co_inner| self.write_u8(self.sp, bytes[1], co_inner));
+        self.write_u8(self.sp, bytes[1], system);
         self.sp -= 1;
-        gen_all!(&co, |co_inner| self.write_u8(self.sp, bytes[0], co_inner));
+        self.write_u8(self.sp, bytes[0], system);
     }
 
     #[inline(always)]
-    async fn pop<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, operand: O) {
+    fn pop<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
         let mut bytes = [0; 2];
-        bytes[0] = gen_all!(&co, |co_inner| self.read_u8(self.sp, co_inner));
+        bytes[0] = self.read_u8(self.sp, system);
         self.sp += 1;
-        bytes[1] = gen_all!(&co, |co_inner| self.read_u8(self.sp, co_inner));
+        bytes[1] = self.read_u8(self.sp, system);
         self.sp += 1;
-        gen_all!(co, |co_inner| operand.set(u16::from_le_bytes(bytes), self, co_inner));
+        operand.set(u16::from_le_bytes(bytes), self, system);
     }
 
     #[inline(always)]
-    async fn ccf(&mut self, co: Co<'_, ()>) {
+    fn ccf(&mut self, system: &mut GameBoy) {
         set_flags!(self;
             n=(false),
             h=(false)
@@ -608,7 +593,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn scf(&mut self, co: Co<'_, ()>) {
+    fn scf(&mut self, system: &mut GameBoy) {
         set_flags!(self;
             n=(false),
             h=(false),
@@ -617,7 +602,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn daa(&mut self, co: Co<'_, ()>) {
+    fn daa(&mut self, system: &mut GameBoy) {
         let a = reg!(self.A);
         let n = get_flag!(self; n);
         let h = get_flag!(self; h);
@@ -641,7 +626,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn cpl(&mut self, co: Co<'_, ()>) {
+    fn cpl(&mut self, system: &mut GameBoy) {
         reg!(self.A) ^= 0xFF;
         set_flags!(self;
             n=(true),
@@ -650,8 +635,8 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn rlc<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O, sets_z: bool) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn rlc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+        let o = operand.get(self, system);
         let result = o.rotate_left(1);
         set_flags!(self;
             z=(sets_z && result == 0),
@@ -659,12 +644,12 @@ impl Cpu {
             h=(false),
             c=(result & 0b00000001 != 0)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn rrc<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O, sets_z: bool) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn rrc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+        let o = operand.get(self, system);
         let result = o.rotate_right(1);
         set_flags!(self;
             z=(sets_z && result == 0),
@@ -672,12 +657,12 @@ impl Cpu {
             h=(false),
             c=(result & 0b10000000 != 0)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn rl<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O, sets_z: bool) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn rl<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+        let o = operand.get(self, system);
         let carry = o.test_bit(7);
         let result = (o << 1) | get_flag!(self; c) as u8;
         set_flags!(self;
@@ -686,12 +671,12 @@ impl Cpu {
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn rr<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O, sets_z: bool) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn rr<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+        let o = operand.get(self, system);
         let carry = o.test_bit(0);
         let result = (o >> 1) | ((get_flag!(self; c) as u8) << 7);
         set_flags!(self;
@@ -700,12 +685,12 @@ impl Cpu {
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn sla<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn sla<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let carry = o.test_bit(7);
         let result = o << 1;
         set_flags!(self;
@@ -714,12 +699,12 @@ impl Cpu {
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn sra<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner)) as i8;
+    fn sra<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system) as i8;
         let carry = o.test_bit(0);
         let result = o >> 1;
         set_flags!(self;
@@ -728,12 +713,12 @@ impl Cpu {
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result as u8, self, co_inner));
+        operand.set(result as u8, self, system);
     }
 
     #[inline(always)]
-    async fn swap<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn swap<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let result = (o & 0x0F) << 4 | (o & 0xF0) >> 4;
         set_flags!(self;
             z=(result == 0),
@@ -741,12 +726,12 @@ impl Cpu {
             h=(false),
             c=(false)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn srl<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn srl<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+        let o = operand.get(self, system);
         let carry = o.test_bit(0);
         let result = o >> 1;
         set_flags!(self;
@@ -755,12 +740,12 @@ impl Cpu {
             h=(false),
             c=(carry)
         );
-        gen_all!(co, |co_inner| operand.set(result, self, co_inner));
+        operand.set(result, self, system);
     }
 
     #[inline(always)]
-    async fn bit<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, index: u8, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn bit<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, index: u8, operand: O) {
+        let o = operand.get(self, system);
         set_flags!(self;
             z=(o & (1 << index) == 0),
             n=(false),
@@ -769,84 +754,84 @@ impl Cpu {
     }
 
     #[inline(always)]
-    async fn res<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, index: u8, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
-        gen_all!(co, |co_inner| operand.set(o & ((1 << index) ^ 0b11111111), self, co_inner));
+    fn res<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, index: u8, operand: O) {
+        let o = operand.get(self, system);
+        operand.set(o & ((1 << index) ^ 0b11111111), self, system);
     }
 
     #[inline(always)]
-    async fn set<O: IntOperand<u8>>(&mut self, co: Co<'_, ()>, index: u8, operand: O) {
-        let o = gen_all!(co, |co_inner| operand.get(self, co_inner));
-        gen_all!(co, |co_inner| operand.set(o | (1 << index), self, co_inner));
+    fn set<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, index: u8, operand: O) {
+        let o = operand.get(self, system);
+        operand.set(o | (1 << index), self, system);
     }
 
     #[inline(always)]
-    async fn jp<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, condition: CondOperand, operand: O) {
-        let addr = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn jp<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, condition: CondOperand, operand: O) {
+        let addr = operand.get(self, system);
         if condition.evaluate(self) {
-            co.yield_(()).await;
+            system.cycle_components();
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    async fn jr<O: IntOperand<i8>>(&mut self, co: Co<'_, ()>, condition: CondOperand, operand: O) {
-        let e = gen_all!(co, |co_inner| operand.get(self, co_inner)) as i8;
+    fn jr<O: IntOperand<i8>>(&mut self, system: &mut GameBoy, condition: CondOperand, operand: O) {
+        let e = operand.get(self, system) as i8;
         let addr = self.pc.wrapping_add_signed(e.into());
         if condition.evaluate(self) {
-            co.yield_(()).await;
+            system.cycle_components();
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    async fn call<O: IntOperand<u16>>(&mut self, co: Co<'_, ()>, condition: CondOperand, operand: O) {
-        let addr = gen_all!(co, |co_inner| operand.get(self, co_inner));
+    fn call<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, condition: CondOperand, operand: O) {
+        let addr = operand.get(self, system);
         if condition.evaluate(self) {
-            gen_all!(&co, |co_inner| self.push(co_inner, opcode::RegisterOperand16(Register16::PC)));
+            self.push(system, opcode::RegisterOperand16(Register16::PC));
             self.pc = addr;
         }
     }
 
     #[inline(always)]
-    async fn ret(&mut self, co: Co<'_, ()>, condition: CondOperand) {
-        co.yield_(()).await;
+    fn ret(&mut self, system: &mut GameBoy, condition: CondOperand) {
+        system.cycle_components();
         if condition.evaluate(self) {
-            gen_all!(&co, |co_inner| self.pop(co_inner, opcode::RegisterOperand16(Register16::PC)));
-            co.yield_(()).await;
+            self.pop(system, opcode::RegisterOperand16(Register16::PC));
+            system.cycle_components();
         }
     }
 
     #[inline(always)]
-    async fn reti(&mut self, co: Co<'_, ()>) {
-        gen_all!(&co, |co_inner| self.ret(co_inner, CondOperand::Unconditional));
+    fn reti(&mut self, system: &mut GameBoy) {
+        self.ret(system, CondOperand::Unconditional);
         self.ime = true;
     }
 
     #[inline(always)]
-    async fn ei(&mut self, co: Co<'_, ()>) {
+    fn ei(&mut self, system: &mut GameBoy) {
         self.queue_ime();
     }
 
     #[inline(always)]
-    async fn di(&mut self, co: Co<'_, ()>) {
+    fn di(&mut self, system: &mut GameBoy) {
         self.ime = false;
         self.cancel_ime();
     }
 
     #[inline(always)]
-    async fn halt(&mut self, co: Co<'_, ()>) {
+    fn halt(&mut self, system: &mut GameBoy) {
         self.mode = CpuMode::Halted;
 
         // If IME is off but an interrupt is already pending, trigger halt bug
-        if !self.ime && self.interrupt_pending() {
+        if !self.ime && self.interrupt_pending(system) {
             self.queue_halt_bug();
         }
     }
 
     #[inline(always)]
-    async fn stop(&mut self, co: Co<'_, ()>) {
-        let (mode, speed_switch, extra_cycle, reset_div) = match (self.memory.borrow().joypad.is_input_active(), self.interrupt_pending(), self.memory.borrow().timer.is_speed_switch_requested(), self.ime) {
+    fn stop(&mut self, system: &mut GameBoy) {
+        let (mode, speed_switch, extra_cycle, reset_div) = match (system.memory.joypad.is_input_active(), self.interrupt_pending(system), system.memory.timer.is_speed_switch_requested(), self.ime) {
             (true, true, _, _) => (CpuMode::Normal, false, false, false),
             (true, false, _, _) => (CpuMode::Halted, false, true, false),
             (false, true, false, _) => (CpuMode::Stopped, false, false, true),
@@ -857,17 +842,17 @@ impl Cpu {
         };
 
         if extra_cycle {
-            let _ = gen_all!(co, |co_inner| self.step_u8(co_inner));
+            let _ = self.step_u8(system);
         }
 
         self.mode = mode;
         
         if speed_switch {
-            self.memory.borrow_mut().timer.toggle_speed(&mut self.memory.borrow_mut().apu_state);
+            system.memory.timer.toggle_speed(&mut system.memory.apu_state);
         }
         
         if reset_div {
-            self.memory.borrow_mut().timer.write_div(&mut self.memory.borrow_mut().apu_state);
+            system.memory.timer.write_div(&mut system.memory.apu_state);
         }
     }
 }

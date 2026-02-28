@@ -7,7 +7,6 @@ edition = "2024"
 cpal = "0.17.2"
 funty = "2.0.0"
 futures = "0.3.31"
-genawaiter = "0.99.1"
 hydra_macros = {path = "../hydra_macros"}
 muda = "0.17.1"
 rand = "0.9.2"

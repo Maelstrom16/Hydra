@@ -1,7 +1,6 @@
 mod audio;
 mod common;
 mod config;
-mod ext;
 mod gameboy;
 mod graphics;
 mod ui;

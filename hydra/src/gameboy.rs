@@ -7,14 +7,13 @@ mod ppu;
 mod serial;
 mod timer;
 
-use genawaiter::stack::let_gen_using;
 use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 
 use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
     },
-    gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, lcdc::LcdController, state::PpuState}, timer::MasterTimer},
+    gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer},
     window::HydraApp
 };
 use std::{
@@ -93,10 +92,10 @@ pub enum GbMode {
 
 
 pub struct GameBoy {
-    apu: Rc<RefCell<Apu>>,
+    apu: Apu,
     cpu: Option<Cpu>,
-    memory: Rc<RefCell<MemoryMap>>,
-    ppu: Option<Ppu>,
+    memory: MemoryMap,
+    ppu: Ppu,
 
     channel: Receiver<EmuMessage>,
 }
@@ -132,11 +131,12 @@ impl GameBoy {
             let model = Rc::new(model);
             let mode = Rc::new(mode);
 
-            let memory = Rc::new(RefCell::new(memory::MemoryMap::new(&model, mode.clone()).unwrap())); // TODO: Error should be handled rather than unwrapped
-            let ppu = Some(Ppu::new(model.clone(), memory.clone(), graphics, proxy));
-            let apu = Rc::new(RefCell::new(Apu::new(memory.clone(), audio)));
-            let cpu = Some(Cpu::new(&rom, &model, &mode, memory.clone()));
-            memory.borrow_mut().hot_swap_rom(rom);
+            let ppu = Ppu::new(model.clone(), graphics, proxy);
+            let apu = Apu::new(audio);
+            let cpu = Some(Cpu::new(&rom, &model, &mode));
+            let mut memory = MemoryMap::new(&model, mode.clone()).unwrap(); // TODO: Error should be handled rather than unwrapped
+            memory.hot_swap_rom(rom).unwrap();
+
             GameBoy {
                 apu,
                 cpu,
@@ -152,9 +152,57 @@ impl GameBoy {
         for y in 0..=0xFFF {
             print!("{:#06X}:   ", y << 4);
             for x in 0..=0xF {
-                print!("{:02X} ", self.memory.borrow().read_u8(x | (y << 4), true));
+                print!("{:02X} ", self.memory.read_u8(x | (y << 4), true));
             }
             println!("");
+        }
+    }
+
+    fn cycle_components(&mut self) {
+        let memory = &mut self.memory;
+        loop { 
+            // Finish current cycle
+            memory.timer.refresh_tima_if_overflowing();
+            self.ppu.coro(memory);
+            
+            // Every frame
+            if memory.timer.get_ppu_dots(&mut memory.ppu_state) == 0 {
+
+                // Send audio for playback
+                self.apu.frame();
+
+                // Process any new messages
+                for msg in self.channel.try_iter() {
+                    match msg {
+                        // TODO: Allow remapping controls in the future
+                        EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
+                            KeyCode::KeyW => memory.joypad.press_dpad(Dpad::Up, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::KeyS => memory.joypad.press_dpad(Dpad::Down, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::KeyA => memory.joypad.press_dpad(Dpad::Left, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::KeyD => memory.joypad.press_dpad(Dpad::Right, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::KeyK => memory.joypad.press_button(Button::A, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::KeyJ => memory.joypad.press_button(Button::B, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::Enter => memory.joypad.press_button(Button::Start, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::ShiftRight => memory.joypad.press_button(Button::Select, state.is_pressed(), &mut memory.interrupt_flags),
+                            _ => {}
+                        }
+                        EmuMessage::HotSwap(path) => {
+                            // if let Err(e) = read_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
+                            //     println!("{}", e);
+                            // }
+                        },
+                        EmuMessage::Stop => {}//break 'main,
+                        _ => {} // Do nothing
+                    }
+                }
+            }
+
+            // Next cycle
+            memory.timer.tick(&mut memory.interrupt_flags, &mut memory.ppu_state, &mut memory.apu_state);
+            self.apu.dot_tick(&mut memory.apu_state);
+            memory.tick_dma();
+
+            if memory.timer.is_system_cycle() {break;}
         }
     }
 }
@@ -163,68 +211,8 @@ impl Emulator for GameBoy {
     fn main_thread(mut self) {
         println!("Launching Wyrm");
 
-        // Generate Coroutines
         let mut cpu = self.cpu.take().unwrap();
-        let mut ppu = self.ppu.take().unwrap();
-        let_gen_using!(cpu_coro, |co| cpu.coro(co, false));
-        let_gen_using!(ppu_coro, |co| ppu.coro(co));
-
-        // Main loop
-        'main: loop {
-            {
-                let memory = &mut *self.memory.borrow_mut();
-                memory.tick_dma();
-
-                let interrupt_flags = &mut memory.interrupt_flags;
-                let ppu_state = &mut memory.ppu_state;
-                let apu_state = &mut memory.apu_state;
-
-                memory.timer.tick(interrupt_flags, ppu_state, apu_state);
-                self.apu.borrow_mut().dot_tick(apu_state);
-            }
-            if self.memory.borrow_mut().timer.is_system_cycle() {
-                cpu_coro.resume();
-            }
-            self.memory.borrow_mut().timer.refresh_tima_if_overflowing();
-            ppu_coro.resume();
-
-            let memory = &mut *self.memory.borrow_mut();
-            let interrupt_flags = &mut memory.interrupt_flags;
-            let ppu_state = &mut memory.ppu_state;
-            let apu_state = &mut memory.apu_state;
-            
-            // Every frame
-            if memory.timer.get_ppu_dots(ppu_state) == 0 {
-
-                // Send audio for playback
-                self.apu.borrow_mut().frame();
-
-                // Process any new messages
-                for msg in self.channel.try_iter() {
-                    match msg {
-                        // TODO: Allow remapping controls in the future
-                        EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
-                            KeyCode::KeyW => memory.joypad.press_dpad(Dpad::Up, state.is_pressed(), interrupt_flags),
-                            KeyCode::KeyS => memory.joypad.press_dpad(Dpad::Down, state.is_pressed(), interrupt_flags),
-                            KeyCode::KeyA => memory.joypad.press_dpad(Dpad::Left, state.is_pressed(), interrupt_flags),
-                            KeyCode::KeyD => memory.joypad.press_dpad(Dpad::Right, state.is_pressed(), interrupt_flags),
-                            KeyCode::KeyK => memory.joypad.press_button(Button::A, state.is_pressed(), interrupt_flags),
-                            KeyCode::KeyJ => memory.joypad.press_button(Button::B, state.is_pressed(), interrupt_flags),
-                            KeyCode::Enter => memory.joypad.press_button(Button::Start, state.is_pressed(), interrupt_flags),
-                            KeyCode::ShiftRight => memory.joypad.press_button(Button::Select, state.is_pressed(), interrupt_flags),
-                            _ => {}
-                        }
-                        EmuMessage::HotSwap(path) => {
-                            // if let Err(e) = read_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
-                            //     println!("{}", e);
-                            // }
-                        },
-                        EmuMessage::Stop => break 'main,
-                        _ => {} // Do nothing
-                    }
-                }
-            }
-        }
+        cpu.coro(&mut self, false);
 
         println!("Exiting Wyrm");
 

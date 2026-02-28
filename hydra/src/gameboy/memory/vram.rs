@@ -5,7 +5,6 @@ use crate::common::errors::HydraIOError;
 use crate::gameboy::Model;
 use crate::gameboy::ppu::PpuMode;
 use crate::gameboy::ppu::attributes::TileAttributes;
-use crate::gameboy::ppu::lcdc::LcdController;
 use crate::{deserialize, serialize};
 
 pub const ADDRESS_OFFSET: u16 = 0x8000;

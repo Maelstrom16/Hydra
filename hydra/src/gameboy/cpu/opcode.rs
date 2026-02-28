@@ -1,24 +1,20 @@
 use std::{cell::RefCell, pin::Pin, rc::Rc};
 
 use futures::FutureExt;
-use genawaiter::stack::Co;
 
 use crate::{
-    gameboy::{
-        GbMode, cpu::{self, Cpu}, memory::MemoryMap
-    },
-    gen_all,
+    gameboy::{GameBoy, GbMode, cpu::{self, Cpu}},
 };
 
 pub trait IntOperand<T> {
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> T;
-    async fn set(&self, value: T, cpu: &mut Cpu, co: Co<'_, ()>);
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> T;
+    fn set(&self, value: T, cpu: &mut Cpu, system: &mut GameBoy);
 }
 
 pub struct RegisterOperand8(pub cpu::Register8);
 impl IntOperand<u8> for RegisterOperand8 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, _co: Co<'_, ()>) -> u8 {
+    fn get(&self, cpu: &mut Cpu, _system: &mut GameBoy) -> u8 {
         match self.0 {
             cpu::Register8::A => cpu.af[1],
             cpu::Register8::F => cpu.af[0],
@@ -31,7 +27,7 @@ impl IntOperand<u8> for RegisterOperand8 {
         }
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut Cpu, _co: Co<'_, ()>) {
+    fn set(&self, value: u8, cpu: &mut Cpu, _system: &mut GameBoy) {
         match self.0 {
             cpu::Register8::A => cpu.af[1] = value,
             cpu::Register8::F => cpu.af[0] = value & 0xF0,
@@ -48,11 +44,11 @@ impl IntOperand<u8> for RegisterOperand8 {
 pub struct ImmediateOperand8;
 impl IntOperand<u8> for ImmediateOperand8 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u8 {
-        gen_all!(&co, |co_inner| cpu.step_u8(co_inner))
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+        cpu.step_u8(system)
     }
     #[inline(always)]
-    async fn set(&self, _: u8, _: &mut Cpu, _co: Co<'_, ()>) {
+    fn set(&self, _: u8, _: &mut Cpu, _system: &mut GameBoy) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -60,11 +56,11 @@ impl IntOperand<u8> for ImmediateOperand8 {
 pub struct ImmediateSignedOperand8;
 impl IntOperand<i8> for ImmediateSignedOperand8 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> i8 {
-        gen_all!(&co, |co_inner| cpu.step_u8(co_inner)) as i8
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> i8 {
+        cpu.step_u8(system) as i8
     }
     #[inline(always)]
-    async fn set(&self, _: i8, _: &mut Cpu, _co: Co<'_, ()>) {
+    fn set(&self, _: i8, _: &mut Cpu, _system: &mut GameBoy) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -72,88 +68,88 @@ impl IntOperand<i8> for ImmediateSignedOperand8 {
 pub struct IndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u8 {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.read_u8(address, co_inner))
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+        let address = self.0.get(cpu, system);
+        cpu.read_u8(address, system)
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut Cpu, co: Co<'_, ()>) {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.write_u8(address, value, co_inner));
+    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+        let address = self.0.get(cpu, system);
+        cpu.write_u8(address, value, system);
     }
 }
 pub struct IncIndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u8 {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
-        gen_all!(co, |co_inner| self.0.set(address + 1, cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.read_u8(address, co_inner))
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+        let address = self.0.get(cpu, system);
+        self.0.set(address + 1, cpu, system);
+        cpu.read_u8(address, system)
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut Cpu, co: Co<'_, ()>) {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
-        gen_all!(co, |co_inner| self.0.set(address + 1, cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.write_u8(address, value, co_inner));
+    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+        let address = self.0.get(cpu, system);
+        self.0.set(address + 1, cpu, system);
+        cpu.write_u8(address, value, system);
     }
 }
 pub struct DecIndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u8 {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
-        gen_all!(co, |co_inner| self.0.set(address - 1, cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.read_u8(address, co_inner))
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+        let address = self.0.get(cpu, system);
+        self.0.set(address - 1, cpu, system);
+        cpu.read_u8(address, system)
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut Cpu, co: Co<'_, ()>) {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
-        gen_all!(co, |co_inner| self.0.set(address - 1, cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.write_u8(address, value, co_inner));
+    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+        let address = self.0.get(cpu, system);
+        self.0.set(address - 1, cpu, system);
+        cpu.write_u8(address, value, system);
     }
 }
 
 pub struct HramIndirectOperand<O: IntOperand<u8>>(pub O);
 impl<O: IntOperand<u8>> HramIndirectOperand<O> {
     #[inline(always)]
-    async fn as_hram_address(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u16 {
-        0xFF00 | (gen_all!(co, |co_inner| self.0.get(cpu, co_inner)) as u16)
+    fn as_hram_address(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u16 {
+        0xFF00 | (self.0.get(cpu, system)) as u16
     }
 }
 impl<O: IntOperand<u8>> IntOperand<u8> for HramIndirectOperand<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u8 {
-        let hram_address = gen_all!(co, |co_inner| self.as_hram_address(cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.read_u8(hram_address, co_inner))
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+        let hram_address = self.as_hram_address(cpu, system);
+        cpu.read_u8(hram_address, system)
     }
     #[inline(always)]
-    async fn set(&self, value: u8, cpu: &mut Cpu, co: Co<'_, ()>) {
-        let hram_address = gen_all!(co, |co_inner| self.as_hram_address(cpu, co_inner));
-        gen_all!(&co, |co_inner| cpu.write_u8(hram_address, value, co_inner));
+    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+        let hram_address = self.as_hram_address(cpu, system);
+        cpu.write_u8(hram_address, value, system);
     }
 }
 impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u16 {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u16 {
+        let address = self.0.get(cpu, system);
         u16::from_le_bytes([
-            gen_all!(&co, |co_inner| cpu.read_u8(address, co_inner)),
-            gen_all!(&co, |co_inner| cpu.read_u8(address + 1, co_inner)),
+            cpu.read_u8(address, system),
+            cpu.read_u8(address + 1, system),
         ])
     }
     #[inline(always)]
-    async fn set(&self, value: u16, cpu: &mut Cpu, co: Co<'_, ()>) {
-        let address = gen_all!(co, |co_inner| self.0.get(cpu, co_inner));
+    fn set(&self, value: u16, cpu: &mut Cpu, system: &mut GameBoy) {
+        let address = self.0.get(cpu, system);
         let bytes = u16::to_le_bytes(value);
-        gen_all!(&co, |co_inner| cpu.write_u8(address, bytes[0], co_inner));
-        gen_all!(&co, |co_inner| cpu.write_u8(address + 1, bytes[1], co_inner));
+        cpu.write_u8(address, bytes[0], system);
+        cpu.write_u8(address + 1, bytes[1], system);
     }
 }
 
 pub struct RegisterOperand16(pub cpu::Register16);
 impl IntOperand<u16> for RegisterOperand16 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, _co: Co<'_, ()>) -> u16 {
+    fn get(&self, cpu: &mut Cpu, _system: &mut GameBoy) -> u16 {
         match self.0 {
             cpu::Register16::AF => u16::from_le_bytes(cpu.af),
             cpu::Register16::BC => u16::from_le_bytes(cpu.bc),
@@ -164,7 +160,7 @@ impl IntOperand<u16> for RegisterOperand16 {
         }
     }
     #[inline(always)]
-    async fn set(&self, value: u16, cpu: &mut Cpu, _co: Co<'_, ()>) {
+    fn set(&self, value: u16, cpu: &mut Cpu, _system: &mut GameBoy) {
         match self.0 {
             cpu::Register16::AF => cpu.af = u16::to_le_bytes(value & 0xFFF0),
             cpu::Register16::BC => cpu.bc = u16::to_le_bytes(value),
@@ -179,11 +175,11 @@ impl IntOperand<u16> for RegisterOperand16 {
 pub struct ImmediateOperand16;
 impl IntOperand<u16> for ImmediateOperand16 {
     #[inline(always)]
-    async fn get(&self, cpu: &mut Cpu, co: Co<'_, ()>) -> u16 {
-        u16::from_le_bytes([gen_all!(&co, |co_inner| cpu.step_u8(co_inner)), gen_all!(&co, |co_inner| cpu.step_u8(co_inner))])
+    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u16 {
+        u16::from_le_bytes([cpu.step_u8(system), cpu.step_u8(system)])
     }
     #[inline(always)]
-    async fn set(&self, _: u16, _: &mut Cpu, _co: Co<'_, ()>) {
+    fn set(&self, _: u16, _: &mut Cpu, _system: &mut GameBoy) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -191,11 +187,11 @@ impl IntOperand<u16> for ImmediateOperand16 {
 pub struct ConstOperand16(pub u16);
 impl IntOperand<u16> for ConstOperand16 {
     #[inline(always)]
-    async fn get(&self, _: &mut Cpu, _co: Co<'_, ()>) -> u16 {
+    fn get(&self, _: &mut Cpu, _system: &mut GameBoy) -> u16 {
         self.0
     }
     #[inline(always)]
-    async fn set(&self, _: u16, _: &mut Cpu, _co: Co<'_, ()>) {
+    fn set(&self, _: u16, _: &mut Cpu, _system: &mut GameBoy) {
         panic!("Cannot write to constant operand")
     }
 }
@@ -221,2165 +217,2067 @@ impl CondOperand {
 }
 
 
-pub type OpcodeFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
-pub type OpcodeFn = &'static (dyn for<'a> Fn(&'a mut Cpu, Co<'a, ()>) -> OpcodeFuture<'a> + Sync);
-pub type LocalOpcodeFn<'a> = Box<dyn FnOnce(&'a mut Cpu, Co<'a, ()>) -> OpcodeFuture<'a>>;
+pub type OpcodeFn = fn(&mut Cpu, &mut GameBoy);
 
 impl Cpu {
     pub(super) const OP_TABLE: [OpcodeFn; 0x100] = Self::generate_op();
     pub(super) const CB_TABLE: [OpcodeFn; 0x100] = Self::generate_cb();
-    const INVALID: OpcodeFn = &|_, _| async move {panic!("Unknown opcode")}.boxed_local();
+    const INVALID: OpcodeFn = |_, _| {panic!("Unknown opcode")};
 
     const fn generate_op() -> [OpcodeFn; 0x100] {
         let mut op_table = [Self::INVALID; 0x100];
-        op_table[0x00] = &|cpu, co| async move { 
+        op_table[0x00] = |cpu, system| { 
             // NOP
-        }.boxed_local();
-        op_table[0x01] = &|cpu, co| async move {
+        };
+        op_table[0x01] = |cpu, system| {
             // LD BC, nn
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand16(cpu::Register16::BC), ImmediateOperand16));
-        }.boxed_local();
-        op_table[0x02] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand16(cpu::Register16::BC), ImmediateOperand16);
+        };
+        op_table[0x02] = |cpu, system| {
             // LD (BC), A
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::BC)),
-                RegisterOperand8(cpu::Register8::A)
-            ));
-        }.boxed_local();
-        op_table[0x03] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::BC)), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x03] = |cpu, system| {
             // INC BC
-            gen_all!(co, |co_inner| cpu.inc16(co_inner, RegisterOperand16(cpu::Register16::BC)));
-        }.boxed_local();
-        op_table[0x04] = &|cpu, co| async move {
+            cpu.inc16(system, RegisterOperand16(cpu::Register16::BC));
+        };
+        op_table[0x04] = |cpu, system| {
             // INC B
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x05] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x05] = |cpu, system| {
             // DEC B
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x06] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x06] = |cpu, system| {
             // LD B, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x07] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), ImmediateOperand8);
+        };
+        op_table[0x07] = |cpu, system| {
             // RLCA
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::A), false));
-        }.boxed_local();
-        op_table[0x08] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::A), false);
+        };
+        op_table[0x08] = |cpu, system| {
             // LD (nn), SP
-            gen_all!(co, |co_inner| cpu.ld(co_inner, IndirectOperand8(ImmediateOperand16), RegisterOperand16(cpu::Register16::SP)));
-        }.boxed_local();
-        op_table[0x09] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(ImmediateOperand16), RegisterOperand16(cpu::Register16::SP));
+        };
+        op_table[0x09] = |cpu, system| {
             // ADD HL, BC
-            gen_all!(co, |co_inner| cpu.add_hl(co_inner, RegisterOperand16(cpu::Register16::BC)));
-        }.boxed_local();
-        op_table[0x0A] = &|cpu, co| async move {
+            cpu.add_hl(system, RegisterOperand16(cpu::Register16::BC));
+        };
+        op_table[0x0A] = |cpu, system| {
             // LD A, (BC)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::A),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::BC))
-            ));
-        }.boxed_local();
-        op_table[0x0B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), IndirectOperand8(RegisterOperand16(cpu::Register16::BC)));
+        };
+        op_table[0x0B] = |cpu, system| {
             // DEC BC
-            gen_all!(co, |co_inner| cpu.dec16(co_inner, RegisterOperand16(cpu::Register16::BC)));
-        }.boxed_local();
-        op_table[0x0C] = &|cpu, co| async move {
+            cpu.dec16(system, RegisterOperand16(cpu::Register16::BC));
+        };
+        op_table[0x0C] = |cpu, system| {
             // INC C
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x0D] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x0D] = |cpu, system| {
             // DEC C
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x0E] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x0E] = |cpu, system| {
             // LD C, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x0F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), ImmediateOperand8);
+        };
+        op_table[0x0F] = |cpu, system| {
             // RRCA
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::A), false));
-        }.boxed_local();
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::A), false);
+        };
 
-        op_table[0x10] = &|cpu, co| async move {
+        op_table[0x10] = |cpu, system| {
             // STOP
-            gen_all!(co, |co_inner| cpu.stop(co_inner));
-        }.boxed_local();
-        op_table[0x11] = &|cpu, co| async move {
+            cpu.stop(system);
+        };
+        op_table[0x11] = |cpu, system| {
             // LD DE, nn
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand16(cpu::Register16::DE), ImmediateOperand16));
-        }.boxed_local();
-        op_table[0x12] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand16(cpu::Register16::DE), ImmediateOperand16);
+        };
+        op_table[0x12] = |cpu, system| {
             // LD (DE), A
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::DE)),
-                RegisterOperand8(cpu::Register8::A)
-            ));
-        }.boxed_local();
-        op_table[0x13] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::DE)), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x13] = |cpu, system| {
             // INC DE
-            gen_all!(co, |co_inner| cpu.inc16(co_inner, RegisterOperand16(cpu::Register16::DE)));
-        }.boxed_local();
-        op_table[0x14] = &|cpu, co| async move {
+            cpu.inc16(system, RegisterOperand16(cpu::Register16::DE));
+        };
+        op_table[0x14] = |cpu, system| {
             // INC D
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x15] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x15] = |cpu, system| {
             // DEC D
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x16] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x16] = |cpu, system| {
             // LD D, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x17] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), ImmediateOperand8);
+        };
+        op_table[0x17] = |cpu, system| {
             // RLA
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::A), false));
-        }.boxed_local();
-        op_table[0x18] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::A), false);
+        };
+        op_table[0x18] = |cpu, system| {
             // JR e
-            gen_all!(co, |co_inner| cpu.jr(co_inner, CondOperand::Unconditional, ImmediateSignedOperand8));
-        }.boxed_local();
-        op_table[0x19] = &|cpu, co| async move {
+            cpu.jr(system, CondOperand::Unconditional, ImmediateSignedOperand8);
+        };
+        op_table[0x19] = |cpu, system| {
             // ADD HL, DE
-            gen_all!(co, |co_inner| cpu.add_hl(co_inner, RegisterOperand16(cpu::Register16::DE)));
-        }.boxed_local();
-        op_table[0x1A] = &|cpu, co| async move {
+            cpu.add_hl(system, RegisterOperand16(cpu::Register16::DE));
+        };
+        op_table[0x1A] = |cpu, system| {
             // LD A, (DE)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::A),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::DE))
-            ));
-        }.boxed_local();
-        op_table[0x1B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), IndirectOperand8(RegisterOperand16(cpu::Register16::DE)));
+        };
+        op_table[0x1B] = |cpu, system| {
             // DEC DE
-            gen_all!(co, |co_inner| cpu.dec16(co_inner, RegisterOperand16(cpu::Register16::DE)));
-        }.boxed_local();
-        op_table[0x1C] = &|cpu, co| async move {
+            cpu.dec16(system, RegisterOperand16(cpu::Register16::DE));
+        };
+        op_table[0x1C] = |cpu, system| {
             // INC E
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x1D] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x1D] = |cpu, system| {
             // DEC E
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x1E] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x1E] = |cpu, system| {
             // LD E, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x1F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), ImmediateOperand8);
+        };
+        op_table[0x1F] = |cpu, system| {
             // RRA
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::A), false));
-        }.boxed_local();
+            cpu.rr(system, RegisterOperand8(cpu::Register8::A), false);
+        };
 
-        op_table[0x20] = &|cpu, co| async move {
+        op_table[0x20] = |cpu, system| {
             // JR NZ, e
-            gen_all!(co, |co_inner| cpu.jr(co_inner, CondOperand::NZ, ImmediateSignedOperand8));
-        }.boxed_local();
-        op_table[0x21] = &|cpu, co| async move {
+            cpu.jr(system, CondOperand::NZ, ImmediateSignedOperand8);
+        };
+        op_table[0x21] = |cpu, system| {
             // LD HL, nn
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand16(cpu::Register16::HL), ImmediateOperand16));
-        }.boxed_local();
-        op_table[0x22] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand16(cpu::Register16::HL), ImmediateOperand16);
+        };
+        op_table[0x22] = |cpu, system| {
             // LD (HL+), A
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IncIndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::A)
-            ));
-        }.boxed_local();
-        op_table[0x23] = &|cpu, co| async move {
+            cpu.ld(system, IncIndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x23] = |cpu, system| {
             // INC HL
-            gen_all!(co, |co_inner| cpu.inc16(co_inner, RegisterOperand16(cpu::Register16::HL)));
-        }.boxed_local();
-        op_table[0x24] = &|cpu, co| async move {
+            cpu.inc16(system, RegisterOperand16(cpu::Register16::HL));
+        };
+        op_table[0x24] = |cpu, system| {
             // INC H
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x25] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x25] = |cpu, system| {
             // DEC H
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x26] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x26] = |cpu, system| {
             // LD H, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x27] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), ImmediateOperand8);
+        };
+        op_table[0x27] = |cpu, system| {
             // DAA
-            gen_all!(co, |co_inner| cpu.daa(co_inner));
-        }.boxed_local();
-        op_table[0x28] = &|cpu, co| async move {
+            cpu.daa(system);
+        };
+        op_table[0x28] = |cpu, system| {
             // JR Z, e
-            gen_all!(co, |co_inner| cpu.jr(co_inner, CondOperand::Z, ImmediateSignedOperand8));
-        }.boxed_local();
-        op_table[0x29] = &|cpu, co| async move {
+            cpu.jr(system, CondOperand::Z, ImmediateSignedOperand8);
+        };
+        op_table[0x29] = |cpu, system| {
             // ADD HL, HL
-            gen_all!(co, |co_inner| cpu.add_hl(co_inner, RegisterOperand16(cpu::Register16::HL)));
-        }.boxed_local();
-        op_table[0x2A] = &|cpu, co| async move {
+            cpu.add_hl(system, RegisterOperand16(cpu::Register16::HL));
+        };
+        op_table[0x2A] = |cpu, system| {
             // LD A, (HL+)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::A),
-                IncIndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x2B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), IncIndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x2B] = |cpu, system| {
             // DEC HL
-            gen_all!(co, |co_inner| cpu.dec16(co_inner, RegisterOperand16(cpu::Register16::HL)));
-        }.boxed_local();
-        op_table[0x2C] = &|cpu, co| async move {
+            cpu.dec16(system, RegisterOperand16(cpu::Register16::HL));
+        };
+        op_table[0x2C] = |cpu, system| {
             // INC L
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x2D] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x2D] = |cpu, system| {
             // DEC L
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x2E] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x2E] = |cpu, system| {
             // LD L, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x2F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), ImmediateOperand8);
+        };
+        op_table[0x2F] = |cpu, system| {
             // CPL
-            gen_all!(co, |co_inner| cpu.cpl(co_inner));
-        }.boxed_local();
+            cpu.cpl(system);
+        };
 
-        op_table[0x30] = &|cpu, co| async move {
+        op_table[0x30] = |cpu, system| {
             // JR NC, e
-            gen_all!(co, |co_inner| cpu.jr(co_inner, CondOperand::NC, ImmediateSignedOperand8));
-        }.boxed_local();
-        op_table[0x31] = &|cpu, co| async move {
+            cpu.jr(system, CondOperand::NC, ImmediateSignedOperand8);
+        };
+        op_table[0x31] = |cpu, system| {
             // LD SP, nn
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand16(cpu::Register16::SP), ImmediateOperand16));
-        }.boxed_local();
-        op_table[0x32] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand16(cpu::Register16::SP), ImmediateOperand16);
+        };
+        op_table[0x32] = |cpu, system| {
             // LD (HL-), A
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                DecIndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::A)
-            ));
-        }.boxed_local();
-        op_table[0x33] = &|cpu, co| async move {
+            cpu.ld(system, DecIndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x33] = |cpu, system| {
             // INC SP
-            gen_all!(co, |co_inner| cpu.inc16(co_inner, RegisterOperand16(cpu::Register16::SP)));
-        }.boxed_local();
-        op_table[0x34] = &|cpu, co| async move {
+            cpu.inc16(system, RegisterOperand16(cpu::Register16::SP));
+        };
+        op_table[0x34] = |cpu, system| {
             // INC (HL)
-            gen_all!(co, |co_inner| cpu.inc(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x35] = &|cpu, co| async move {
+            cpu.inc(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x35] = |cpu, system| {
             // DEC (HL)
-            gen_all!(co, |co_inner| cpu.dec(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x36] = &|cpu, co| async move {
+            cpu.dec(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x36] = |cpu, system| {
             // LD (HL), n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x37] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), ImmediateOperand8);
+        };
+        op_table[0x37] = |cpu, system| {
             // SCF
-            gen_all!(co, |co_inner| cpu.scf(co_inner));
-        }.boxed_local();
-        op_table[0x38] = &|cpu, co| async move {
+            cpu.scf(system);
+        };
+        op_table[0x38] = |cpu, system| {
             // JR C, e
-            gen_all!(co, |co_inner| cpu.jr(co_inner, CondOperand::C, ImmediateSignedOperand8));
-        }.boxed_local();
-        op_table[0x39] = &|cpu, co| async move {
+            cpu.jr(system, CondOperand::C, ImmediateSignedOperand8);
+        };
+        op_table[0x39] = |cpu, system| {
             // ADD HL, SP
-            gen_all!(co, |co_inner| cpu.add_hl(co_inner, RegisterOperand16(cpu::Register16::SP)));
-        }.boxed_local();
-        op_table[0x3A] = &|cpu, co| async move {
+            cpu.add_hl(system, RegisterOperand16(cpu::Register16::SP));
+        };
+        op_table[0x3A] = |cpu, system| {
             // LD A, (HL-)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::A),
-                DecIndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x3B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), DecIndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x3B] = |cpu, system| {
             // DEC SP
-            gen_all!(co, |co_inner| cpu.dec16(co_inner, RegisterOperand16(cpu::Register16::SP)));
-        }.boxed_local();
-        op_table[0x3C] = &|cpu, co| async move {
+            cpu.dec16(system, RegisterOperand16(cpu::Register16::SP));
+        };
+        op_table[0x3C] = |cpu, system| {
             // INC A
-            gen_all!(co, |co_inner| cpu.inc(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x3D] = &|cpu, co| async move {
+            cpu.inc(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x3D] = |cpu, system| {
             // DEC A
-            gen_all!(co, |co_inner| cpu.dec(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x3E] = &|cpu, co| async move {
+            cpu.dec(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x3E] = |cpu, system| {
             // LD A, n
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), ImmediateOperand8));
-        }.boxed_local();
-        op_table[0x3F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), ImmediateOperand8);
+        };
+        op_table[0x3F] = |cpu, system| {
             // CCF
-            gen_all!(co, |co_inner| cpu.ccf(co_inner));
-        }.boxed_local();
+            cpu.ccf(system);
+        };
 
-        op_table[0x40] = &|cpu, co| async move {
+        op_table[0x40] = |cpu, system| {
             // LD B, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x41] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x41] = |cpu, system| {
             // LD B, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x42] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x42] = |cpu, system| {
             // LD B, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x43] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x43] = |cpu, system| {
             // LD B, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x44] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x44] = |cpu, system| {
             // LD B, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x45] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x45] = |cpu, system| {
             // LD B, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x46] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x46] = |cpu, system| {
             // LD B, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::B),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x47] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x47] = |cpu, system| {
             // LD B, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x48] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::B), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x48] = |cpu, system| {
             // LD C, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x49] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x49] = |cpu, system| {
             // LD C, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x4A] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x4A] = |cpu, system| {
             // LD C, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x4B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x4B] = |cpu, system| {
             // LD C, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x4C] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x4C] = |cpu, system| {
             // LD C, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x4D] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x4D] = |cpu, system| {
             // LD C, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x4E] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x4E] = |cpu, system| {
             // LD C, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::C),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x4F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x4F] = |cpu, system| {
             // LD C, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.ld(system, RegisterOperand8(cpu::Register8::C), RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x50] = &|cpu, co| async move {
+        op_table[0x50] = |cpu, system| {
             // LD D, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x51] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x51] = |cpu, system| {
             // LD D, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x52] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x52] = |cpu, system| {
             // LD D, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x53] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x53] = |cpu, system| {
             // LD D, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x54] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x54] = |cpu, system| {
             // LD D, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x55] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x55] = |cpu, system| {
             // LD D, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x56] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x56] = |cpu, system| {
             // LD D, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::D),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x57] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x57] = |cpu, system| {
             // LD D, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x58] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::D), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x58] = |cpu, system| {
             // LD E, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x59] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x59] = |cpu, system| {
             // LD E, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x5A] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x5A] = |cpu, system| {
             // LD E, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x5B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x5B] = |cpu, system| {
             // LD E, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x5C] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x5C] = |cpu, system| {
             // LD E, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x5D] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x5D] = |cpu, system| {
             // LD E, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x5E] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x5E] = |cpu, system| {
             // LD E, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::E),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x5F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x5F] = |cpu, system| {
             // LD E, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.ld(system, RegisterOperand8(cpu::Register8::E), RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x60] = &|cpu, co| async move {
+        op_table[0x60] = |cpu, system| {
             // LD H, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x61] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x61] = |cpu, system| {
             // LD H, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x62] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x62] = |cpu, system| {
             // LD H, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x63] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x63] = |cpu, system| {
             // LD H, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x64] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x64] = |cpu, system| {
             // LD H, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x65] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x65] = |cpu, system| {
             // LD H, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x66] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x66] = |cpu, system| {
             // LD H, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::H),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x67] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x67] = |cpu, system| {
             // LD H, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x68] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::H), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x68] = |cpu, system| {
             // LD L, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x69] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x69] = |cpu, system| {
             // LD L, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x6A] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x6A] = |cpu, system| {
             // LD L, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x6B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x6B] = |cpu, system| {
             // LD L, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x6C] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x6C] = |cpu, system| {
             // LD L, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x6D] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x6D] = |cpu, system| {
             // LD L, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x6E] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x6E] = |cpu, system| {
             // LD L, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::L),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x6F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x6F] = |cpu, system| {
             // LD L, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.ld(system, RegisterOperand8(cpu::Register8::L), RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x70] = &|cpu, co| async move {
+        op_table[0x70] = |cpu, system| {
             // LD (HL), B
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::B)
-            ));
-        }.boxed_local();
-        op_table[0x71] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x71] = |cpu, system| {
             // LD (HL), C
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::C)
-            ));
-        }.boxed_local();
-        op_table[0x72] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x72] = |cpu, system| {
             // LD (HL), D
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::D)
-            ));
-        }.boxed_local();
-        op_table[0x73] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x73] = |cpu, system| {
             // LD (HL), E
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::E)
-            ));
-        }.boxed_local();
-        op_table[0x74] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x74] = |cpu, system| {
             // LD (HL), H
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::H)
-            ));
-        }.boxed_local();
-        op_table[0x75] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x75] = |cpu, system| {
             // LD (HL), L
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::L)
-            ));
-        }.boxed_local();
-        op_table[0x76] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x76] = |cpu, system| {
             // HALT
-            gen_all!(co, |co_inner| cpu.halt(co_inner));
-        }.boxed_local();
-        op_table[0x77] = &|cpu, co| async move {
+            cpu.halt(system);
+        };
+        op_table[0x77] = |cpu, system| {
             // LD (HL), A
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL)),
-                RegisterOperand8(cpu::Register8::A)
-            ));
-        }.boxed_local();
-        op_table[0x78] = &|cpu, co| async move {
+            cpu.ld(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x78] = |cpu, system| {
             // LD A, B
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x79] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x79] = |cpu, system| {
             // LD A, C
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x7A] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x7A] = |cpu, system| {
             // LD A, D
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x7B] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x7B] = |cpu, system| {
             // LD A, E
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x7C] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x7C] = |cpu, system| {
             // LD A, H
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x7D] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x7D] = |cpu, system| {
             // LD A, L
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x7E] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x7E] = |cpu, system| {
             // LD A, (HL)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::A),
-                IndirectOperand8(RegisterOperand16(cpu::Register16::HL))
-            ));
-        }.boxed_local();
-        op_table[0x7F] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x7F] = |cpu, system| {
             // LD A, A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x80] = &|cpu, co| async move {
+        op_table[0x80] = |cpu, system| {
             // ADD B
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x81] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x81] = |cpu, system| {
             // ADD C
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x82] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x82] = |cpu, system| {
             // ADD D
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x83] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x83] = |cpu, system| {
             // ADD E
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x84] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x84] = |cpu, system| {
             // ADD H
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x85] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x85] = |cpu, system| {
             // ADD L
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x86] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x86] = |cpu, system| {
             // ADD (HL)
-            gen_all!(co, |co_inner| cpu.add(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x87] = &|cpu, co| async move {
+            cpu.add(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x87] = |cpu, system| {
             // ADD A
-            gen_all!(co, |co_inner| cpu.add(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x88] = &|cpu, co| async move {
+            cpu.add(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x88] = |cpu, system| {
             // ADC B
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x89] = &|cpu, co| async move {
+            cpu.adc(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x89] = |cpu, system| {
             // ADC C
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x8A] = &|cpu, co| async move {
+            cpu.adc(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x8A] = |cpu, system| {
             // ADC D
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x8B] = &|cpu, co| async move {
+            cpu.adc(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x8B] = |cpu, system| {
             // ADC E
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x8C] = &|cpu, co| async move {
+            cpu.adc(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x8C] = |cpu, system| {
             // ADC H
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x8D] = &|cpu, co| async move {
+            cpu.adc(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x8D] = |cpu, system| {
             // ADC L
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x8E] = &|cpu, co| async move {
+            cpu.adc(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x8E] = |cpu, system| {
             // ADC (HL)
-            gen_all!(co, |co_inner| cpu.adc(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x8F] = &|cpu, co| async move {
+            cpu.adc(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x8F] = |cpu, system| {
             // ADC A
-            gen_all!(co, |co_inner| cpu.adc(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.adc(system, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x90] = &|cpu, co| async move {
+        op_table[0x90] = |cpu, system| {
             // SUB B
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x91] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x91] = |cpu, system| {
             // SUB C
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x92] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x92] = |cpu, system| {
             // SUB D
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x93] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x93] = |cpu, system| {
             // SUB E
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x94] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x94] = |cpu, system| {
             // SUB H
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x95] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x95] = |cpu, system| {
             // SUB L
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x96] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x96] = |cpu, system| {
             // SUB (HL)
-            gen_all!(co, |co_inner| cpu.sub(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x97] = &|cpu, co| async move {
+            cpu.sub(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x97] = |cpu, system| {
             // SUB A
-            gen_all!(co, |co_inner| cpu.sub(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x98] = &|cpu, co| async move {
+            cpu.sub(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x98] = |cpu, system| {
             // SBC B
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x99] = &|cpu, co| async move {
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x99] = |cpu, system| {
             // SBC C
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x9A] = &|cpu, co| async move {
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x9A] = |cpu, system| {
             // SBC D
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x9B] = &|cpu, co| async move {
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x9B] = |cpu, system| {
             // SBC E
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x9C] = &|cpu, co| async move {
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x9C] = |cpu, system| {
             // SBC H
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x9D] = &|cpu, co| async move {
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x9D] = |cpu, system| {
             // SBC L
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x9E] = &|cpu, co| async move {
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x9E] = |cpu, system| {
             // SBC (HL)
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x9F] = &|cpu, co| async move {
+            cpu.sbc(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x9F] = |cpu, system| {
             // SBC A
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.sbc(system, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xA0] = &|cpu, co| async move {
+        op_table[0xA0] = |cpu, system| {
             // AND B
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xA1] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xA1] = |cpu, system| {
             // AND C
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xA2] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xA2] = |cpu, system| {
             // AND D
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xA3] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xA3] = |cpu, system| {
             // AND E
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xA4] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xA4] = |cpu, system| {
             // AND H
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xA5] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xA5] = |cpu, system| {
             // AND L
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xA6] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xA6] = |cpu, system| {
             // AND (HL)
-            gen_all!(co, |co_inner| cpu.and(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xA7] = &|cpu, co| async move {
+            cpu.and(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xA7] = |cpu, system| {
             // AND A
-            gen_all!(co, |co_inner| cpu.and(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xA8] = &|cpu, co| async move {
+            cpu.and(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xA8] = |cpu, system| {
             // XOR B
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xA9] = &|cpu, co| async move {
+            cpu.xor(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xA9] = |cpu, system| {
             // XOR C
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xAA] = &|cpu, co| async move {
+            cpu.xor(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xAA] = |cpu, system| {
             // XOR D
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xAB] = &|cpu, co| async move {
+            cpu.xor(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xAB] = |cpu, system| {
             // XOR E
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xAC] = &|cpu, co| async move {
+            cpu.xor(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xAC] = |cpu, system| {
             // XOR H
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xAD] = &|cpu, co| async move {
+            cpu.xor(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xAD] = |cpu, system| {
             // XOR L
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xAE] = &|cpu, co| async move {
+            cpu.xor(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xAE] = |cpu, system| {
             // XOR (HL)
-            gen_all!(co, |co_inner| cpu.xor(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xAF] = &|cpu, co| async move {
+            cpu.xor(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xAF] = |cpu, system| {
             // XOR A
-            gen_all!(co, |co_inner| cpu.xor(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.xor(system, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xB0] = &|cpu, co| async move {
+        op_table[0xB0] = |cpu, system| {
             // OR B
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xB1] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xB1] = |cpu, system| {
             // OR C
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xB2] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xB2] = |cpu, system| {
             // OR D
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xB3] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xB3] = |cpu, system| {
             // OR E
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xB4] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xB4] = |cpu, system| {
             // OR H
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xB5] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xB5] = |cpu, system| {
             // OR L
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xB6] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xB6] = |cpu, system| {
             // OR (HL)
-            gen_all!(co, |co_inner| cpu.or(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xB7] = &|cpu, co| async move {
+            cpu.or(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xB7] = |cpu, system| {
             // OR A
-            gen_all!(co, |co_inner| cpu.or(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xB8] = &|cpu, co| async move {
+            cpu.or(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xB8] = |cpu, system| {
             // CP B
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xB9] = &|cpu, co| async move {
+            cpu.cp(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xB9] = |cpu, system| {
             // CP C
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xBA] = &|cpu, co| async move {
+            cpu.cp(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xBA] = |cpu, system| {
             // CP D
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xBB] = &|cpu, co| async move {
+            cpu.cp(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xBB] = |cpu, system| {
             // CP E
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xBC] = &|cpu, co| async move {
+            cpu.cp(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xBC] = |cpu, system| {
             // CP H
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xBD] = &|cpu, co| async move {
+            cpu.cp(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xBD] = |cpu, system| {
             // CP L
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xBE] = &|cpu, co| async move {
+            cpu.cp(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xBE] = |cpu, system| {
             // CP (HL)
-            gen_all!(co, |co_inner| cpu.cp(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xBF] = &|cpu, co| async move {
+            cpu.cp(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xBF] = |cpu, system| {
             // CP A
-            gen_all!(co, |co_inner| cpu.cp(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.cp(system, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xC0] = &|cpu, co| async move {
+        op_table[0xC0] = |cpu, system| {
             // RET NZ
-            gen_all!(co, |co_inner| cpu.ret(co_inner, CondOperand::NZ));
-        }.boxed_local();
-        op_table[0xC1] = &|cpu, co| async move {
+            cpu.ret(system, CondOperand::NZ);
+        };
+        op_table[0xC1] = |cpu, system| {
             // POP BC
-            gen_all!(co, |co_inner| cpu.pop(co_inner, RegisterOperand16(cpu::Register16::BC)));
-        }.boxed_local();
-        op_table[0xC2] = &|cpu, co| async move {
+            cpu.pop(system, RegisterOperand16(cpu::Register16::BC));
+        };
+        op_table[0xC2] = |cpu, system| {
             // JP NZ, nn
-            gen_all!(co, |co_inner| cpu.jp(co_inner, CondOperand::NZ, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xC3] = &|cpu, co| async move {
+            cpu.jp(system, CondOperand::NZ, ImmediateOperand16);
+        };
+        op_table[0xC3] = |cpu, system| {
             // JP nn
-            gen_all!(co, |co_inner| cpu.jp(co_inner, CondOperand::Unconditional, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xC4] = &|cpu, co| async move {
+            cpu.jp(system, CondOperand::Unconditional, ImmediateOperand16);
+        };
+        op_table[0xC4] = |cpu, system| {
             // CALL NZ, nn
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::NZ, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xC5] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::NZ, ImmediateOperand16);
+        };
+        op_table[0xC5] = |cpu, system| {
             // PUSH BC
-            gen_all!(co, |co_inner| cpu.push(co_inner, RegisterOperand16(cpu::Register16::BC)));
-        }.boxed_local();
-        op_table[0xC6] = &|cpu, co| async move {
+            cpu.push(system, RegisterOperand16(cpu::Register16::BC));
+        };
+        op_table[0xC6] = |cpu, system| {
             // ADD n
-            gen_all!(co, |co_inner| cpu.add(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xC7] = &|cpu, co| async move {
+            cpu.add(system, ImmediateOperand8);
+        };
+        op_table[0xC7] = |cpu, system| {
             // RST 0x00
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0000)));
-        }.boxed_local();
-        op_table[0xC8] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0000));
+        };
+        op_table[0xC8] = |cpu, system| {
             // RET Z
-            gen_all!(co, |co_inner| cpu.ret(co_inner, CondOperand::Z));
-        }.boxed_local();
-        op_table[0xC9] = &|cpu, co| async move {
+            cpu.ret(system, CondOperand::Z);
+        };
+        op_table[0xC9] = |cpu, system| {
             // RET
-            gen_all!(co, |co_inner| cpu.ret(co_inner, CondOperand::Unconditional));
-        }.boxed_local();
-        op_table[0xCA] = &|cpu, co| async move {
+            cpu.ret(system, CondOperand::Unconditional);
+        };
+        op_table[0xCA] = |cpu, system| {
             // JP Z, nn
-            gen_all!(co, |co_inner| cpu.jp(co_inner, CondOperand::Z, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xCB] = &|cpu, co| async move {
+            cpu.jp(system, CondOperand::Z, ImmediateOperand16);
+        };
+        op_table[0xCB] = |cpu, system| {
             // CB op
-            cpu.ir = gen_all!(&co, |co_inner| cpu.step_u8(co_inner));
-            gen_all!(co, |co_inner| Self::CB_TABLE[cpu.ir as usize](cpu, co_inner));
-        }.boxed_local();
-        op_table[0xCC] = &|cpu, co| async move {
+            cpu.ir = cpu.step_u8(system);
+            Self::CB_TABLE[cpu.ir as usize](cpu, system);
+        };
+        op_table[0xCC] = |cpu, system| {
             // CALL Z, nn
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Z, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xCD] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::Z, ImmediateOperand16);
+        };
+        op_table[0xCD] = |cpu, system| {
             // CALL nn
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xCE] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::Unconditional, ImmediateOperand16);
+        };
+        op_table[0xCE] = |cpu, system| {
             // ADC n
-            gen_all!(co, |co_inner| cpu.adc(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xCF] = &|cpu, co| async move {
+            cpu.adc(system, ImmediateOperand8);
+        };
+        op_table[0xCF] = |cpu, system| {
             // RST 0x08
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0008)));
-        }.boxed_local();
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0008));
+        };
 
-        op_table[0xD0] = &|cpu, co| async move {
+        op_table[0xD0] = |cpu, system| {
             // RET NC
-            gen_all!(co, |co_inner| cpu.ret(co_inner, CondOperand::NC));
-        }.boxed_local();
-        op_table[0xD1] = &|cpu, co| async move {
+            cpu.ret(system, CondOperand::NC);
+        };
+        op_table[0xD1] = |cpu, system| {
             // POP DE
-            gen_all!(co, |co_inner| cpu.pop(co_inner, RegisterOperand16(cpu::Register16::DE)));
-        }.boxed_local();
-        op_table[0xD2] = &|cpu, co| async move {
+            cpu.pop(system, RegisterOperand16(cpu::Register16::DE));
+        };
+        op_table[0xD2] = |cpu, system| {
             // JP NC, nn
-            gen_all!(co, |co_inner| cpu.jp(co_inner, CondOperand::NC, ImmediateOperand16));
-        }.boxed_local();
+            cpu.jp(system, CondOperand::NC, ImmediateOperand16);
+        };
         // 0xD3 (invalid)
-        op_table[0xD4] = &|cpu, co| async move {
+        op_table[0xD4] = |cpu, system| {
             // CALL NC, nn
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::NC, ImmediateOperand16));
-        }.boxed_local();
-        op_table[0xD5] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::NC, ImmediateOperand16);
+        };
+        op_table[0xD5] = |cpu, system| {
             // PUSH DE
-            gen_all!(co, |co_inner| cpu.push(co_inner, RegisterOperand16(cpu::Register16::DE)));
-        }.boxed_local();
-        op_table[0xD6] = &|cpu, co| async move {
+            cpu.push(system, RegisterOperand16(cpu::Register16::DE));
+        };
+        op_table[0xD6] = |cpu, system| {
             // SUB n
-            gen_all!(co, |co_inner| cpu.sub(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xD7] = &|cpu, co| async move {
+            cpu.sub(system, ImmediateOperand8);
+        };
+        op_table[0xD7] = |cpu, system| {
             // RST 0x10
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0010)));
-        }.boxed_local();
-        op_table[0xD8] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0010));
+        };
+        op_table[0xD8] = |cpu, system| {
             // RET C
-            gen_all!(co, |co_inner| cpu.ret(co_inner, CondOperand::C));
-        }.boxed_local();
-        op_table[0xD9] = &|cpu, co| async move {
+            cpu.ret(system, CondOperand::C);
+        };
+        op_table[0xD9] = |cpu, system| {
             // RETI
-            gen_all!(co, |co_inner| cpu.reti(co_inner));
-        }.boxed_local();
-        op_table[0xDA] = &|cpu, co| async move {
+            cpu.reti(system);
+        };
+        op_table[0xDA] = |cpu, system| {
             // JP C, nn
-            gen_all!(co, |co_inner| cpu.jp(co_inner, CondOperand::C, ImmediateOperand16));
-        }.boxed_local();
+            cpu.jp(system, CondOperand::C, ImmediateOperand16);
+        };
         // 0xDB (invalid)
-        op_table[0xDC] = &|cpu, co| async move {
+        op_table[0xDC] = |cpu, system| {
             // CALL C, nn
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::C, ImmediateOperand16));
-        }.boxed_local();
+            cpu.call(system, CondOperand::C, ImmediateOperand16);
+        };
         // 0xDD (invalid)
-        op_table[0xDE] = &|cpu, co| async move {
+        op_table[0xDE] = |cpu, system| {
             // SBC n
-            gen_all!(co, |co_inner| cpu.sbc(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xDF] = &|cpu, co| async move {
+            cpu.sbc(system, ImmediateOperand8);
+        };
+        op_table[0xDF] = |cpu, system| {
             // RST 0x18
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0018)));
-        }.boxed_local();
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0018));
+        };
 
-        op_table[0xE0] = &|cpu, co| async move {
+        op_table[0xE0] = |cpu, system| {
             // LDH (n), A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, HramIndirectOperand(ImmediateOperand8), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xE1] = &|cpu, co| async move {
+            cpu.ld(system, HramIndirectOperand(ImmediateOperand8), RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xE1] = |cpu, system| {
             // POP HL
-            gen_all!(co, |co_inner| cpu.pop(co_inner, RegisterOperand16(cpu::Register16::HL)));
-        }.boxed_local();
-        op_table[0xE2] = &|cpu, co| async move {
+            cpu.pop(system, RegisterOperand16(cpu::Register16::HL));
+        };
+        op_table[0xE2] = |cpu, system| {
             // LDH (C), A
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                HramIndirectOperand(RegisterOperand8(cpu::Register8::C)),
-                RegisterOperand8(cpu::Register8::A)
-            ));
-        }.boxed_local();
+            cpu.ld(system, HramIndirectOperand(RegisterOperand8(cpu::Register8::C)), RegisterOperand8(cpu::Register8::A));
+        };
         // 0xE3 (invalid)
         // 0xE4 (invalid)
-        op_table[0xE5] = &|cpu, co| async move {
+        op_table[0xE5] = |cpu, system| {
             // PUSH HL
-            gen_all!(co, |co_inner| cpu.push(co_inner, RegisterOperand16(cpu::Register16::HL)));
-        }.boxed_local();
-        op_table[0xE6] = &|cpu, co| async move {
+            cpu.push(system, RegisterOperand16(cpu::Register16::HL));
+        };
+        op_table[0xE6] = |cpu, system| {
             // AND n
-            gen_all!(co, |co_inner| cpu.and(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xE7] = &|cpu, co| async move {
+            cpu.and(system, ImmediateOperand8);
+        };
+        op_table[0xE7] = |cpu, system| {
             // RST 0x20
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0020)));
-        }.boxed_local();
-        op_table[0xE8] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0020));
+        };
+        op_table[0xE8] = |cpu, system| {
             // ADD SP, e
-            gen_all!(co, |co_inner| cpu.add_spe(co_inner));
-        }.boxed_local();
-        op_table[0xE9] = &|cpu, co| async move {
+            cpu.add_spe(system);
+        };
+        op_table[0xE9] = |cpu, system| {
             // JP HL
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand16(cpu::Register16::PC), RegisterOperand16(cpu::Register16::HL)));
-        }.boxed_local();
-        op_table[0xEA] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand16(cpu::Register16::PC), RegisterOperand16(cpu::Register16::HL));
+        };
+        op_table[0xEA] = |cpu, system| {
             // LD (nn), A
-            gen_all!(co, |co_inner| cpu.ld(co_inner, IndirectOperand8(ImmediateOperand16), RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.ld(system, IndirectOperand8(ImmediateOperand16), RegisterOperand8(cpu::Register8::A));
+        };
         // 0xEB (invalid)
         // 0xEC (invalid)
         // 0xED (invalid)
-        op_table[0xEE] = &|cpu, co| async move {
+        op_table[0xEE] = |cpu, system| {
             // XOR n
-            gen_all!(co, |co_inner| cpu.xor(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xEF] = &|cpu, co| async move {
+            cpu.xor(system, ImmediateOperand8);
+        };
+        op_table[0xEF] = |cpu, system| {
             // RST 0x28
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0028)));
-        }.boxed_local();
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0028));
+        };
 
-        op_table[0xF0] = &|cpu, co| async move {
+        op_table[0xF0] = |cpu, system| {
             // LDH A, (n)
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), HramIndirectOperand(ImmediateOperand8)));
-        }.boxed_local();
-        op_table[0xF1] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), HramIndirectOperand(ImmediateOperand8));
+        };
+        op_table[0xF1] = |cpu, system| {
             // POP AF
-            gen_all!(co, |co_inner| cpu.pop(co_inner, RegisterOperand16(cpu::Register16::AF)));
-        }.boxed_local();
-        op_table[0xF2] = &|cpu, co| async move {
+            cpu.pop(system, RegisterOperand16(cpu::Register16::AF));
+        };
+        op_table[0xF2] = |cpu, system| {
             // LDH A, (C)
-            gen_all!(co, |co_inner| cpu.ld(
-                            co_inner,
-                RegisterOperand8(cpu::Register8::A),
-                HramIndirectOperand(RegisterOperand8(cpu::Register8::C))
-            ));
-        }.boxed_local();
-        op_table[0xF3] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), HramIndirectOperand(RegisterOperand8(cpu::Register8::C)));
+        };
+        op_table[0xF3] = |cpu, system| {
             // DI
-            gen_all!(co, |co_inner| cpu.di(co_inner));
-        }.boxed_local();
+            cpu.di(system);
+        };
         // 0xF4 (invalid)
-        op_table[0xF5] = &|cpu, co| async move {
+        op_table[0xF5] = |cpu, system| {
             // PUSH AF
-            gen_all!(co, |co_inner| cpu.push(co_inner, RegisterOperand16(cpu::Register16::AF)));
-        }.boxed_local();
-        op_table[0xF6] = &|cpu, co| async move {
+            cpu.push(system, RegisterOperand16(cpu::Register16::AF));
+        };
+        op_table[0xF6] = |cpu, system| {
             // OR n
-            gen_all!(co, |co_inner| cpu.or(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xF7] = &|cpu, co| async move {
+            cpu.or(system, ImmediateOperand8);
+        };
+        op_table[0xF7] = |cpu, system| {
             // RST 0x30
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0030)));
-        }.boxed_local();
-        op_table[0xF8] = &|cpu, co| async move {
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0030));
+        };
+        op_table[0xF8] = |cpu, system| {
             // LD HL, SP+e
-            gen_all!(co, |co_inner| cpu.ld_hlspe(co_inner));
-        }.boxed_local();
-        op_table[0xF9] = &|cpu, co| async move {
+            cpu.ld_hlspe(system);
+        };
+        op_table[0xF9] = |cpu, system| {
             // LD SP, HL
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand16(cpu::Register16::SP), RegisterOperand16(cpu::Register16::HL)));
-            co.yield_(()).await;
-        }.boxed_local();
-        op_table[0xFA] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand16(cpu::Register16::SP), RegisterOperand16(cpu::Register16::HL));
+            system.cycle_components();
+        };
+        op_table[0xFA] = |cpu, system| {
             // LD A, (nn)
-            gen_all!(co, |co_inner| cpu.ld(co_inner, RegisterOperand8(cpu::Register8::A), IndirectOperand8(ImmediateOperand16)));
-        }.boxed_local();
-        op_table[0xFB] = &|cpu, co| async move {
+            cpu.ld(system, RegisterOperand8(cpu::Register8::A), IndirectOperand8(ImmediateOperand16));
+        };
+        op_table[0xFB] = |cpu, system| {
             // EI
-            gen_all!(co, |co_inner| cpu.ei(co_inner));
-        }.boxed_local();
+            cpu.ei(system);
+        };
         // 0xFC (invalid)
         // 0xFD (invalid)
-        op_table[0xFE] = &|cpu, co| async move {
+        op_table[0xFE] = |cpu, system| {
             // CP n
-            gen_all!(co, |co_inner| cpu.cp(co_inner, ImmediateOperand8));
-        }.boxed_local();
-        op_table[0xFF] = &|cpu, co| async move {
+            cpu.cp(system, ImmediateOperand8);
+        };
+        op_table[0xFF] = |cpu, system| {
             // RST 0x38
-            gen_all!(co, |co_inner| cpu.call(co_inner, CondOperand::Unconditional, ConstOperand16(0x0038)));
-        }.boxed_local();
+            cpu.call(system, CondOperand::Unconditional, ConstOperand16(0x0038));
+        };
 
         op_table
     }
 
     const fn generate_cb() -> [OpcodeFn; 0x100] {
         let mut op_table = [Self::INVALID; 0x100];
-        op_table[0x00] = &|cpu, co| async move {
+        op_table[0x00] = |cpu, system| {
             // RLC B
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::B), true));
-        }.boxed_local();
-        op_table[0x01] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::B), true);
+        };
+        op_table[0x01] = |cpu, system| {
             // RLC C
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::C), true));
-        }.boxed_local();
-        op_table[0x02] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::C), true);
+        };
+        op_table[0x02] = |cpu, system| {
             // RLC D
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::D), true));
-        }.boxed_local();
-        op_table[0x03] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::D), true);
+        };
+        op_table[0x03] = |cpu, system| {
             // RLC E
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::E), true));
-        }.boxed_local();
-        op_table[0x04] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::E), true);
+        };
+        op_table[0x04] = |cpu, system| {
             // RLC H
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::H), true));
-        }.boxed_local();
-        op_table[0x05] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::H), true);
+        };
+        op_table[0x05] = |cpu, system| {
             // RLC L
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::L), true));
-        }.boxed_local();
-        op_table[0x06] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::L), true);
+        };
+        op_table[0x06] = |cpu, system| {
             // RLC (HL)
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true));
-        }.boxed_local();
-        op_table[0x07] = &|cpu, co| async move {
+            cpu.rlc(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true);
+        };
+        op_table[0x07] = |cpu, system| {
             // RLC A
-            gen_all!(co, |co_inner| cpu.rlc(co_inner, RegisterOperand8(cpu::Register8::A), true));
-        }.boxed_local();
-        op_table[0x08] = &|cpu, co| async move {
+            cpu.rlc(system, RegisterOperand8(cpu::Register8::A), true);
+        };
+        op_table[0x08] = |cpu, system| {
             // RRC B
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::B), true));
-        }.boxed_local();
-        op_table[0x09] = &|cpu, co| async move {
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::B), true);
+        };
+        op_table[0x09] = |cpu, system| {
             // RRC C
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::C), true));
-        }.boxed_local();
-        op_table[0x0A] = &|cpu, co| async move {
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::C), true);
+        };
+        op_table[0x0A] = |cpu, system| {
             // RRC D
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::D), true));
-        }.boxed_local();
-        op_table[0x0B] = &|cpu, co| async move {
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::D), true);
+        };
+        op_table[0x0B] = |cpu, system| {
             // RRC E
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::E), true));
-        }.boxed_local();
-        op_table[0x0C] = &|cpu, co| async move {
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::E), true);
+        };
+        op_table[0x0C] = |cpu, system| {
             // RRC H
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::H), true));
-        }.boxed_local();
-        op_table[0x0D] = &|cpu, co| async move {
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::H), true);
+        };
+        op_table[0x0D] = |cpu, system| {
             // RRC L
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::L), true));
-        }.boxed_local();
-        op_table[0x0E] = &|cpu, co| async move {
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::L), true);
+        };
+        op_table[0x0E] = |cpu, system| {
             // RRC (HL)
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true));
-        }.boxed_local();
-        op_table[0x0F] = &|cpu, co| async move {
+            cpu.rrc(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true);
+        };
+        op_table[0x0F] = |cpu, system| {
             // RRC A
-            gen_all!(co, |co_inner| cpu.rrc(co_inner, RegisterOperand8(cpu::Register8::A), true));
-        }.boxed_local();
+            cpu.rrc(system, RegisterOperand8(cpu::Register8::A), true);
+        };
 
-        op_table[0x10] = &|cpu, co| async move {
+        op_table[0x10] = |cpu, system| {
             // RL B
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::B), true));
-        }.boxed_local();
-        op_table[0x11] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::B), true);
+        };
+        op_table[0x11] = |cpu, system| {
             // RL C
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::C), true));
-        }.boxed_local();
-        op_table[0x12] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::C), true);
+        };
+        op_table[0x12] = |cpu, system| {
             // RL D
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::D), true));
-        }.boxed_local();
-        op_table[0x13] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::D), true);
+        };
+        op_table[0x13] = |cpu, system| {
             // RL E
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::E), true));
-        }.boxed_local();
-        op_table[0x14] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::E), true);
+        };
+        op_table[0x14] = |cpu, system| {
             // RL H
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::H), true));
-        }.boxed_local();
-        op_table[0x15] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::H), true);
+        };
+        op_table[0x15] = |cpu, system| {
             // RL L
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::L), true));
-        }.boxed_local();
-        op_table[0x16] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::L), true);
+        };
+        op_table[0x16] = |cpu, system| {
             // RL (HL)
-            gen_all!(co, |co_inner| cpu.rl(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true));
-        }.boxed_local();
-        op_table[0x17] = &|cpu, co| async move {
+            cpu.rl(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true);
+        };
+        op_table[0x17] = |cpu, system| {
             // RL A
-            gen_all!(co, |co_inner| cpu.rl(co_inner, RegisterOperand8(cpu::Register8::A), true));
-        }.boxed_local();
-        op_table[0x18] = &|cpu, co| async move {
+            cpu.rl(system, RegisterOperand8(cpu::Register8::A), true);
+        };
+        op_table[0x18] = |cpu, system| {
             // RR B
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::B), true));
-        }.boxed_local();
-        op_table[0x19] = &|cpu, co| async move {
+            cpu.rr(system, RegisterOperand8(cpu::Register8::B), true);
+        };
+        op_table[0x19] = |cpu, system| {
             // RR C
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::C), true));
-        }.boxed_local();
-        op_table[0x1A] = &|cpu, co| async move {
+            cpu.rr(system, RegisterOperand8(cpu::Register8::C), true);
+        };
+        op_table[0x1A] = |cpu, system| {
             // RR D
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::D), true));
-        }.boxed_local();
-        op_table[0x1B] = &|cpu, co| async move {
+            cpu.rr(system, RegisterOperand8(cpu::Register8::D), true);
+        };
+        op_table[0x1B] = |cpu, system| {
             // RR E
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::E), true));
-        }.boxed_local();
-        op_table[0x1C] = &|cpu, co| async move {
+            cpu.rr(system, RegisterOperand8(cpu::Register8::E), true);
+        };
+        op_table[0x1C] = |cpu, system| {
             // RR H
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::H), true));
-        }.boxed_local();
-        op_table[0x1D] = &|cpu, co| async move {
+            cpu.rr(system, RegisterOperand8(cpu::Register8::H), true);
+        };
+        op_table[0x1D] = |cpu, system| {
             // RR L
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::L), true));
-        }.boxed_local();
-        op_table[0x1E] = &|cpu, co| async move {
+            cpu.rr(system, RegisterOperand8(cpu::Register8::L), true);
+        };
+        op_table[0x1E] = |cpu, system| {
             // RR (HL)
-            gen_all!(co, |co_inner| cpu.rr(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true));
-        }.boxed_local();
-        op_table[0x1F] = &|cpu, co| async move {
+            cpu.rr(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)), true);
+        };
+        op_table[0x1F] = |cpu, system| {
             // RR A
-            gen_all!(co, |co_inner| cpu.rr(co_inner, RegisterOperand8(cpu::Register8::A), true));
-        }.boxed_local();
+            cpu.rr(system, RegisterOperand8(cpu::Register8::A), true);
+        };
 
-        op_table[0x20] = &|cpu, co| async move {
+        op_table[0x20] = |cpu, system| {
             // SLA B
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x21] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x21] = |cpu, system| {
             // SLA C
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x22] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x22] = |cpu, system| {
             // SLA D
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x23] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x23] = |cpu, system| {
             // SLA E
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x24] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x24] = |cpu, system| {
             // SLA H
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x25] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x25] = |cpu, system| {
             // SLA L
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x26] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x26] = |cpu, system| {
             // SLA (HL)
-            gen_all!(co, |co_inner| cpu.sla(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x27] = &|cpu, co| async move {
+            cpu.sla(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x27] = |cpu, system| {
             // SLA A
-            gen_all!(co, |co_inner| cpu.sla(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x28] = &|cpu, co| async move {
+            cpu.sla(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x28] = |cpu, system| {
             // SRA B
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x29] = &|cpu, co| async move {
+            cpu.sra(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x29] = |cpu, system| {
             // SRA C
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x2A] = &|cpu, co| async move {
+            cpu.sra(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x2A] = |cpu, system| {
             // SRA D
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x2B] = &|cpu, co| async move {
+            cpu.sra(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x2B] = |cpu, system| {
             // SRA E
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x2C] = &|cpu, co| async move {
+            cpu.sra(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x2C] = |cpu, system| {
             // SRA H
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x2D] = &|cpu, co| async move {
+            cpu.sra(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x2D] = |cpu, system| {
             // SRA L
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x2E] = &|cpu, co| async move {
+            cpu.sra(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x2E] = |cpu, system| {
             // SRA (HL)
-            gen_all!(co, |co_inner| cpu.sra(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x2F] = &|cpu, co| async move {
+            cpu.sra(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x2F] = |cpu, system| {
             // SRA A
-            gen_all!(co, |co_inner| cpu.sra(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.sra(system, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x30] = &|cpu, co| async move {
+        op_table[0x30] = |cpu, system| {
             // SWAP B
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x31] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x31] = |cpu, system| {
             // SWAP C
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x32] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x32] = |cpu, system| {
             // SWAP D
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x33] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x33] = |cpu, system| {
             // SWAP E
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x34] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x34] = |cpu, system| {
             // SWAP H
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x35] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x35] = |cpu, system| {
             // SWAP L
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x36] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x36] = |cpu, system| {
             // SWAP (HL)
-            gen_all!(co, |co_inner| cpu.swap(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x37] = &|cpu, co| async move {
+            cpu.swap(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x37] = |cpu, system| {
             // SWAP A
-            gen_all!(co, |co_inner| cpu.swap(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x38] = &|cpu, co| async move {
+            cpu.swap(system, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x38] = |cpu, system| {
             // SRL B
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x39] = &|cpu, co| async move {
+            cpu.srl(system, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x39] = |cpu, system| {
             // SRL C
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x3A] = &|cpu, co| async move {
+            cpu.srl(system, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x3A] = |cpu, system| {
             // SRL D
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x3B] = &|cpu, co| async move {
+            cpu.srl(system, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x3B] = |cpu, system| {
             // SRL E
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x3C] = &|cpu, co| async move {
+            cpu.srl(system, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x3C] = |cpu, system| {
             // SRL H
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x3D] = &|cpu, co| async move {
+            cpu.srl(system, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x3D] = |cpu, system| {
             // SRL L
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x3E] = &|cpu, co| async move {
+            cpu.srl(system, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x3E] = |cpu, system| {
             // SRL (HL)
-            gen_all!(co, |co_inner| cpu.srl(co_inner, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x3F] = &|cpu, co| async move {
+            cpu.srl(system, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x3F] = |cpu, system| {
             // SRL A
-            gen_all!(co, |co_inner| cpu.srl(co_inner, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.srl(system, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x40] = &|cpu, co| async move {
+        op_table[0x40] = |cpu, system| {
             // BIT 0, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x41] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x41] = |cpu, system| {
             // BIT 0, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x42] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x42] = |cpu, system| {
             // BIT 0, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x43] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x43] = |cpu, system| {
             // BIT 0, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x44] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x44] = |cpu, system| {
             // BIT 0, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x45] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x45] = |cpu, system| {
             // BIT 0, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x46] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x46] = |cpu, system| {
             // BIT 0, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x47] = &|cpu, co| async move {
+            cpu.bit(system, 0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x47] = |cpu, system| {
             // BIT 0, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 0, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x48] = &|cpu, co| async move {
+            cpu.bit(system, 0, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x48] = |cpu, system| {
             // BIT 1, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x49] = &|cpu, co| async move {
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x49] = |cpu, system| {
             // BIT 1, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x4A] = &|cpu, co| async move {
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x4A] = |cpu, system| {
             // BIT 1, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x4B] = &|cpu, co| async move {
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x4B] = |cpu, system| {
             // BIT 1, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x4C] = &|cpu, co| async move {
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x4C] = |cpu, system| {
             // BIT 1, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x4D] = &|cpu, co| async move {
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x4D] = |cpu, system| {
             // BIT 1, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x4E] = &|cpu, co| async move {
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x4E] = |cpu, system| {
             // BIT 1, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x4F] = &|cpu, co| async move {
+            cpu.bit(system, 1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x4F] = |cpu, system| {
             // BIT 1, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 1, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.bit(system, 1, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x50] = &|cpu, co| async move {
+        op_table[0x50] = |cpu, system| {
             // BIT 2, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x51] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x51] = |cpu, system| {
             // BIT 2, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x52] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x52] = |cpu, system| {
             // BIT 2, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x53] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x53] = |cpu, system| {
             // BIT 2, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x54] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x54] = |cpu, system| {
             // BIT 2, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x55] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x55] = |cpu, system| {
             // BIT 2, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x56] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x56] = |cpu, system| {
             // BIT 2, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x57] = &|cpu, co| async move {
+            cpu.bit(system, 2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x57] = |cpu, system| {
             // BIT 2, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 2, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x58] = &|cpu, co| async move {
+            cpu.bit(system, 2, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x58] = |cpu, system| {
             // BIT 3, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x59] = &|cpu, co| async move {
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x59] = |cpu, system| {
             // BIT 3, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x5A] = &|cpu, co| async move {
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x5A] = |cpu, system| {
             // BIT 3, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x5B] = &|cpu, co| async move {
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x5B] = |cpu, system| {
             // BIT 3, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x5C] = &|cpu, co| async move {
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x5C] = |cpu, system| {
             // BIT 3, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x5D] = &|cpu, co| async move {
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x5D] = |cpu, system| {
             // BIT 3, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x5E] = &|cpu, co| async move {
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x5E] = |cpu, system| {
             // BIT 3, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x5F] = &|cpu, co| async move {
+            cpu.bit(system, 3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x5F] = |cpu, system| {
             // BIT 3, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 3, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.bit(system, 3, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x60] = &|cpu, co| async move {
+        op_table[0x60] = |cpu, system| {
             // BIT 4, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x61] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x61] = |cpu, system| {
             // BIT 4, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x62] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x62] = |cpu, system| {
             // BIT 4, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x63] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x63] = |cpu, system| {
             // BIT 4, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x64] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x64] = |cpu, system| {
             // BIT 4, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x65] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x65] = |cpu, system| {
             // BIT 4, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x66] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x66] = |cpu, system| {
             // BIT 4, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x67] = &|cpu, co| async move {
+            cpu.bit(system, 4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x67] = |cpu, system| {
             // BIT 4, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 4, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x68] = &|cpu, co| async move {
+            cpu.bit(system, 4, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x68] = |cpu, system| {
             // BIT 5, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x69] = &|cpu, co| async move {
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x69] = |cpu, system| {
             // BIT 5, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x6A] = &|cpu, co| async move {
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x6A] = |cpu, system| {
             // BIT 5, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x6B] = &|cpu, co| async move {
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x6B] = |cpu, system| {
             // BIT 5, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x6C] = &|cpu, co| async move {
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x6C] = |cpu, system| {
             // BIT 5, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x6D] = &|cpu, co| async move {
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x6D] = |cpu, system| {
             // BIT 5, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x6E] = &|cpu, co| async move {
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x6E] = |cpu, system| {
             // BIT 5, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x6F] = &|cpu, co| async move {
+            cpu.bit(system, 5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x6F] = |cpu, system| {
             // BIT 5, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 5, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.bit(system, 5, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x70] = &|cpu, co| async move {
+        op_table[0x70] = |cpu, system| {
             // BIT 6, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x71] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x71] = |cpu, system| {
             // BIT 6, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x72] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x72] = |cpu, system| {
             // BIT 6, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x73] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x73] = |cpu, system| {
             // BIT 6, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x74] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x74] = |cpu, system| {
             // BIT 6, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x75] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x75] = |cpu, system| {
             // BIT 6, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x76] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x76] = |cpu, system| {
             // BIT 6, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x77] = &|cpu, co| async move {
+            cpu.bit(system, 6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x77] = |cpu, system| {
             // BIT 6, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 6, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x78] = &|cpu, co| async move {
+            cpu.bit(system, 6, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x78] = |cpu, system| {
             // BIT 7, B
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x79] = &|cpu, co| async move {
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x79] = |cpu, system| {
             // BIT 7, C
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x7A] = &|cpu, co| async move {
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x7A] = |cpu, system| {
             // BIT 7, D
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x7B] = &|cpu, co| async move {
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x7B] = |cpu, system| {
             // BIT 7, E
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x7C] = &|cpu, co| async move {
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x7C] = |cpu, system| {
             // BIT 7, H
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x7D] = &|cpu, co| async move {
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x7D] = |cpu, system| {
             // BIT 7, L
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x7E] = &|cpu, co| async move {
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x7E] = |cpu, system| {
             // BIT 7, (HL)
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x7F] = &|cpu, co| async move {
+            cpu.bit(system, 7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x7F] = |cpu, system| {
             // BIT 7, A
-            gen_all!(co, |co_inner| cpu.bit(co_inner, 7, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.bit(system, 7, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x80] = &|cpu, co| async move {
+        op_table[0x80] = |cpu, system| {
             // RES 0, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x81] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x81] = |cpu, system| {
             // RES 0, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x82] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x82] = |cpu, system| {
             // RES 0, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x83] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x83] = |cpu, system| {
             // RES 0, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x84] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x84] = |cpu, system| {
             // RES 0, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x85] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x85] = |cpu, system| {
             // RES 0, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x86] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x86] = |cpu, system| {
             // RES 0, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x87] = &|cpu, co| async move {
+            cpu.res(system, 0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x87] = |cpu, system| {
             // RES 0, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 0, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x88] = &|cpu, co| async move {
+            cpu.res(system, 0, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x88] = |cpu, system| {
             // RES 1, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x89] = &|cpu, co| async move {
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x89] = |cpu, system| {
             // RES 1, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x8A] = &|cpu, co| async move {
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x8A] = |cpu, system| {
             // RES 1, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x8B] = &|cpu, co| async move {
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x8B] = |cpu, system| {
             // RES 1, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x8C] = &|cpu, co| async move {
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x8C] = |cpu, system| {
             // RES 1, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x8D] = &|cpu, co| async move {
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x8D] = |cpu, system| {
             // RES 1, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x8E] = &|cpu, co| async move {
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x8E] = |cpu, system| {
             // RES 1, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x8F] = &|cpu, co| async move {
+            cpu.res(system, 1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x8F] = |cpu, system| {
             // RES 1, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 1, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.res(system, 1, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0x90] = &|cpu, co| async move {
+        op_table[0x90] = |cpu, system| {
             // RES 2, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x91] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x91] = |cpu, system| {
             // RES 2, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x92] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x92] = |cpu, system| {
             // RES 2, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x93] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x93] = |cpu, system| {
             // RES 2, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x94] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x94] = |cpu, system| {
             // RES 2, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x95] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x95] = |cpu, system| {
             // RES 2, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x96] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x96] = |cpu, system| {
             // RES 2, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x97] = &|cpu, co| async move {
+            cpu.res(system, 2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x97] = |cpu, system| {
             // RES 2, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 2, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0x98] = &|cpu, co| async move {
+            cpu.res(system, 2, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0x98] = |cpu, system| {
             // RES 3, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0x99] = &|cpu, co| async move {
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0x99] = |cpu, system| {
             // RES 3, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0x9A] = &|cpu, co| async move {
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0x9A] = |cpu, system| {
             // RES 3, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0x9B] = &|cpu, co| async move {
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0x9B] = |cpu, system| {
             // RES 3, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0x9C] = &|cpu, co| async move {
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0x9C] = |cpu, system| {
             // RES 3, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0x9D] = &|cpu, co| async move {
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0x9D] = |cpu, system| {
             // RES 3, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0x9E] = &|cpu, co| async move {
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0x9E] = |cpu, system| {
             // RES 3, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0x9F] = &|cpu, co| async move {
+            cpu.res(system, 3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0x9F] = |cpu, system| {
             // RES 3, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 3, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.res(system, 3, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xA0] = &|cpu, co| async move {
+        op_table[0xA0] = |cpu, system| {
             // RES 4, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xA1] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xA1] = |cpu, system| {
             // RES 4, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xA2] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xA2] = |cpu, system| {
             // RES 4, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xA3] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xA3] = |cpu, system| {
             // RES 4, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xA4] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xA4] = |cpu, system| {
             // RES 4, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xA5] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xA5] = |cpu, system| {
             // RES 4, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xA6] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xA6] = |cpu, system| {
             // RES 4, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xA7] = &|cpu, co| async move {
+            cpu.res(system, 4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xA7] = |cpu, system| {
             // RES 4, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 4, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xA8] = &|cpu, co| async move {
+            cpu.res(system, 4, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xA8] = |cpu, system| {
             // RES 5, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xA9] = &|cpu, co| async move {
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xA9] = |cpu, system| {
             // RES 5, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xAA] = &|cpu, co| async move {
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xAA] = |cpu, system| {
             // RES 5, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xAB] = &|cpu, co| async move {
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xAB] = |cpu, system| {
             // RES 5, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xAC] = &|cpu, co| async move {
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xAC] = |cpu, system| {
             // RES 5, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xAD] = &|cpu, co| async move {
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xAD] = |cpu, system| {
             // RES 5, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xAE] = &|cpu, co| async move {
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xAE] = |cpu, system| {
             // RES 5, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xAF] = &|cpu, co| async move {
+            cpu.res(system, 5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xAF] = |cpu, system| {
             // RES 5, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 5, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.res(system, 5, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xB0] = &|cpu, co| async move {
+        op_table[0xB0] = |cpu, system| {
             // RES 6, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xB1] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xB1] = |cpu, system| {
             // RES 6, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xB2] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xB2] = |cpu, system| {
             // RES 6, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xB3] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xB3] = |cpu, system| {
             // RES 6, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xB4] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xB4] = |cpu, system| {
             // RES 6, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xB5] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xB5] = |cpu, system| {
             // RES 6, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xB6] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xB6] = |cpu, system| {
             // RES 6, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xB7] = &|cpu, co| async move {
+            cpu.res(system, 6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xB7] = |cpu, system| {
             // RES 6, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 6, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xB8] = &|cpu, co| async move {
+            cpu.res(system, 6, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xB8] = |cpu, system| {
             // RES 7, B
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xB9] = &|cpu, co| async move {
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xB9] = |cpu, system| {
             // RES 7, C
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xBA] = &|cpu, co| async move {
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xBA] = |cpu, system| {
             // RES 7, D
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xBB] = &|cpu, co| async move {
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xBB] = |cpu, system| {
             // RES 7, E
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xBC] = &|cpu, co| async move {
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xBC] = |cpu, system| {
             // RES 7, H
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xBD] = &|cpu, co| async move {
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xBD] = |cpu, system| {
             // RES 7, L
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xBE] = &|cpu, co| async move {
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xBE] = |cpu, system| {
             // RES 7, (HL)
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xBF] = &|cpu, co| async move {
+            cpu.res(system, 7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xBF] = |cpu, system| {
             // RES 7, A
-            gen_all!(co, |co_inner| cpu.res(co_inner, 7, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.res(system, 7, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xC0] = &|cpu, co| async move {
+        op_table[0xC0] = |cpu, system| {
             // SET 0, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xC1] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xC1] = |cpu, system| {
             // SET 0, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xC2] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xC2] = |cpu, system| {
             // SET 0, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xC3] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xC3] = |cpu, system| {
             // SET 0, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xC4] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xC4] = |cpu, system| {
             // SET 0, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xC5] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xC5] = |cpu, system| {
             // SET 0, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xC6] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xC6] = |cpu, system| {
             // SET 0, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xC7] = &|cpu, co| async move {
+            cpu.set(system, 0, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xC7] = |cpu, system| {
             // SET 0, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 0, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xC8] = &|cpu, co| async move {
+            cpu.set(system, 0, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xC8] = |cpu, system| {
             // SET 1, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xC9] = &|cpu, co| async move {
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xC9] = |cpu, system| {
             // SET 1, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xCA] = &|cpu, co| async move {
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xCA] = |cpu, system| {
             // SET 1, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xCB] = &|cpu, co| async move {
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xCB] = |cpu, system| {
             // SET 1, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xCC] = &|cpu, co| async move {
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xCC] = |cpu, system| {
             // SET 1, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xCD] = &|cpu, co| async move {
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xCD] = |cpu, system| {
             // SET 1, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xCE] = &|cpu, co| async move {
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xCE] = |cpu, system| {
             // SET 1, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xCF] = &|cpu, co| async move {
+            cpu.set(system, 1, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xCF] = |cpu, system| {
             // SET 1, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 1, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.set(system, 1, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xD0] = &|cpu, co| async move {
+        op_table[0xD0] = |cpu, system| {
             // SET 2, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xD1] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xD1] = |cpu, system| {
             // SET 2, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xD2] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xD2] = |cpu, system| {
             // SET 2, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xD3] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xD3] = |cpu, system| {
             // SET 2, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xD4] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xD4] = |cpu, system| {
             // SET 2, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xD5] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xD5] = |cpu, system| {
             // SET 2, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xD6] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xD6] = |cpu, system| {
             // SET 2, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xD7] = &|cpu, co| async move {
+            cpu.set(system, 2, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xD7] = |cpu, system| {
             // SET 2, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 2, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xD8] = &|cpu, co| async move {
+            cpu.set(system, 2, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xD8] = |cpu, system| {
             // SET 3, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xD9] = &|cpu, co| async move {
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xD9] = |cpu, system| {
             // SET 3, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xDA] = &|cpu, co| async move {
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xDA] = |cpu, system| {
             // SET 3, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xDB] = &|cpu, co| async move {
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xDB] = |cpu, system| {
             // SET 3, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xDC] = &|cpu, co| async move {
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xDC] = |cpu, system| {
             // SET 3, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xDD] = &|cpu, co| async move {
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xDD] = |cpu, system| {
             // SET 3, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xDE] = &|cpu, co| async move {
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xDE] = |cpu, system| {
             // SET 3, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xDF] = &|cpu, co| async move {
+            cpu.set(system, 3, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xDF] = |cpu, system| {
             // SET 3, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 3, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.set(system, 3, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xE0] = &|cpu, co| async move {
+        op_table[0xE0] = |cpu, system| {
             // SET 4, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xE1] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xE1] = |cpu, system| {
             // SET 4, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xE2] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xE2] = |cpu, system| {
             // SET 4, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xE3] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xE3] = |cpu, system| {
             // SET 4, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xE4] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xE4] = |cpu, system| {
             // SET 4, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xE5] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xE5] = |cpu, system| {
             // SET 4, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xE6] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xE6] = |cpu, system| {
             // SET 4, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xE7] = &|cpu, co| async move {
+            cpu.set(system, 4, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xE7] = |cpu, system| {
             // SET 4, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 4, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xE8] = &|cpu, co| async move {
+            cpu.set(system, 4, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xE8] = |cpu, system| {
             // SET 5, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xE9] = &|cpu, co| async move {
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xE9] = |cpu, system| {
             // SET 5, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xEA] = &|cpu, co| async move {
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xEA] = |cpu, system| {
             // SET 5, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xEB] = &|cpu, co| async move {
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xEB] = |cpu, system| {
             // SET 5, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xEC] = &|cpu, co| async move {
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xEC] = |cpu, system| {
             // SET 5, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xED] = &|cpu, co| async move {
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xED] = |cpu, system| {
             // SET 5, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xEE] = &|cpu, co| async move {
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xEE] = |cpu, system| {
             // SET 5, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xEF] = &|cpu, co| async move {
+            cpu.set(system, 5, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xEF] = |cpu, system| {
             // SET 5, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 5, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.set(system, 5, RegisterOperand8(cpu::Register8::A));
+        };
 
-        op_table[0xF0] = &|cpu, co| async move {
+        op_table[0xF0] = |cpu, system| {
             // SET 6, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xF1] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xF1] = |cpu, system| {
             // SET 6, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xF2] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xF2] = |cpu, system| {
             // SET 6, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xF3] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xF3] = |cpu, system| {
             // SET 6, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xF4] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xF4] = |cpu, system| {
             // SET 6, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xF5] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xF5] = |cpu, system| {
             // SET 6, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xF6] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xF6] = |cpu, system| {
             // SET 6, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xF7] = &|cpu, co| async move {
+            cpu.set(system, 6, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xF7] = |cpu, system| {
             // SET 6, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 6, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
-        op_table[0xF8] = &|cpu, co| async move {
+            cpu.set(system, 6, RegisterOperand8(cpu::Register8::A));
+        };
+        op_table[0xF8] = |cpu, system| {
             // SET 7, B
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::B)));
-        }.boxed_local();
-        op_table[0xF9] = &|cpu, co| async move {
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::B));
+        };
+        op_table[0xF9] = |cpu, system| {
             // SET 7, C
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::C)));
-        }.boxed_local();
-        op_table[0xFA] = &|cpu, co| async move {
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::C));
+        };
+        op_table[0xFA] = |cpu, system| {
             // SET 7, D
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::D)));
-        }.boxed_local();
-        op_table[0xFB] = &|cpu, co| async move {
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::D));
+        };
+        op_table[0xFB] = |cpu, system| {
             // SET 7, E
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::E)));
-        }.boxed_local();
-        op_table[0xFC] = &|cpu, co| async move {
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::E));
+        };
+        op_table[0xFC] = |cpu, system| {
             // SET 7, H
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::H)));
-        }.boxed_local();
-        op_table[0xFD] = &|cpu, co| async move {
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::H));
+        };
+        op_table[0xFD] = |cpu, system| {
             // SET 7, L
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::L)));
-        }.boxed_local();
-        op_table[0xFE] = &|cpu, co| async move {
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::L));
+        };
+        op_table[0xFE] = |cpu, system| {
             // SET 7, (HL)
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL))));
-        }.boxed_local();
-        op_table[0xFF] = &|cpu, co| async move {
+            cpu.set(system, 7, IndirectOperand8(RegisterOperand16(cpu::Register16::HL)));
+        };
+        op_table[0xFF] = |cpu, system| {
             // SET 7, A
-            gen_all!(co, |co_inner| cpu.set(co_inner, 7, RegisterOperand8(cpu::Register8::A)));
-        }.boxed_local();
+            cpu.set(system, 7, RegisterOperand8(cpu::Register8::A));
+        };
         
         op_table
     }

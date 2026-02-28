@@ -1,6 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
-use crate::{deserialize, gameboy::{Model, memory::oam::Oam, ppu::lcdc::ObjectHeight}};
+use crate::{deserialize, gameboy::Model};
 
 pub struct TileAttributes {
     pub(super) bg_priority: bool,

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{common::errors::HydraIOError, gameboy::{Model, ppu::{attributes::TileAttributes, lcdc::ObjectHeight}}};
+use crate::{common::errors::HydraIOError, gameboy::{Model, ppu::{attributes::TileAttributes, state::ObjectHeight}}};
 
 pub struct Oam {
     inner: [u8; 0x100],

@@ -11,8 +11,6 @@ use crate::{audio::Audio, common::audio, gameboy::{apu::{channel::{Noise, Pulse,
 pub struct Apu {
     dot_counter: u8,
 
-    memory: Rc<RefCell<MemoryMap>>,
-
     pulse1_sample: f32,
     pulse2_sample: f32,
     wave_sample: f32,
@@ -26,14 +24,12 @@ pub struct Apu {
 impl Apu {
     const SAMPLE_RATE: u32 = MasterTimer::PPU_DOTS_PER_FRAME * 30;
 
-    pub fn new(memory: Rc<RefCell<MemoryMap>>, audio: Arc<RwLock<Audio>>) -> Self {
+    pub fn new(audio: Arc<RwLock<Audio>>) -> Self {
         let global_sample_rate = audio.read().unwrap().get_sample_rate();
         let ring_buffer = audio.write().unwrap().get_producer();
 
         Apu { 
             dot_counter: 0,
-
-            memory,
 
             pulse1_sample: 0.0,
             pulse2_sample: 0.0,
