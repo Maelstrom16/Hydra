@@ -90,7 +90,10 @@ impl HydraApp {
             Some(path) => match func(&path, &self) {
                 // If a file was selected, try to initialize Emulator
                 Ok(emu) => {
-                    // If Emulator construction succeeds, save communication channel to app state
+                    // If Emulator construction succeeds, close current emulator (if any) and save communication channel to app state
+                    if let Some(emu_old) = self.emulator.take() {
+                        emu_old.send(EmuMessage::Stop);
+                    }
                     println!("Successfully loaded {}. Launching emulator.", path.file_name().unwrap().display());
                     self.emulator = Some(emu);
                 }

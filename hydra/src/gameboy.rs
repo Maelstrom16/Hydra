@@ -98,6 +98,8 @@ pub struct GameBoy {
     ppu: Ppu,
 
     channel: Receiver<EmuMessage>,
+
+    running: bool,
 }
 
 fn read_rom(path: &Path) -> Result<Rom, HydraIOError> {
@@ -143,9 +145,14 @@ impl GameBoy {
                 memory,
                 ppu,
                 channel: recv,
+                running: true
             }.main_thread();
         });
         Ok(send)
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running
     }
 
     fn dump_mem(&self) {
@@ -187,11 +194,11 @@ impl GameBoy {
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
-                            // if let Err(e) = read_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
-                            //     println!("{}", e);
-                            // }
+                            if let Err(e) = read_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
+                                println!("{}", e);
+                            }
                         },
-                        EmuMessage::Stop => {}//break 'main,
+                        EmuMessage::Stop => self.running = false,
                         _ => {} // Do nothing
                     }
                 }
@@ -202,6 +209,7 @@ impl GameBoy {
             self.apu.dot_tick(&mut memory.apu_state);
             memory.tick_dma();
 
+            // CPU cycle if applicable
             if memory.timer.is_system_cycle() {break;}
         }
     }

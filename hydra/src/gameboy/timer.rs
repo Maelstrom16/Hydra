@@ -98,15 +98,25 @@ impl MasterTimer {
     pub fn toggle_speed(&mut self, apu_state: &mut ApuState) {
         if self.speed_switch_queued {
             self.speed_switch_queued = false;
+
+            self.machine_cycle_timer.reset();
             let new_system_speed = match self.system_speed {
-                SystemSpeed::Standard => SystemSpeed::CgbDouble,
-                SystemSpeed::CgbDouble => SystemSpeed::Standard,
+                SystemSpeed::Standard => {
+                    self.machine_cycle_timer.modulus = 4;
+                    SystemSpeed::CgbDouble
+                }
+                SystemSpeed::CgbDouble => {
+                    self.machine_cycle_timer.modulus = 2;
+                    SystemSpeed::Standard
+                }
             };
 
             // Tick APU timer if falling edge detected
             if (self.div_full & self.system_speed as u16 != 0) && (self.div_full & new_system_speed as u16 == 0) {
                 apu_state.apu_tick();
             }
+
+            self.system_speed = new_system_speed;
         }
     }
 
