@@ -91,7 +91,7 @@ impl MemoryMap {
 
     fn is_vram_accessible(&self) -> bool {
         // VRAM is inaccessible during PPU mode 3 when LCD is enabled
-        matches!(self.ppu_state.get_mode(), PpuMode::Render) || !self.ppu_state.is_lcd_enabled()
+        !matches!(self.ppu_state.get_mode(), PpuMode::Render) || !self.ppu_state.is_lcd_enabled()
     }
 
     pub fn tick_dma(&mut self) {
@@ -113,7 +113,7 @@ impl MemoryMap {
         let mem_accessible = is_dma || matches!(self.dma_cycle, None);
         let read_result = if mem_accessible { match address {
             0x0000..=0x7FFF => self.cartridge.as_ref().map(|this| this.read_rom_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0x8000..=0x9FFF => self.vram.read_u8(address),
+            0x8000..=0x9FFF if self.is_vram_accessible() => self.vram.read_u8(address),
             0xA000..=0xBFFF => self.cartridge.as_ref().map(|this| this.read_ram_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0xC000..=0xDFFF => Ok(self.wram.read_u8(address)),
             0xE000..=0xFDFF => Ok(self.wram.read_u8(address - 0x2000)), // Treat exactly like WRAM
@@ -152,7 +152,7 @@ impl MemoryMap {
         let mem_accessible = is_dma || matches!(self.dma_cycle, None);
         let write_result = if mem_accessible { match address {
             0x0000..=0x7FFF => self.cartridge.as_mut().map(|this| this.write_rom_u8(val, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0x8000..=0x9FFF => self.vram.write_u8(val, address),
+            0x8000..=0x9FFF if self.is_vram_accessible() => self.vram.write_u8(val, address),
             0xA000..=0xBFFF => self.cartridge.as_mut().map(|this| this.write_ram_u8(val, address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0xC000..=0xDFFF => Ok(self.wram.write_u8(val, address)),
             0xE000..=0xFDFF => Ok(self.wram.write_u8(val, address - 0x2000)), // Treat exactly like WRAM
