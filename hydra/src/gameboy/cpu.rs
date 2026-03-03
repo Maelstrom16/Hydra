@@ -199,7 +199,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn fetch(&mut self, system: &mut GameBoy, debug: bool) {
+    fn fetch(&mut self, system: &mut GameBoy, debug: bool) -> Box<dyn Fn(&mut Cpu, &mut GameBoy)> {
         if self.ime && self.interrupt_pending(system) { 
             // Generate call instruction from handled interrupt
             let composite = system.memory.interrupt_enable.read_ie() & system.memory.interrupt_flags.read_if();
@@ -215,8 +215,14 @@ impl Cpu {
                     let jump_addr = (shift_width * 0x8) + 0x40;
                     
                     // TODO: Verify cycle accuracy
-                    self.call(system, CondOperand::Unconditional, ConstOperand16(jump_addr));
-                    return;
+                    return Box::new(move |cpu_inner, system_inner| {
+                        // Two NOPs (in place of fetching nn from memory for CALL nn)
+                        system_inner.cycle_components();
+                        system_inner.cycle_components();
+
+                        // The call itself
+                        cpu_inner.call(system_inner, CondOperand::Unconditional, ConstOperand16(jump_addr));
+                    });
                 }
             }
             unreachable!() // Interrupt should've been handled
@@ -235,15 +241,19 @@ impl Cpu {
                     u16::from_le_bytes(self.hl),
                     self.sp
                 );
+                if self.ir == 0xFF {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
             }
-            Self::OP_TABLE[self.ir as usize](self, system);
+            let op_index = self.ir as usize;
+            return Box::new(move |cpu_inner, system_inner| Self::OP_TABLE[op_index](cpu_inner, system_inner));
         }
     }
 
     #[inline(always)]
     fn step_u8(&mut self, system: &mut GameBoy) -> u8 {
         let result = system.memory.read_u8(self.pc, false);
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         system.cycle_components();
         result
     }
@@ -275,9 +285,10 @@ impl Cpu {
 
             // Fetch cycle
             let pc_old = self.pc;
-            self.fetch(system, debug);
+            let next = self.fetch(system, debug);
 
             // Execute cycle(s)
+            next(self, system);
             self.refresh_interrupt_handler(pc_old);
         }
     }
@@ -567,9 +578,9 @@ impl Cpu {
     fn push<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
         let bytes = u16::to_le_bytes(operand.get(self, system));
         system.cycle_components();
-        self.sp -= 1;
+        self.sp = self.sp.wrapping_sub(1);
         self.write_u8(self.sp, bytes[1], system);
-        self.sp -= 1;
+        self.sp = self.sp.wrapping_sub(1);
         self.write_u8(self.sp, bytes[0], system);
     }
 
@@ -577,9 +588,9 @@ impl Cpu {
     fn pop<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
         let mut bytes = [0; 2];
         bytes[0] = self.read_u8(self.sp, system);
-        self.sp += 1;
+        self.sp = self.sp.wrapping_add(1);
         bytes[1] = self.read_u8(self.sp, system);
-        self.sp += 1;
+        self.sp = self.sp.wrapping_add(1);
         operand.set(u16::from_le_bytes(bytes), self, system);
     }
 

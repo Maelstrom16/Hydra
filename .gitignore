@@ -11,6 +11,7 @@ src-future
 *.gbc.tags
 *.gba
 *.gba.tags
+mts/
 
 # Prerequisites
 *.d

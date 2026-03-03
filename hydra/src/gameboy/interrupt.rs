@@ -49,22 +49,22 @@ impl MemoryMapped for InterruptFlags {
 }
 
 pub struct InterruptEnable {
-    interrupts: MaskedBitVec<u8, false> // TODO: false assumed due to startup value -- verify this
+    interrupts: u8
 }
 
 impl InterruptEnable {
     pub fn new() -> Self {
         InterruptEnable {
-            interrupts: MaskedBitVec::new(0b00000000, 0b00011111, 0b00011111)
+            interrupts: 0x00
         }
     }
     
     pub fn read_ie(&self) -> u8 {
-        self.interrupts.read()
+        self.interrupts
     }
 
     pub fn write_ie(&mut self, val: u8) {
-        self.interrupts.write(val)
+        self.interrupts = val
     }
 }
 

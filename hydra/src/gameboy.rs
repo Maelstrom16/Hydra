@@ -136,7 +136,7 @@ impl GameBoy {
             let ppu = Ppu::new(model.clone(), graphics, proxy);
             let apu = Apu::new(audio);
             let cpu = Some(Cpu::new(&rom, &model, &mode));
-            let mut memory = MemoryMap::new(&model, mode.clone()).unwrap(); // TODO: Error should be handled rather than unwrapped
+            let mut memory = MemoryMap::new(model.clone(), mode.clone()).unwrap(); // TODO: Error should be handled rather than unwrapped
             memory.hot_swap_rom(rom).unwrap();
 
             GameBoy {
@@ -167,6 +167,10 @@ impl GameBoy {
 
     fn cycle_components(&mut self) {
         let memory = &mut self.memory;
+        // Once per machine cycle
+        memory.tick_dma();
+
+        // Loop until next M-cycle
         loop { 
             // Finish current cycle
             memory.timer.refresh_tima_if_overflowing();
@@ -207,7 +211,6 @@ impl GameBoy {
             // Next cycle
             memory.timer.tick(&mut memory.interrupt_flags, &mut memory.ppu_state, &mut memory.apu_state);
             self.apu.dot_tick(&mut memory.apu_state);
-            memory.tick_dma();
 
             // CPU cycle if applicable
             if memory.timer.is_system_cycle() {break;}
@@ -219,6 +222,7 @@ impl Emulator for GameBoy {
     fn main_thread(mut self) {
         println!("Launching Wyrm");
 
+        // Start main loop
         let mut cpu = self.cpu.take().unwrap();
         cpu.coro(&mut self, false);
 

@@ -1,9 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, gameboy::{GBRevision, Model, apu::{Apu, state::ApuState}, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::state::PpuState}, serialize};
+use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, gameboy::{GBRevision, GbMode, Model, apu::{Apu, state::ApuState}, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::state::PpuState}, serialize};
 
 pub struct MasterTimer {
     model: Rc<Model>,
+    mode: Rc<GbMode>,
 
     machine_cycle_timer: ModuloCounter<u8>,
     div_full: u16,
@@ -18,7 +19,7 @@ pub struct MasterTimer {
 }
 
 impl MasterTimer {
-    pub fn new(model: Rc<Model>) -> Self {
+    pub fn new(model: Rc<Model>, mode: Rc<GbMode>) -> Self {
         MasterTimer { 
             machine_cycle_timer: ModuloCounter::new(0, 4),
             div_full: match *model { 
@@ -27,6 +28,7 @@ impl MasterTimer {
                 Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles,
             } << 6,
             model,
+            mode,
             
             tima: 0,
             tma: 0,
@@ -47,7 +49,6 @@ impl MasterTimer {
     pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags, ppu_state: &mut PpuState, apu_state: &mut ApuState) {
         if self.machine_cycle_timer.increment() {
             self.update_div(self.div_full.wrapping_add(1), apu_state);
-
             self.timer_interrupt_status = match self.timer_interrupt_status {
                 InterruptStatus::Idle | InterruptStatus::Requesting => InterruptStatus::Idle,
                 InterruptStatus::Queued => {
@@ -102,11 +103,11 @@ impl MasterTimer {
             self.machine_cycle_timer.reset();
             let new_system_speed = match self.system_speed {
                 SystemSpeed::Standard => {
-                    self.machine_cycle_timer.modulus = 4;
+                    self.machine_cycle_timer.modulus = 2;
                     SystemSpeed::CgbDouble
                 }
                 SystemSpeed::CgbDouble => {
-                    self.machine_cycle_timer.modulus = 2;
+                    self.machine_cycle_timer.modulus = 4;
                     SystemSpeed::Standard
                 }
             };
@@ -188,6 +189,7 @@ impl MasterTimer {
     pub fn read_key1(&self) -> u8 {
         serialize!(
             (self.system_speed.as_u1()) =>> 7;
+            0b01111110;
             (self.speed_switch_queued as u8) =>> 0;
         )
     }
@@ -206,7 +208,7 @@ impl MasterTimer {
             0xFF05 => Ok(self.read_tima()),
             0xFF06 => Ok(self.read_tma()),
             0xFF07 => Ok(self.read_tac()),
-            0xFF4D => Ok(self.read_key1()),
+            0xFF4D if matches!(*self.mode, GbMode::CGB) => Ok(self.read_key1()),
             _ => Err(HydraIOError::OpenBusAccess),
         }
     }
@@ -217,7 +219,7 @@ impl MasterTimer {
             0xFF05 => Ok(self.write_tima(val)),
             0xFF06 => Ok(self.write_tma(val)),
             0xFF07 => Ok(self.write_tac(val)),
-            0xFF4D => Ok(self.write_key1(val)),
+            0xFF4D if matches!(*self.mode, GbMode::CGB) => Ok(self.write_key1(val)),
             _ => Err(HydraIOError::OpenBusAccess),
         }
     }

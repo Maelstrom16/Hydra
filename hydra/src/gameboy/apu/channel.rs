@@ -107,6 +107,7 @@ impl Pulse {
 impl Pulse {
     pub fn read_nr10(&self) -> u8 {
         serialize!(
+            0b10000000;
             (self.period_sweep_timer.modulus.reset_value) =>> 6..=4;
             (<Direction as Into<u8>>::into(self.period_sweep_direction)) =>> 3;
             (self.period_sweep_step) =>> 2..=0;
@@ -312,6 +313,7 @@ impl Wave {
 
     pub fn read_nr32(&self) -> u8 {
         serialize!(
+            0b10011111;
             (self.volume) =>> 6..=5;
         )
     }

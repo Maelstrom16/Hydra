@@ -17,7 +17,7 @@ impl SerialConnection {
         SerialConnection { 
             transfer_enabled: false, 
             high_speed: model.is_color(), 
-            local_clock: model.is_monochrome(),
+            local_clock: model.is_color(),
 
             data: 0x00,
 
@@ -36,6 +36,7 @@ impl SerialConnection {
     pub fn read_sc(&self) -> u8 {
         serialize!(
             (self.transfer_enabled as u8) =>> 7;
+            0b01111100;
             ((self.model.is_monochrome() || self.high_speed) as u8) =>> 1;
             (self.local_clock as u8) =>> 0;
         )

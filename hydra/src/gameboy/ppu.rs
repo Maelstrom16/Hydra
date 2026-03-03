@@ -149,7 +149,7 @@ impl Ppu {
         // Delay thread
         const SECS_PER_FRAME: f64 = 1f64 / 60f64;
         let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
-        println!("Finished with {}% remaining", (duration_until_next.as_secs_f32())/(1.0/60.0));
+        // println!("Finished with {}% remaining", (duration_until_next.as_secs_f32())/(1.0/60.0));
         thread::sleep(duration_until_next);
         self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
 
