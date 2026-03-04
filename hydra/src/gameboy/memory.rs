@@ -6,7 +6,7 @@ pub mod vram;
 pub mod wram;
 
 use crate::{
-    common::{errors::HydraIOError, util::Accessors},
+    common::errors::HydraIOError,
     gameboy::{
         GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
     },

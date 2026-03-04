@@ -224,7 +224,7 @@ impl Emulator for GameBoy {
 
         // Start main loop
         let mut cpu = self.cpu.take().unwrap();
-        cpu.coro(&mut self, true);
+        cpu.coro(&mut self, false);
 
         println!("Exiting Wyrm");
 

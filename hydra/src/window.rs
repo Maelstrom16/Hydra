@@ -8,6 +8,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
+#[cfg(target_os = "macos")]
 use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 
@@ -57,7 +58,7 @@ impl HydraApp {
         self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
         self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(self.window.clone().unwrap(), None)))));
         self.audio = Some(Arc::new(RwLock::new(Audio::new())));
-        self.ui = Some(UserInterface::from_config(&self.config));
+        self.ui = Some(UserInterface::initialize(self.window.as_ref().unwrap(), &self.config));
     }
 
     pub fn get_config(&self) -> &Config {

@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, io::Read, sync::{Arc, Mutex}, time::Duration};
 
-use cpal::{Device, Host, OutputCallbackInfo, SampleRate, SizedSample, Stream, StreamConfig, StreamError, traits::{DeviceTrait, HostTrait}};
-use ringbuf::{HeapProd, HeapRb, traits::{Consumer, Observer, Split}};
+use cpal::{Device, Host, OutputCallbackInfo, SampleRate, SizedSample, Stream, StreamConfig, StreamError, traits::{DeviceTrait, HostTrait, StreamTrait}};
+use ringbuf::{HeapProd, HeapRb, traits::{Consumer, Observer, Split}, wrap::Wrap};
 
 use crate::common::audio::sine_callback;
 
@@ -18,7 +18,6 @@ impl Audio {
         let output = host.default_output_device().unwrap();
         let supported_config = output.default_output_config().unwrap();
         let config = supported_config.config();
-
         Audio { host, output, config, stream: None }
     }
 
@@ -30,10 +29,12 @@ impl Audio {
         self.config.channels
     }
 
-    pub fn get_producer(&mut self) -> HeapProd<f32> {       
+    pub fn get_producer(&mut self) -> HeapProd<f32> {
         let (producer, mut consumer) = HeapRb::<f32>::new(self.config.sample_rate as usize / 10).split();
-        self.stream = Some(self.output.build_output_stream(&self.config, move |samples: &mut [f32], _| {consumer.pop_slice(samples);}, Self::error_callback, None).unwrap());
-        producer
+        let stream = self.output.build_output_stream(&self.config, move |samples: &mut [f32], _| {consumer.pop_slice(samples);}, Self::error_callback, None).unwrap();
+        stream.play();
+        self.stream = Some(stream);
+        return producer;
     }
 
     fn error_callback(err: StreamError) {

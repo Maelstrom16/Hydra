@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use muda::{
     AboutMetadataBuilder, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu,
     accelerator::{Accelerator, Code, Modifiers},
 };
 use rfd::FileDialog;
+use winit::window::Window;
 
 use crate::{
     config::Config,
@@ -17,7 +20,7 @@ pub struct UserInterface {
 }
 
 impl UserInterface {
-    pub fn from_config(config: &Config) -> Self {
+    pub fn initialize(window: &Arc<Window>, config: &Config) -> Self {
         // Create the main menubar
         let menu = Menu::new();
 
@@ -122,7 +125,7 @@ impl UserInterface {
 
         menu.append_items(&[&about_submenu, &file_submenu, &gameboy_submenu]).unwrap();
 
-        init_for_window(&menu);
+        apply_to_window(&menu, window);
 
         UserInterface {
             hydra_menu: menu,
@@ -144,10 +147,14 @@ impl UserInterface {
     }
 }
 
-fn init_for_window(menu: &Menu) {
+fn apply_to_window(menu: &Menu, window: &Arc<Window>) {
     #[cfg(target_os = "windows")]
     unsafe {
-        menu.init_for_hwnd(window_hwnd)
+        use wgpu::rwh::{HasWindowHandle, RawWindowHandle};
+        match window.window_handle().unwrap().as_raw() {
+            RawWindowHandle::Win32(handle) => menu.init_for_hwnd(handle.hwnd.into()),
+            _ => panic!("Initialized non-WIN32 window on Windows platform")
+        }
     };
     #[cfg(target_os = "linux")]
     menu.init_for_gtk_window(&gtk_window, Some(&vertical_gtk_box));
