@@ -67,10 +67,10 @@ impl mbc::MemoryBankController for MBC3 {
                 (0x0A, Some(rtc)) => Ok(rtc.latched_hours),
                 (0x0B, Some(rtc)) => Ok((rtc.latched_days & 0xFF) as u8),
                 (0x0C, Some(rtc)) => Ok(serialize!(
-                    (rtc.day_carry as u8) =>> 7;
-                    (rtc.halted as u8) =>> 6;
+                    (rtc.day_carry as u8) =>> [7];
+                    (rtc.halted as u8) =>> [6];
                     0b00111110;
-                    (((rtc.latched_days & 0b100000000) >> 8) as u8) =>> 0;
+                    (((rtc.latched_days & 0b100000000) >> 8) as u8) =>> [0];
                 )),
                 _ => Err(HydraIOError::OpenBusAccess)
             }
@@ -111,9 +111,9 @@ impl mbc::MemoryBankController for MBC3 {
                 (0x0B, Some(rtc)) => Ok(rtc.latched_days = (rtc.latched_days & 0x100) | value as u16),
                 (0x0C, Some(rtc)) => {
                     deserialize!(value;
-                        7 as bool =>> (rtc.day_carry);
-                        6 as bool =>> (rtc.halted);
-                        0 =>> days_hi;
+                        [7] as bool =>> (rtc.day_carry);
+                        [6] as bool =>> (rtc.halted);
+                        [0] =>> days_hi;
                     );
                     rtc.latched_days = (rtc.latched_days & 0xFF) | ((days_hi as u16) << 8);
                     Ok(())

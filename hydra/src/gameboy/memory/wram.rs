@@ -52,13 +52,13 @@ impl Wram {
     pub fn read_wbk(&self) -> u8 {
         serialize!(
             0b11111110;
-            (self.wbk) =>> 2..=0;
+            (self.wbk) =>> [2..=0];
         )
     }
 
     pub fn write_wbk(&mut self, val: u8) {
         deserialize!(val;
-            2..=0 =>> (self.wbk);
+            [2..=0] =>> (self.wbk);
         );
     }
 }

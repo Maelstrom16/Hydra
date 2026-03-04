@@ -22,19 +22,19 @@ macro_rules! let_or_set {
 #[macro_export]
 macro_rules! serialize {
     () => {0};
-    ($expr:expr =>> $hi:literal..=$lo:literal; $($rest:tt)*) => {
+    ($expr:expr =>> [$hi:literal..=$lo:literal]; $($rest:tt)*) => {
         (($expr & crate::bitmask_with_width!($hi..=$lo)) << $lo)
         | serialize!($($rest)*)
     };
-    ($expr:tt => $hi:literal..=$lo:literal; $($rest:tt)*) => {
+    ($expr:tt => [$hi:literal..=$lo:literal]; $($rest:tt)*) => {
         ($expr & const{crate::bitmask_with_width!($hi..=$lo) << $lo})
         | serialize!($($rest)*)
     };
-    ($expr:expr =>> $bit:literal; $($rest:tt)*) => {
+    ($expr:expr =>> [$bit:literal]; $($rest:tt)*) => {
         (($expr & 1) << $bit)
         | serialize!($($rest)*)
     };
-    ($expr:tt => $bit:literal; $($rest:tt)*) => {
+    ($expr:tt => [$bit:literal]; $($rest:tt)*) => {
         ($expr & const{1 << $bit})
         | serialize!($($rest)*)
     };
@@ -47,23 +47,23 @@ macro_rules! serialize {
 #[macro_export]
 macro_rules! deserialize {
     ($num:ident;) => {};
-    ($num:ident; $hi:literal..=$lo:literal =>> $field:tt; $($rest:tt)*) => {
+    ($num:ident; [$hi:literal..=$lo:literal] =>> $field:tt; $($rest:tt)*) => {
         crate::let_or_set!($field, ($num >> $lo) & crate::bitmask_with_width!($hi..=$lo));
         deserialize!($num; $($rest)*);
     };
-    ($num:ident; $hi:literal..=$lo:literal => $field:tt; $($rest:tt)*) => {
+    ($num:ident; [$hi:literal..=$lo:literal] => $field:tt; $($rest:tt)*) => {
         crate::let_or_set!($field, $num & const{crate::bitmask_with_width!($hi..=$lo) << $lo});
         deserialize!($num; $($rest)*);
     };
-    ($num:ident; $bit:literal as bool =>> $field:tt; $($rest:tt)*) => {
+    ($num:ident; [$bit:literal] as bool =>> $field:tt; $($rest:tt)*) => {
         crate::let_or_set!($field, $num & const{1 << $bit} != 0);
         deserialize!($num; $($rest)*);
     };
-    ($num:ident; $bit:literal =>> $field:tt; $($rest:tt)*) => {
+    ($num:ident; [$bit:literal] =>> $field:tt; $($rest:tt)*) => {
         crate::let_or_set!($field, ($num >> $bit) & 1);
         deserialize!($num; $($rest)*);
     };
-    ($num:ident; $bit:literal => $field:tt; $($rest:tt)*) => {
+    ($num:ident; [$bit:literal] => $field:tt; $($rest:tt)*) => {
         crate::let_or_set!($field, $num & const{1 << $bit});
         deserialize!($num; $($rest)*);
     };

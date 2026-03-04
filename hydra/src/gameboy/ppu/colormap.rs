@@ -51,37 +51,37 @@ impl DmgColorMap {
 
     pub fn read_bgp(&self) -> u8 {
         serialize!(
-            (self.bg_palette[3]) =>> 7..=6;
-            (self.bg_palette[2]) =>> 5..=4;
-            (self.bg_palette[1]) =>> 3..=2;
-            (self.bg_palette[0]) =>> 1..=0;
+            (self.bg_palette[3]) =>> [7..=6];
+            (self.bg_palette[2]) =>> [5..=4];
+            (self.bg_palette[1]) =>> [3..=2];
+            (self.bg_palette[0]) =>> [1..=0];
         )
     }
 
     pub fn write_bgp(&mut self, val: u8) {
         deserialize!(val;
-            7..=6 =>> (self.bg_palette[3]);
-            5..=4 =>> (self.bg_palette[2]);
-            3..=2 =>> (self.bg_palette[1]);
-            1..=0 =>> (self.bg_palette[0]);
+            [7..=6] =>> (self.bg_palette[3]);
+            [5..=4] =>> (self.bg_palette[2]);
+            [3..=2] =>> (self.bg_palette[1]);
+            [1..=0] =>> (self.bg_palette[0]);
         );
     }
     
     pub fn read_obp(&self, palette_index: usize) -> u8 {
         serialize!(
-            (self.ob_palettes[palette_index][3]) =>> 7..=6;
-            (self.ob_palettes[palette_index][2]) =>> 5..=4;
-            (self.ob_palettes[palette_index][1]) =>> 3..=2;
-            (self.ob_palettes[palette_index][0]) =>> 1..=0;
+            (self.ob_palettes[palette_index][3]) =>> [7..=6];
+            (self.ob_palettes[palette_index][2]) =>> [5..=4];
+            (self.ob_palettes[palette_index][1]) =>> [3..=2];
+            (self.ob_palettes[palette_index][0]) =>> [1..=0];
         )
     }
 
     pub fn write_obp(&mut self, val: u8, palette_index: usize) {
         deserialize!(val;
-            7..=6 =>> (self.ob_palettes[palette_index][3]);
-            5..=4 =>> (self.ob_palettes[palette_index][2]);
-            3..=2 =>> (self.ob_palettes[palette_index][1]);
-            1..=0 =>> (self.ob_palettes[palette_index][0]);
+            [7..=6] =>> (self.ob_palettes[palette_index][3]);
+            [5..=4] =>> (self.ob_palettes[palette_index][2]);
+            [3..=2] =>> (self.ob_palettes[palette_index][1]);
+            [1..=0] =>> (self.ob_palettes[palette_index][0]);
         );
     }
 }
@@ -184,16 +184,16 @@ impl CgbPaletteBank {
 
     pub fn read_index(&self) -> u8 {
         serialize!(
-            (self.index_auto_increment as u8) =>> 7;
+            (self.index_auto_increment as u8) =>> [7];
             0b01000000;
-            (self.palette_index) =>> 5..=0;
+            (self.palette_index) =>> [5..=0];
         )
     }
 
     pub fn write_index(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> (self.index_auto_increment);
-            5..=0 =>> (self.palette_index);
+            [7] as bool =>> (self.index_auto_increment);
+            [5..=0] =>> (self.palette_index);
         );
     }
 
@@ -204,13 +204,13 @@ impl CgbPaletteBank {
 
         match self.palette_index % 2 {
             0 => serialize!(
-                (color[G] >> 3) =>> 7..=5;
-                (color[R] >> 3) =>> 4..=0;
+                (color[G] >> 3) =>> [7..=5];
+                (color[R] >> 3) =>> [4..=0];
             ),
             1 => serialize!(
                 0b10000000;
-                (color[B] >> 3) =>> 6..=2;
-                (color[G] >> 6) =>> 1..=0;
+                (color[B] >> 3) =>> [6..=2];
+                (color[G] >> 6) =>> [1..=0];
             ),
             _ => unreachable!()
         }
@@ -224,16 +224,16 @@ impl CgbPaletteBank {
         match self.palette_index % 2 {
             0 => {
                 deserialize!(val;
-                    7..=5 =>> g_lo;
-                    4..=0 =>> r;
+                    [7..=5] =>> g_lo;
+                    [4..=0] =>> r;
                 );
                 color[G] = (color[G] & 0b11000000) | (g_lo << 3);
                 color[R] = r << 3;
             }
             1 => {
                 deserialize!(val;
-                    6..=2 =>> b;
-                    1..=0 =>> g_hi;
+                    [6..=2] =>> b;
+                    [1..=0] =>> g_hi;
                 );
                 color[B] = b << 3;
                 color[G] = (color[G] & 0b00111000) | (g_hi << 6);

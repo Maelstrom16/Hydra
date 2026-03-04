@@ -154,15 +154,15 @@ impl MasterTimer {
     pub fn read_tac(&self) -> u8 {
         serialize!(
             0b11111000;
-            (self.tima_enabled as u8) =>> 2;
-            (self.tima_speed.as_u2()) =>> 1..=0;
+            (self.tima_enabled as u8) =>> [2];
+            (self.tima_speed.as_u2()) =>> [1..=0];
         )
     }
     
     pub fn write_tac(&mut self, val: u8) {
         deserialize!(val;
-            2 as bool =>> tima_enabled;
-            1..=0 =>> tima_speed;
+            [2] as bool =>> tima_enabled;
+            [1..=0] =>> tima_speed;
         );
         let tima_speed = TimaSpeed::from_u2(tima_speed);
 
@@ -188,15 +188,15 @@ impl MasterTimer {
     
     pub fn read_key1(&self) -> u8 {
         serialize!(
-            (self.system_speed.as_u1()) =>> 7;
+            (self.system_speed.as_u1()) =>> [7];
             0b01111110;
-            (self.speed_switch_queued as u8) =>> 0;
+            (self.speed_switch_queued as u8) =>> [0];
         )
     }
 
     pub fn write_key1(&mut self, val: u8) {
         deserialize!(val;
-            0 as bool =>> (self.speed_switch_queued); 
+            [0] as bool =>> (self.speed_switch_queued); 
         );
     }
 }

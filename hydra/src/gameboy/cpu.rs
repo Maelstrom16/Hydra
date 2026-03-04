@@ -231,9 +231,11 @@ impl Cpu {
             self.ir = self.step_u8(system);
             if debug {
                 println!(
-                    "{:#06X}: {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
+                    "{:#06X}: {:02X} {:02X} {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
                     self.pc - 1,
                     self.ir,
+                    system.memory.read_u8(self.pc, false),
+                    system.memory.read_u8(self.pc + 1, false),
                     self.af[1],
                     self.af[0],
                     u16::from_le_bytes(self.bc),

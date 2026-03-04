@@ -35,18 +35,18 @@ impl SerialConnection {
 
     pub fn read_sc(&self) -> u8 {
         serialize!(
-            (self.transfer_enabled as u8) =>> 7;
+            (self.transfer_enabled as u8) =>> [7];
             0b01111100;
-            ((self.model.is_monochrome() || self.high_speed) as u8) =>> 1;
-            (self.local_clock as u8) =>> 0;
+            ((self.model.is_monochrome() || self.high_speed) as u8) =>> [1];
+            (self.local_clock as u8) =>> [0];
         )
     }
 
     pub fn write_sc(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> (self.transfer_enabled);
-            1 as bool =>> high_speed;
-            0 as bool =>> (self.local_clock);
+            [7] as bool =>> (self.transfer_enabled);
+            [1] as bool =>> high_speed;
+            [0] as bool =>> (self.local_clock);
         );
         self.high_speed = self.model.is_color() && high_speed;
     }

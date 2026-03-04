@@ -62,13 +62,13 @@ impl Vram {
     pub fn read_vbk(&self) -> u8 {
         serialize!(
             0b11111110;
-            (self.vbk) =>> 0;
+            (self.vbk) =>> [0];
         )
     }
 
     pub fn write_vbk(&mut self, val: u8) {
         deserialize!(val;
-            0 =>> (self.vbk);
+            [0] =>> (self.vbk);
         );
     }
 }

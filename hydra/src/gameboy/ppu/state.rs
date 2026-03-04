@@ -117,27 +117,27 @@ impl PpuState {
     
     pub fn read_lcdc(&self) -> u8 {
         serialize!(
-            (self.lcd_enabled as u8) =>> 7;
-            (matches!(self.win_map_area, TileMapArea::Map1) as u8) =>> 6;
-            (self.window_enabled as u8) =>> 5;
-            (matches!(self.tilemaps_data_area, TileLowDataArea::Data1) as u8) =>> 4;
-            (matches!(self.bg_map_area, TileMapArea::Map1) as u8) =>> 3;
-            (matches!(self.object_size, ObjectHeight::Tall) as u8) =>> 2;
-            (self.objects_enabled as u8) =>> 1;
-            (self.tilemaps_enabled as u8) =>> 0;
+            (self.lcd_enabled as u8) =>> [7];
+            (matches!(self.win_map_area, TileMapArea::Map1) as u8) =>> [6];
+            (self.window_enabled as u8) =>> [5];
+            (matches!(self.tilemaps_data_area, TileLowDataArea::Data1) as u8) =>> [4];
+            (matches!(self.bg_map_area, TileMapArea::Map1) as u8) =>> [3];
+            (matches!(self.object_size, ObjectHeight::Tall) as u8) =>> [2];
+            (self.objects_enabled as u8) =>> [1];
+            (self.tilemaps_enabled as u8) =>> [0];
         )
     }
 
     pub fn write_lcdc(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> (self.lcd_enabled);
-            6 as bool =>> win_map_area;
-            5 as bool =>> (self.window_enabled);
-            4 as bool =>> tilemaps_data_area;
-            3 as bool =>> bg_map_area;
-            2 as bool =>> object_size;
-            1 as bool =>> (self.objects_enabled);
-            0 as bool =>> (self.tilemaps_enabled);
+            [7] as bool =>> (self.lcd_enabled);
+            [6] as bool =>> win_map_area;
+            [5] as bool =>> (self.window_enabled);
+            [4] as bool =>> tilemaps_data_area;
+            [3] as bool =>> bg_map_area;
+            [2] as bool =>> object_size;
+            [1] as bool =>> (self.objects_enabled);
+            [0] as bool =>> (self.tilemaps_enabled);
         );
         self.win_map_area = TileMapArea::from_bool(win_map_area);
         self.tilemaps_data_area = TileLowDataArea::from_bool(tilemaps_data_area);
@@ -148,15 +148,15 @@ impl PpuState {
     pub fn read_stat(&self) -> u8 {
         serialize!(
             0b10000000;
-            (self.stat_interrupt_select) => 6..=3;
-            ((self.ly == self.lyc) as u8) =>> 2;
-            (self.ppu_mode.as_u2()) =>> 1..=0;
+            (self.stat_interrupt_select) => [6..=3];
+            ((self.ly == self.lyc) as u8) =>> [2];
+            (self.ppu_mode.as_u2()) =>> [1..=0];
         )
     }
     
     pub fn write_stat(&mut self, val: u8) {
         deserialize!(val;
-            6..=3 => (self.stat_interrupt_select);
+            [6..=3] => (self.stat_interrupt_select);
         );
     }
     

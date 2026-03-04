@@ -1,23 +1,45 @@
-use crate::{common::errors::HydraIOError, gameboy::{apu::channel::{Noise, Pulse, PulseType, Wave}, memory::MemoryMapped}};
+use cpal::Sample;
+
+use crate::{common::errors::HydraIOError, deserialize, gameboy::{apu::channel::{Noise, Pulse, PulseType, Wave}, memory::MemoryMapped}, serialize};
 
 pub struct ApuState {
+    master_enable: bool,
+    master_amp_l: u8,
+    master_amp_r: u8,
     div: u8,
 
     pub(super) pulse1: Pulse,
     pub(super) pulse2: Pulse,
     pub(super) wave: Wave,
     pub(super) noise: Noise,
+
+    vin_amp_l: u8,
+    vin_amp_r: u8,
+
+    prev_samples: [f32; 4],
+    amplitudes_l: [u8; 4],
+    amplitudes_r: [u8; 4],
 }
 
 impl ApuState {
     pub fn new() -> Self {
         ApuState {
+            master_enable: true,
+            master_amp_l: 1,
+            master_amp_r: 1,
             div: 0,
 
             pulse1: Pulse::new(PulseType::Pulse1),
             pulse2: Pulse::new(PulseType::Pulse2),
             wave: Wave::new(),
             noise: Noise::new(),
+
+            vin_amp_l: 0,
+            vin_amp_r: 0,
+
+            prev_samples: [0.0; 4],
+            amplitudes_l: [1; 4],
+            amplitudes_r: [1, 1, 0, 0],
         }
     }
 
@@ -41,6 +63,92 @@ impl ApuState {
             self.wave.tick_length();
             self.noise.tick_length();
         }
+    }
+
+    pub fn dot_tick(&mut self, dot_counter: u8) -> [f32; 2] {
+        self.prev_samples[2] = self.wave.tick_and_sample();
+        if dot_counter % 4 == 0 {
+            self.prev_samples[0] = self.pulse1.tick_and_sample();
+            self.prev_samples[1] = self.pulse2.tick_and_sample();
+            if dot_counter % 8 == 0 {
+                self.prev_samples[3] = self.noise.tick_and_sample();
+            }
+        }
+
+        [self.prev_samples.iter().enumerate().fold(0.0, |l, (index, sample)| l + sample.mul_amp(Self::amp_from_u1(self.amplitudes_l[index]))).mul_amp(Self::amp_from_u3(self.master_amp_l) / 4.0),
+         self.prev_samples.iter().enumerate().fold(0.0, |r, (index, sample)| r + sample.mul_amp(Self::amp_from_u1(self.amplitudes_r[index]))).mul_amp(Self::amp_from_u3(self.master_amp_r) / 4.0)]
+    }
+
+    fn amp_from_u1(u1: u8) -> f32 {
+        u1 as f32
+    }
+
+    fn amp_from_u3(u3: u8) -> f32 {
+        // Maps 0 - 7 to 0.125 - 1.000
+        (u3 + 1) as f32 / 8.0
+    }
+}
+
+impl ApuState {
+    fn read_nr50(&self) -> u8 {
+        serialize!(
+            (self.vin_amp_l) =>> [7];
+            (self.master_amp_l) =>> [6..=4];
+            (self.vin_amp_r) =>> [3];
+            (self.master_amp_r) =>> [2..=0];
+        )
+    }
+
+    fn write_nr50(&mut self, val: u8) {
+        deserialize!(val;
+            [7] =>> (self.vin_amp_l);
+            [6..=4] =>> (self.master_amp_l);
+            [3] =>> (self.vin_amp_r);
+            [2..=0] =>> (self.master_amp_r);
+        );
+    }
+
+    fn read_nr51(&self) -> u8 {
+        serialize!(
+            (self.amplitudes_l[3]) =>> [7];
+            (self.amplitudes_l[2]) =>> [6];
+            (self.amplitudes_l[1]) =>> [5];
+            (self.amplitudes_l[0]) =>> [4];
+            (self.amplitudes_r[3]) =>> [3];
+            (self.amplitudes_r[2]) =>> [2];
+            (self.amplitudes_r[1]) =>> [1];
+            (self.amplitudes_r[0]) =>> [0];
+        )
+    }
+
+    fn write_nr51(&mut self, val: u8) {
+        deserialize!(val;
+            [7] =>> (self.amplitudes_l[3]);
+            [6] =>> (self.amplitudes_l[2]);
+            [5] =>> (self.amplitudes_l[1]);
+            [4] =>> (self.amplitudes_l[0]);
+            [3] =>> (self.amplitudes_r[3]);
+            [2] =>> (self.amplitudes_r[2]);
+            [1] =>> (self.amplitudes_r[1]);
+            [0] =>> (self.amplitudes_r[0]);
+        );
+    }
+
+    fn read_nr52(&self) -> u8 {
+        serialize!(
+            (self.master_enable as u8) =>> [7];
+            0b01110000;
+            (self.noise.is_enabled() as u8) =>> [3];
+            (self.wave.is_enabled() as u8) =>> [2];
+            (self.pulse2.is_enabled() as u8) =>> [1];
+            (self.pulse1.is_enabled() as u8) =>> [0];
+        )
+    }
+
+    fn write_nr52(&mut self, val: u8) {
+        deserialize!(val;
+            [7] as bool =>> (self.master_enable);
+        );
     }
 }
 
@@ -70,6 +178,10 @@ impl MemoryMapped for ApuState {
             0xFF22 => Ok(self.noise.read_nr43()),
             0xFF23 => Ok(self.noise.read_nr44()),
 
+            0xFF24 => Ok(self.read_nr50()),
+            0xFF25 => Ok(self.read_nr51()),
+            0xFF26 => Ok(self.read_nr52()),
+
             _ => Err(HydraIOError::OpenBusAccess)
         }
     }
@@ -98,7 +210,11 @@ impl MemoryMapped for ApuState {
             0xFF21 => Ok(self.noise.write_nr42(val)),
             0xFF22 => Ok(self.noise.write_nr43(val)),
             0xFF23 => Ok(self.noise.write_nr44(val)),
-            
+
+            0xFF24 => Ok(self.write_nr50(val)),
+            0xFF25 => Ok(self.write_nr51(val)),
+            0xFF26 => Ok(self.write_nr52(val)),
+
             _ => Err(HydraIOError::OpenBusAccess)
         }
     }

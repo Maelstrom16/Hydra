@@ -102,23 +102,27 @@ impl Pulse {
             self.enabled = false;
         }
     }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 impl Pulse {
     pub fn read_nr10(&self) -> u8 {
         serialize!(
             0b10000000;
-            (self.period_sweep_timer.modulus.reset_value) =>> 6..=4;
-            (<Direction as Into<u8>>::into(self.period_sweep_direction)) =>> 3;
-            (self.period_sweep_step) =>> 2..=0;
+            (self.period_sweep_timer.modulus.reset_value) =>> [6..=4];
+            (<Direction as Into<u8>>::into(self.period_sweep_direction)) =>> [3];
+            (self.period_sweep_step) =>> [2..=0];
         )
     }
 
     pub fn write_nr10(&mut self, val: u8) {
         deserialize!(val;
-            6..=4 =>> period_sweep_interval;
-            3 as bool =>> period_sweep_direction;
-            2..=0 =>> (self.period_sweep_step);
+            [6..=4] =>> period_sweep_interval;
+            [3] as bool =>> period_sweep_direction;
+            [2..=0] =>> (self.period_sweep_step);
         );
         self.period_sweep_timer.modulus.reset_value = period_sweep_interval;
         self.period_sweep_timer.modulus.reset();
@@ -127,15 +131,15 @@ impl Pulse {
     
     pub fn read_nrx1(&self) -> u8 {
         serialize!(
-            (self.duty_index as u8) =>> 7..=6;
+            (self.duty_index as u8) =>> [7..=6];
             0b00111111;
         )
     }
 
     pub fn write_nrx1(&mut self, val: u8) {
         deserialize!(val;
-            7..=6 =>> duty_index;
-            5..=0 =>> initial_length_timer;
+            [7..=6] =>> duty_index;
+            [5..=0] =>> initial_length_timer;
         );
         self.duty_index = duty_index as usize;
         self.length_timer.reset_value = initial_length_timer;
@@ -143,17 +147,17 @@ impl Pulse {
     
     pub fn read_nrx2(&self) -> u8 {
         serialize!(
-            (self.volume.reset_value) =>> 7..=4;
-            (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> 3;
-            (self.volume_sweep_timer.modulus.reset_value) =>> 2..=0;
+            (self.volume.reset_value) =>> [7..=4];
+            (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> [3];
+            (self.volume_sweep_timer.modulus.reset_value) =>> [2..=0];
         )
     }
 
     pub fn write_nrx2(&mut self, val: u8) {
         deserialize!(val;
-            7..=4 =>> volume;
-            3 as bool =>> volume_sweep_direction;
-            2..=0 =>> volume_sweep_interval;
+            [7..=4] =>> volume;
+            [3] as bool =>> volume_sweep_direction;
+            [2..=0] =>> volume_sweep_interval;
         );
 
         self.volume.reset_value = volume;
@@ -176,15 +180,15 @@ impl Pulse {
     pub fn read_nrx4(&self) -> u8 {
         serialize!(
             0b10111111;
-            (self.length_timer_enabled as u8) =>> 6;
+            (self.length_timer_enabled as u8) =>> [6];
         )
     }
 
     pub fn write_nrx4(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> trigger;
-            6 as bool =>> (self.length_timer_enabled);
-            2..=0 =>> period_high;
+            [7] as bool =>> trigger;
+            [6] as bool =>> (self.length_timer_enabled);
+            [2..=0] =>> period_high;
         );
 
         self.period_timer.reset_value.reset_value = ((period_high as u16) << 8) | (self.period_timer.reset_value.reset_value & 0b00011111111);
@@ -287,19 +291,23 @@ impl Wave {
             self.enabled = false;
         }
     }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled && self.dac_enabled
+    }
 }
 
 impl Wave {
     pub fn read_nr30(&self) -> u8 {
         serialize!(
-            (self.dac_enabled as u8) =>> 7;
+            (self.dac_enabled as u8) =>> [7];
             0b01111111;
         )
     }
 
     pub fn write_nr30(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> (self.dac_enabled);
+            [7] as bool =>> (self.dac_enabled);
         );
     }
 
@@ -314,13 +322,13 @@ impl Wave {
     pub fn read_nr32(&self) -> u8 {
         serialize!(
             0b10011111;
-            (self.volume) =>> 6..=5;
+            (self.volume) =>> [6..=5];
         )
     }
 
     pub fn write_nr32(&mut self, val: u8) {
         deserialize!(val;
-            6..=5 =>> (self.volume);
+            [6..=5] =>> (self.volume);
         );
     }
 
@@ -335,15 +343,15 @@ impl Wave {
     pub fn read_nr34(&self) -> u8 {
         serialize!(
             0b10111111;
-            (self.length_timer_enabled as u8) =>> 6;
+            (self.length_timer_enabled as u8) =>> [6];
         )
     }
 
     pub fn write_nr34(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> trigger;
-            6 as bool =>> (self.length_timer_enabled);
-            2..=0 =>> period_high;
+            [7] as bool =>> trigger;
+            [6] as bool =>> (self.length_timer_enabled);
+            [2..=0] =>> period_high;
         );
 
         self.period_timer.reset_value.reset_value = ((period_high as u16) << 8) | (self.period_timer.reset_value.reset_value & 0b00011111111);
@@ -363,8 +371,8 @@ impl Wave {
     pub fn write_waveram(&mut self, val: u8, address: usize) {
         let index = address * 2;
         deserialize!(val;
-            7..=4 =>> wave_high;
-            3..=0 =>> wave_low;
+            [7..=4] =>> wave_high;
+            [3..=0] =>> wave_low;
         );
         self.wavetable[index] = wave_high;
         self.wavetable[index + 1] = wave_low;
@@ -442,6 +450,10 @@ impl Noise {
             self.enabled = false;
         }
     }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 impl Noise {
@@ -451,23 +463,23 @@ impl Noise {
 
     pub fn write_nr41(&mut self, val: u8) {
         deserialize!(val;
-            5..=0 =>> (self.length_timer.reset_value);
+            [5..=0] =>> (self.length_timer.reset_value);
         );
     }
     
     pub fn read_nr42(&self) -> u8 {
         serialize!(
-            (self.volume.reset_value) =>> 7..=4;
-            (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> 3;
-            (self.volume_sweep_timer.modulus.reset_value) =>> 2..=0;
+            (self.volume.reset_value) =>> [7..=4];
+            (<Direction as Into<u8>>::into(self.volume_sweep_direction.reset_value)) =>> [3];
+            (self.volume_sweep_timer.modulus.reset_value) =>> [2..=0];
         )
     }
 
     pub fn write_nr42(&mut self, val: u8) {
         deserialize!(val;
-            7..=4 =>> volume;
-            3 as bool =>> volume_sweep_direction;
-            2..=0 =>> volume_sweep_interval;
+            [7..=4] =>> volume;
+            [3] as bool =>> volume_sweep_direction;
+            [2..=0] =>> volume_sweep_interval;
         );
 
         self.volume.reset_value = volume;
@@ -481,17 +493,17 @@ impl Noise {
     
     pub fn read_nr43(&self) -> u8 {
         serialize!(
-            (self.initial_shift) =>> 7..=4;
-            (self.use_bit_7 as u8) =>> 3;
-            (self.initial_divider) =>> 2..=0;
+            (self.initial_shift) =>> [7..=4];
+            (self.use_bit_7 as u8) =>> [3];
+            (self.initial_divider) =>> [2..=0];
         )
     }
 
     pub fn write_nr43(&mut self, val: u8) {
         deserialize!(val;
-            7..=4 =>> (self.initial_shift);
-            3 as bool =>> (self.use_bit_7);
-            2..=0 =>> (self.initial_divider);
+            [7..=4] =>> (self.initial_shift);
+            [3] as bool =>> (self.use_bit_7);
+            [2..=0] =>> (self.initial_divider);
         );
         
         let divider = if self.initial_divider != 0 {self.initial_divider as u32 * 2} else {1};
@@ -501,14 +513,14 @@ impl Noise {
     pub fn read_nr44(&self) -> u8 {
         serialize!(
             0b10111111;
-            (self.length_timer_enabled as u8) =>> 6;
+            (self.length_timer_enabled as u8) =>> [6];
         )
     }
 
     pub fn write_nr44(&mut self, val: u8) {
         deserialize!(val;
-            7 as bool =>> trigger;
-            6 as bool =>> (self.length_timer_enabled);
+            [7] as bool =>> trigger;
+            [6] as bool =>> (self.length_timer_enabled);
         );
         
         if trigger {

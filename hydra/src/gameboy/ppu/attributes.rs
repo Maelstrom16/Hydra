@@ -15,20 +15,20 @@ impl TileAttributes {
         match model.is_monochrome() {
             true => {
                 deserialize!(val;
-                    7 as bool =>> bg_priority;
-                    6 as bool =>> y_flip;
-                    5 as bool =>> x_flip;
-                    4 =>> palette;
+                    [7] as bool =>> bg_priority;
+                    [6] as bool =>> y_flip;
+                    [5] as bool =>> x_flip;
+                    [4] =>> palette;
                 );
                 TileAttributes { bg_priority, y_flip, x_flip, bank_index: 0, palette }
             }
             false => {
                 deserialize!(val;
-                    7 as bool =>> bg_priority;
-                    6 as bool =>> y_flip;
-                    5 as bool =>> x_flip;
-                    3 =>> bank_index;
-                    2..=0 =>> palette;
+                    [7] as bool =>> bg_priority;
+                    [6] as bool =>> y_flip;
+                    [5] as bool =>> x_flip;
+                    [3] =>> bank_index;
+                    [2..=0] =>> palette;
                 );
                 TileAttributes { bg_priority, y_flip, x_flip, bank_index, palette }
             }
