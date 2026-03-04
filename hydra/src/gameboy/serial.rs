@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use crate::{common::errors::HydraIOError, deserialize, gameboy::{Model, memory::MemoryMapped}, serialize};
+use crate::{common::errors::HydraIOError, deserialize, gameboy::{GbMode, Model, memory::MemoryMapped}, serialize};
 
 pub struct SerialConnection {
-    model: Rc<Model>,
+    mode: Rc<GbMode>,
 
     transfer_enabled: bool,
     high_speed: bool,
@@ -13,15 +13,15 @@ pub struct SerialConnection {
 }
 
 impl SerialConnection {
-    pub fn new(model: Rc<Model>) -> Self {
+    pub fn new(mode: Rc<GbMode>) -> Self {
         SerialConnection { 
             transfer_enabled: false, 
-            high_speed: model.is_color(), 
-            local_clock: model.is_color(),
+            high_speed: matches!(*mode, GbMode::CGB), 
+            local_clock: matches!(*mode, GbMode::CGB),
 
             data: 0x00,
 
-            model, 
+            mode, 
         }
     }
 
@@ -37,7 +37,7 @@ impl SerialConnection {
         serialize!(
             (self.transfer_enabled as u8) =>> [7];
             0b01111100;
-            ((self.model.is_monochrome() || self.high_speed) as u8) =>> [1];
+            ((matches!(*self.mode, GbMode::DMG) || self.high_speed) as u8) =>> [1];
             (self.local_clock as u8) =>> [0];
         )
     }
@@ -48,7 +48,7 @@ impl SerialConnection {
             [1] as bool =>> high_speed;
             [0] as bool =>> (self.local_clock);
         );
-        self.high_speed = self.model.is_color() && high_speed;
+        self.high_speed = matches!(*self.mode, GbMode::CGB) && high_speed;
     }
 }
 

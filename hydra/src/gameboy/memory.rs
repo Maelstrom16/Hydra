@@ -46,7 +46,7 @@ impl MemoryMap {
         let interrupt_flags = InterruptFlags::new();
         let interrupt_enable = InterruptEnable::new();
         let joypad = Joypad::new();
-        let serial = SerialConnection::new(model.clone());
+        let serial = SerialConnection::new(mode.clone());
         let vram = Vram::new(model.clone());
         let wram = Wram::new(model.clone());
         let ppu_state = PpuState::new(&model);

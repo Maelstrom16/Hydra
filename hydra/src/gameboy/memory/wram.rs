@@ -51,7 +51,7 @@ impl Wram {
 impl Wram {
     pub fn read_wbk(&self) -> u8 {
         serialize!(
-            0b11111110;
+            0b11111000;
             (self.wbk) =>> [2..=0];
         )
     }
