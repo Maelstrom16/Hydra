@@ -1,3 +1,4 @@
+pub mod hdma;
 mod mbc;
 pub mod oam;
 pub mod rom;
@@ -8,7 +9,7 @@ pub mod wram;
 use crate::{
     common::errors::HydraIOError,
     gameboy::{
-        GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
+        GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{hdma::HdmAccessor, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
     },
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, time::Duration};
@@ -29,13 +30,10 @@ pub struct MemoryMap {
     pub(super) apu_state: ApuState,
     pub(super) ppu_state: PpuState,
     pub(super) color_map: Box<dyn ColorMap>,
+    pub(super) hdma: Box<dyn HdmAccessor>,
 
     dma_source: u8,
     dma_cycle: Option<u8>,
-
-    hdma_source: u16,
-    hdma_destination: u16,
-    hdma_length: u8,
 
     hram: [u8; 0x7F],
     pub(super) interrupt_enable: InterruptEnable,
@@ -58,6 +56,7 @@ impl MemoryMap {
             true => 0xFF,
             false => 0x00,
         };
+        let hdma = hdma::from_mode(&mode);
 
         Ok(MemoryMap {
             model,
@@ -75,13 +74,10 @@ impl MemoryMap {
             apu_state,
             ppu_state,
             color_map,
+            hdma,
 
             dma_source,
             dma_cycle: None,
-
-            hdma_source: 0xFFF0,
-            hdma_destination: 0x1FF0,
-            hdma_length: 0xFF,
 
             hram: [0; 0x7F],
             interrupt_enable,
@@ -140,11 +136,7 @@ impl MemoryMap {
             0xFF46 => Ok(self.dma_source),
             0xFF47..=0xFF49 | 0xFF68..=0xFF6B => self.color_map.read(address),
             0xFF4F if matches!(*self.mode, GbMode::CGB) => Ok(self.vram.read_vbk()),
-            0xFF51 if matches!(*self.mode, GbMode::CGB) => Ok(0xFF),
-            0xFF52 if matches!(*self.mode, GbMode::CGB) => Ok(0xFF),
-            0xFF53 if matches!(*self.mode, GbMode::CGB) => Ok(0xFF),
-            0xFF54 if matches!(*self.mode, GbMode::CGB) => Ok(0xFF),
-            0xFF55 if matches!(*self.mode, GbMode::CGB) => Ok(self.hdma_length),
+            0xFF51..=0xFF55 => self.hdma.read(address),
             0xFF70 if matches!(*self.mode, GbMode::CGB) => Ok(self.wram.read_wbk()),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80]),
             0xFFFF => self.interrupt_enable.read(address),
@@ -178,11 +170,7 @@ impl MemoryMap {
             0xFF46 => Ok({self.dma_source = val; self.dma_cycle = Some(0);}),
             0xFF47..=0xFF49 | 0xFF68..=0xFF6B => self.color_map.write(val, address),
             0xFF4F if matches!(*self.mode, GbMode::CGB) => Ok(self.vram.write_vbk(val)),
-            0xFF51 if matches!(*self.mode, GbMode::CGB) => Ok(self.hdma_source = (self.hdma_source & 0xFF) | ((val as u16) << 8)),
-            0xFF52 if matches!(*self.mode, GbMode::CGB) => Ok(self.hdma_source = (self.hdma_source & 0xFF00) | (val as u16)),
-            0xFF53 if matches!(*self.mode, GbMode::CGB) => Ok(self.hdma_destination = (self.hdma_destination & 0xFF) | ((val as u16 & 0x1F) << 8)),
-            0xFF54 if matches!(*self.mode, GbMode::CGB) => Ok(self.hdma_destination = (self.hdma_destination & 0xFF00) | (val as u16)),
-            0xFF55 if matches!(*self.mode, GbMode::CGB) => Ok({self.hdma_length = val; self.hdma();}),
+            0xFF51..=0xFF55 => self.hdma.write(val, address, &self.ppu_state),
             0xFF70 if matches!(*self.mode, GbMode::CGB) => Ok(self.wram.write_wbk(val)),
             0xFF80..=0xFFFE => Ok(self.hram[address as usize - 0xFF80] = val),
             0xFFFF => self.interrupt_enable.write(val, address),
@@ -194,19 +182,6 @@ impl MemoryMap {
             Err(HydraIOError::OpenBusAccess) => {}//println!("Warning: Write to open bus at address {:#06X}", address),
             Err(e) => panic!("Error writing to memory.\n{}", e)
         }
-    }
-}
-
-impl MemoryMap {
-    fn hdma(&mut self) {
-        if matches!(*self.mode, GbMode::DMG) {return;}
-        let length = (self.hdma_length as u16 + 1) * 0x10;
-        let destination = self.hdma_destination + 0x8000;
-        for i in 0..length {
-            let val = self.read_u8(self.hdma_source + i, false);
-            self.write_u8(val, destination + i, false);
-        }
-        self.hdma_length = 0xFF;
     }
 }
 

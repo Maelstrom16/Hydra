@@ -285,6 +285,14 @@ impl Cpu {
                 }
             };
 
+            // If not halted, process HDMA. Skip this cycle during HDMA transfer.
+            // TODO: Remove unsafe block?
+            let hdma_active = unsafe {
+                let memory: *mut MemoryMap = &mut system.memory;
+                (*memory).hdma.tick(&mut system.memory) 
+            };
+            if hdma_active {continue;}
+
             // Fetch cycle
             let pc_old = self.pc;
             let next = self.fetch(system, debug);
