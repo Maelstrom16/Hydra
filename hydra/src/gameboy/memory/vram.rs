@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::common::errors::HydraIOError;
-use crate::gameboy::Model;
+use crate::gameboy::{GbMode, Model};
 use crate::gameboy::ppu::PpuMode;
 use crate::gameboy::ppu::attributes::TileAttributes;
 use crate::{deserialize, serialize};
@@ -10,20 +10,20 @@ use crate::{deserialize, serialize};
 pub const ADDRESS_OFFSET: u16 = 0x8000;
 
 pub struct Vram {
-    model: Rc<Model>,
+    mode: Rc<GbMode>,
     vram: Box<[[u8; 0x2000]]>,
     vbk: u8,
 }
 
 impl Vram {
-    pub fn new(model: Rc<Model>) -> Self {
-        let bank_count = match model.is_monochrome() {
-            true => 1,
-            false => 2
+    pub fn new(mode: Rc<GbMode>) -> Self {
+        let bank_count = match *mode {
+            GbMode::DMG => 1,
+            GbMode::CGB => 2
         };
 
         Vram {
-            model,
+            mode,
             vram: vec![[0; 0x2000]; bank_count].into_boxed_slice(),
             vbk: 0,
         }
@@ -43,14 +43,14 @@ impl Vram {
 
     pub fn read_tile_map(&self, address: u16) -> (u8, TileAttributes) {
         let address = Vram::localize_address(address);
-        (self.vram[0][address], match self.model.is_monochrome() {
-            true => TileAttributes::default(),
-            false => TileAttributes::from_u8(self.vram[1][address], &self.model)
+        (self.vram[0][address], match *self.mode {
+            GbMode::DMG => TileAttributes::default(),
+            GbMode::CGB => TileAttributes::from_u8(self.vram[1][address], &self.mode)
         }) 
     }
 
     fn get_bank_id(&self) -> u8 {
-        if self.model.is_monochrome() {0} else {self.vbk}
+        if matches!(*self.mode, GbMode::DMG) {0} else {self.vbk}
     }
 
     const fn localize_address(address: u16) -> usize {

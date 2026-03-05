@@ -1,20 +1,20 @@
 use std::rc::Rc;
 
-use crate::{common::errors::HydraIOError, gameboy::{Model, ppu::{attributes::TileAttributes, state::ObjectHeight}}};
+use crate::{common::errors::HydraIOError, gameboy::{GbMode, Model, ppu::{attributes::TileAttributes, state::ObjectHeight}}};
 
 pub struct Oam {
     inner: [u8; 0x100],
-    model: Rc<Model>,
+    mode: Rc<GbMode>,
     dma_value: Option<u8>
 }
 
 pub const ADDRESS_OFFSET: u16 = 0xFE00;
 
 impl Oam {
-    pub fn new(model: Rc<Model>) -> Self {
+    pub fn new(mode: Rc<GbMode>) -> Self {
         Oam { 
             inner: [0; 0x100],
-            model,
+            mode,
             dma_value: None
         }
     }
@@ -28,7 +28,7 @@ impl Oam {
     }
 
     pub fn resolve_oam_meta(&self, oam_meta: &ObjectOamMetadata) -> ObjectRenderMetadata {
-        ObjectRenderMetadata { data_index: self.inner[Self::localize_address(oam_meta.address + 2)], attributes: TileAttributes::from_u8(self.inner[Self::localize_address(oam_meta.address + 3)], &self.model) }
+        ObjectRenderMetadata { data_index: self.inner[Self::localize_address(oam_meta.address + 2)], attributes: TileAttributes::from_u8(self.inner[Self::localize_address(oam_meta.address + 3)], &self.mode) }
     }
 
     pub fn write(&mut self, address: u16, value: u8) -> Result<(), HydraIOError> {

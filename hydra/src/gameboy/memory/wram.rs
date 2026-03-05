@@ -1,24 +1,24 @@
 use std::rc::Rc;
 
-use crate::{deserialize, gameboy::Model, serialize};
+use crate::{deserialize, gameboy::{GbMode, Model}, serialize};
 
 pub const ADDRESS_OFFSET: u16 = 0xC000;
 
 pub struct Wram {
-    model: Rc<Model>,
+    mode: Rc<GbMode>,
     wram: Box<[[u8; 0x1000]]>,
     wbk: u8,
 }
 
 impl Wram {
-    pub fn new(model: Rc<Model>) -> Self {
-        let bank_count = match model.is_monochrome() {
-            true => 2,
-            false => 8
+    pub fn new(mode: Rc<GbMode>) -> Self {
+        let bank_count = match *mode {
+            GbMode::DMG => 2,
+            GbMode::CGB => 8
         };
 
         Wram {
-            model,
+            mode,
             wram: vec![[0; 0x1000]; bank_count].into_boxed_slice(),
             wbk: 0
         }
@@ -39,7 +39,7 @@ impl Wram {
     fn get_bank_id(&self, address: usize) -> u8 {
         match address {
             0..0x1000 => 0,
-            _ => if self.model.is_monochrome() {1} else {self.wbk.max(1)}
+            _ => if matches!(*self.mode, GbMode::DMG) {1} else {self.wbk.max(1)}
         }
     }
 

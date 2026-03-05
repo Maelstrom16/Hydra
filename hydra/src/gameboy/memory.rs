@@ -47,12 +47,12 @@ impl MemoryMap {
         let interrupt_enable = InterruptEnable::new();
         let joypad = Joypad::new();
         let serial = SerialConnection::new(mode.clone());
-        let vram = Vram::new(model.clone());
-        let wram = Wram::new(model.clone());
+        let vram = Vram::new(mode.clone());
+        let wram = Wram::new(mode.clone());
         let ppu_state = PpuState::new(&model);
         let timer = MasterTimer::new(model.clone(), mode.clone());
         let color_map = colormap::from_mode(&mode);
-        let oam = Oam::new(model.clone());
+        let oam = Oam::new(mode.clone());
         let apu_state = ApuState::new();
         let dma_source = match model.is_monochrome() {
             true => 0xFF,
@@ -155,9 +155,6 @@ impl MemoryMap {
             Ok(value) => value,
             Err(HydraIOError::OpenBusAccess) => {
                 println!("Warning: Read from open bus at address {:#06X}", address);
-                if let Some(_) = self.dma_cycle {
-                    println!("note: DMA active");
-                }
                 0xFF
             }
             Err(e) => panic!("Error reading from memory.\n{}", e),

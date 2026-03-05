@@ -169,6 +169,7 @@ impl GameBoy {
         let memory = &mut self.memory;
         // Once per machine cycle
         memory.tick_dma();
+        memory.serial.tick(&mut memory.interrupt_flags);
 
         // Loop until next M-cycle
         loop { 
