@@ -85,7 +85,7 @@ impl Ppu {
     }
 
     #[inline(always)]
-    pub fn coro(&mut self, memory: &mut MemoryMap) {
+    pub fn coro(&mut self, memory: &mut MemoryMap, turbo: bool) {
         let (lx, ly) = memory.ppu_state.get_dot_coords();
 
         // Perform mode-specific behavior
@@ -93,7 +93,7 @@ impl Ppu {
             PpuMode::HBlank => {
                 if ly == SCREEN_HEIGHT {
                     memory.ppu_state.set_mode(PpuMode::VBlank, &mut memory.interrupt_flags);
-                    self.push_to_viewport();
+                    self.push_to_viewport(turbo);
                 } else if lx == 0 {
                     memory.ppu_state.set_mode(PpuMode::default_oam(), &mut memory.interrupt_flags);
                     self.fifo.scanline_objects.clear();
@@ -145,12 +145,18 @@ impl Ppu {
         }
     }
 
-    fn push_to_viewport(&mut self) {
-        // Delay thread
+    fn push_to_viewport(&mut self, turbo: bool) {
+        if turbo {
+            // If turbo is on, instantly render next frame without delays
+            self.next_frame_instant = Instant::now();
+        } else {
+            // Delay thread until next frame if turbo is off
+            let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
+            thread::sleep(duration_until_next);
+        }
+
+        // Set expected time for next frame
         const SECS_PER_FRAME: f64 = 1f64 / 60f64;
-        let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
-        // println!("Finished with {}% remaining", (duration_until_next.as_secs_f32())/(1.0/60.0));
-        thread::sleep(duration_until_next);
         self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
 
         // Send redraw request through event loop proxy

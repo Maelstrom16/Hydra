@@ -10,19 +10,21 @@ use crate::{deserialize, serialize};
 pub const ADDRESS_OFFSET: u16 = 0x8000;
 
 pub struct Vram {
+    model: Rc<Model>,
     mode: Rc<GbMode>,
     vram: Box<[[u8; 0x2000]]>,
     vbk: u8,
 }
 
 impl Vram {
-    pub fn new(mode: Rc<GbMode>) -> Self {
+    pub fn new(model: Rc<Model>, mode: Rc<GbMode>) -> Self {
         let bank_count = match *mode {
             GbMode::DMG => 1,
             GbMode::CGB => 2
         };
 
         Vram {
+            model,
             mode,
             vram: vec![[0; 0x2000]; bank_count].into_boxed_slice(),
             vbk: 0,
@@ -59,16 +61,21 @@ impl Vram {
 }
 
 impl Vram {
-    pub fn read_vbk(&self) -> u8 {
-        serialize!(
+    pub fn read_vbk(&self) -> Result<u8, HydraIOError> {
+        // Disallow reads on DMG hardware
+        if self.model.is_monochrome() {return Err(HydraIOError::OpenBusAccess)}
+        Ok(serialize!(
             0b11111110;
             (self.vbk) =>> [0];
-        )
+        ))
     }
 
-    pub fn write_vbk(&mut self, val: u8) {
+    pub fn write_vbk(&mut self, val: u8) -> Result<(), HydraIOError> {
+        // Disallow writes in DMG mode
+        if matches!(*self.mode, GbMode::DMG) {return Err(HydraIOError::OpenBusAccess)}
         deserialize!(val;
             [0] =>> (self.vbk);
         );
+        Ok(())
     }
 }

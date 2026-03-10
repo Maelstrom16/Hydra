@@ -1,6 +1,6 @@
 mod opcode;
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
 
 use futures::FutureExt;
 
@@ -60,7 +60,7 @@ pub struct Cpu {
     ir: u8,
     
     ime: bool,
-    cycles_until_ime: Option<u8>,
+    ei_queue: [bool; 2],
     cycles_until_halt_bug: Option<u8>,
     unhalt_timer: DelayedTickCounter<u16>,
 }
@@ -170,17 +170,17 @@ impl Cpu {
             ir: 0x00,
 
             ime: false, 
-            cycles_until_ime: None,
+            ei_queue: [false, false],
             cycles_until_halt_bug: None,
             unhalt_timer: DelayedTickCounter::new(None),
         }
     }
 
     pub fn queue_ime(&mut self) {
-        self.cycles_until_ime = Some(2)
+        self.ei_queue[1] = true;
     }
     pub fn cancel_ime(&mut self) {
-        self.cycles_until_ime = None
+        self.ei_queue[0] = false;
     }
 
     pub fn queue_halt_bug(&mut self) {
@@ -188,8 +188,12 @@ impl Cpu {
     }
     
     pub fn refresh_interrupt_handler(&mut self, pc_old: u16) {
+        // If next element in arr is true, a previously-queued EI needs to be triggered
+        if self.ei_queue[0] {self.ime = true;}
+        // Shift queue left, dropping the value after use
+        self.ei_queue = [self.ei_queue[1], false];
+
         let decrements_to_zero = |n: &mut u8| {*n -= 1; *n == 0};
-        if let Some(_) = self.cycles_until_ime.take_if(decrements_to_zero) {self.ime = true;}
         if let Some(_) = self.cycles_until_halt_bug.take_if(decrements_to_zero) {self.pc = pc_old;}
     }
 
@@ -201,35 +205,47 @@ impl Cpu {
     #[inline(always)]
     fn fetch(&mut self, system: &mut GameBoy, debug: bool) -> Box<dyn Fn(&mut Cpu, &mut GameBoy)> {
         if self.ime && self.interrupt_pending(system) { 
-            // Generate call instruction from handled interrupt
-            let composite = system.memory.interrupt_enable.read_ie() & system.memory.interrupt_flags.read_if();
-            for shift_width in 0..=4 {
-                let bitmask = 1 << shift_width;
-                if composite & bitmask == 0 {
-                    // Check next priority interrupt
-                    continue;
-                } else {
-                    // Handle interrupt and return call instruction
-                    self.ime = false;
-                    system.memory.interrupt_flags.get_inner().reset_bits(bitmask);
-                    let jump_addr = (shift_width * 0x8) + 0x40;
-                    
-                    // TODO: Verify cycle accuracy
-                    return Box::new(move |cpu_inner, system_inner| {
-                        // Two NOPs (in place of fetching nn from memory for CALL nn)
-                        system_inner.cycle_components();
-                        system_inner.cycle_components();
+            // Generate reordered call instruction from handled interrupt
+            return Box::new(move |cpu_inner, system_inner| {
+                // Two NOPs (in place of fetching nn from memory for CALL nn)
+                system_inner.cycle_components();
+                system_inner.cycle_components();
 
-                        // The call itself
-                        cpu_inner.call(system_inner, CondOperand::Unconditional, ConstOperand16(jump_addr));
-                    });
+                // Push start
+                let bytes = u16::to_le_bytes(cpu_inner.pc);
+                system_inner.cycle_components();
+                cpu_inner.sp = cpu_inner.sp.wrapping_sub(1);
+                cpu_inner.write_u8(cpu_inner.sp, bytes[1], system_inner);
+
+                // Calculate address of interrupt handler
+                let mut jump_addr = 0x0000; // Handler address is 0x0000 if interrupt handling was somehow cancelled
+                let composite = system_inner.memory.interrupt_enable.read_ie() & system_inner.memory.interrupt_flags.read_if();
+                // Update jump address with requested interrupt handler (if any)
+                for shift_width in 0..=4 {
+                    let bitmask = 1 << shift_width;
+                    if composite & bitmask == 0 {
+                        // Check next priority interrupt
+                        continue;
+                    } else {
+                        // Calculate handler address from requested interrupt
+                        system_inner.memory.interrupt_flags.get_inner().reset_bits(bitmask);
+                        jump_addr = (shift_width * 0x8) + 0x40;
+                        break;
+                    }
                 }
-            }
-            unreachable!() // Interrupt should've been handled
+
+                // Push end
+                cpu_inner.sp = cpu_inner.sp.wrapping_sub(1);
+                cpu_inner.write_u8(cpu_inner.sp, bytes[0], system_inner);
+
+                // Disable IME and jump to final address
+                cpu_inner.ime = false;
+                cpu_inner.pc = jump_addr;
+            });
         } else {
             // Fetch instruction from memory
             self.ir = self.step_u8(system);
-            if debug {
+            if debug && system.dump_cpu {
                 println!(
                     "{:#06X}: {:02X} {:02X} {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
                     self.pc - 1,
@@ -243,8 +259,9 @@ impl Cpu {
                     u16::from_le_bytes(self.hl),
                     self.sp
                 );
-                if self.ir == 0xFF {
-                    std::thread::sleep(Duration::from_secs(1));
+                if self.pc - 1 == 0x49A8 {
+                    println!("SPLASH");
+                    std::thread::sleep(Duration::from_secs_f32(3.0));
                 }
             }
             let op_index = self.ir as usize;
@@ -254,22 +271,23 @@ impl Cpu {
 
     #[inline(always)]
     fn step_u8(&mut self, system: &mut GameBoy) -> u8 {
+        system.cycle_components();
         let result = system.memory.read_u8(self.pc, false);
         self.pc = self.pc.wrapping_add(1);
-        system.cycle_components();
         result
     }
 
     #[inline(always)]
     fn read_u8(&self, address: u16, system: &mut GameBoy) -> u8 {
         system.cycle_components();
-        system.memory.read_u8(address, false)
+        let result = system.memory.read_u8(address, false);
+        result
     }
 
     #[inline(always)]
     fn write_u8(&self, address: u16, value: u8, system: &mut GameBoy) -> () {
         system.cycle_components();
-        system.memory.write_u8(value, address, false);
+        system.memory.write_u8(value, address);
     }
 
     pub fn coro(&mut self, system: &mut GameBoy, debug: bool) {

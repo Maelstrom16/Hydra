@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy::{interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}};
+use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy::{Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}};
 
 pub struct Joypad {
     button_vector: u8,
@@ -9,11 +9,14 @@ pub struct Joypad {
 }
 
 impl Joypad {
-    pub fn new() -> Self {
+    pub fn new(model: &Rc<Model>) -> Self {
         Joypad { 
             button_vector: 0b0000,
             dpad_vector: 0b0000,
-            joyp: MaskedBitVec::new(0xCF, 0b00111111, 0b00110000),
+            joyp: MaskedBitVec::new(match model.is_monochrome() {
+                true => 0xCF,
+                false => 0xFF,
+            }, 0b00111111, 0b00110000),
         }
     }
 

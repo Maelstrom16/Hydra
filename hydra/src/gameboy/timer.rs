@@ -48,7 +48,6 @@ impl MasterTimer {
 
     pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags, ppu_state: &mut PpuState, apu_state: &mut ApuState) {
         if self.machine_cycle_timer.increment() {
-            self.update_div(self.div_full.wrapping_add(1), apu_state);
             self.timer_interrupt_status = match self.timer_interrupt_status {
                 InterruptStatus::Idle | InterruptStatus::Requesting => InterruptStatus::Idle,
                 InterruptStatus::Queued => {
@@ -57,6 +56,7 @@ impl MasterTimer {
                     InterruptStatus::Requesting
                 }
             };
+            self.update_div(self.div_full.wrapping_add(1), apu_state);
         }
 
         ppu_state.tick(interrupt_flags);

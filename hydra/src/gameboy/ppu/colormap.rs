@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use crate::{common::errors::HydraIOError, deserialize, gameboy::{GbMode, memory::MemoryMapped}, serialize};
 
@@ -117,6 +117,7 @@ impl MemoryMapped for DmgColorMap {
 }
 
 pub struct CgbColorMap {
+    dmg: DmgColorMap,
     background: CgbPaletteBank,
     objects: CgbPaletteBank,
 }
@@ -124,6 +125,7 @@ pub struct CgbColorMap {
 impl CgbColorMap {
     fn new() -> Self {
         CgbColorMap { 
+            dmg: DmgColorMap::new(),
             background: CgbPaletteBank {
                 palettes: [[WHITE; 4]; 8], 
                 palette_index: 0b001000, 
@@ -151,6 +153,9 @@ impl ColorMap for CgbColorMap {
 impl MemoryMapped for CgbColorMap {
     fn read(&self, address: u16) -> Result<u8, HydraIOError> {
         match address {
+            0xFF47 => Ok(self.dmg.read_bgp()),
+            0xFF48 => Ok(self.dmg.read_obp(0)),
+            0xFF49 => Ok(self.dmg.read_obp(1)),
             0xFF68 => Ok(self.background.read_index()),
             0xFF69 => Ok(self.background.read_data()),
             0xFF6A => Ok(self.objects.read_index()),
@@ -161,6 +166,9 @@ impl MemoryMapped for CgbColorMap {
 
     fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
         match address {
+            0xFF47 => Ok(self.dmg.write_bgp(val)),
+            0xFF48 => Ok(self.dmg.write_obp(val, 0)),
+            0xFF49 => Ok(self.dmg.write_obp(val, 1)),
             0xFF68 => Ok(self.background.write_index(val)),
             0xFF69 => Ok(self.background.write_data(val)),
             0xFF6A => Ok(self.objects.write_index(val)),

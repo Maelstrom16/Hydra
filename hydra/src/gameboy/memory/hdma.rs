@@ -87,7 +87,7 @@ impl HdmAccessor for CgbHdmAccessor {
             let row_offset = self.row_counter.value as u16;
             let destination = self.dest_addr + 0x8000;
             let val = memory.read_u8(self.source_addr + row_offset, false);
-            memory.write_u8(val, destination + row_offset, false);
+            memory.write_u8(val, destination + row_offset);
 
             if self.row_counter.increment() {
                 match self.length.checked_sub(1) {

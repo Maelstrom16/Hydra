@@ -39,7 +39,7 @@ impl Pulse {
         };
 
         Pulse { 
-            enabled: false, 
+            enabled: matches!(pulse_type, PulseType::Pulse1), 
 
             period_timer: DynamicModuloCounter::with_reset_value(0, 0x800, 0b11111111111.into()),
             period_sweep_direction: Direction::Decreasing, 

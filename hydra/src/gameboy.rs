@@ -100,6 +100,8 @@ pub struct GameBoy {
     channel: Receiver<EmuMessage>,
 
     running: bool,
+    turbo: bool,
+    dump_cpu: bool,
 }
 
 fn read_rom(path: &Path) -> Result<Rom, HydraIOError> {
@@ -144,8 +146,12 @@ impl GameBoy {
                 cpu,
                 memory,
                 ppu,
+
                 channel: recv,
-                running: true
+
+                running: true,
+                turbo: false,
+                dump_cpu: false,
             }.main_thread();
         });
         Ok(send)
@@ -167,15 +173,13 @@ impl GameBoy {
 
     fn cycle_components(&mut self) {
         let memory = &mut self.memory;
-        // Once per machine cycle
-        memory.tick_dma();
-        memory.serial.tick(&mut memory.interrupt_flags);
+        // Finish current M-cycle
+        memory.timer.refresh_tima_if_overflowing();
 
         // Loop until next M-cycle
         loop { 
-            // Finish current cycle
-            memory.timer.refresh_tima_if_overflowing();
-            self.ppu.coro(memory);
+            // Finish current T-cycle
+            self.ppu.coro(memory, self.turbo);
             
             // Every frame
             if memory.timer.get_ppu_dots(&mut memory.ppu_state) == 0 {
@@ -196,6 +200,8 @@ impl GameBoy {
                             KeyCode::KeyJ => memory.joypad.press_button(Button::B, state.is_pressed(), &mut memory.interrupt_flags),
                             KeyCode::Enter => memory.joypad.press_button(Button::Start, state.is_pressed(), &mut memory.interrupt_flags),
                             KeyCode::ShiftRight => memory.joypad.press_button(Button::Select, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::Space => self.turbo = state.is_pressed(),
+                            KeyCode::AltLeft => self.dump_cpu = state.is_pressed(),
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
@@ -209,13 +215,17 @@ impl GameBoy {
                 }
             }
 
-            // Next cycle
+            // Next T-cycle
             memory.timer.tick(&mut memory.interrupt_flags, &mut memory.ppu_state, &mut memory.apu_state);
             self.apu.dot_tick(&mut memory.apu_state);
 
-            // CPU cycle if applicable
+            // Break for next M-cycle when applicable
             if memory.timer.is_system_cycle() {break;}
         }
+
+        // Start next M-cycle
+        memory.tick_dma();
+        memory.serial.tick(&mut memory.interrupt_flags);
     }
 }
 
@@ -225,7 +235,7 @@ impl Emulator for GameBoy {
 
         // Start main loop
         let mut cpu = self.cpu.take().unwrap();
-        cpu.coro(&mut self, false);
+        cpu.coro(&mut self, true);
 
         println!("Exiting Wyrm");
 

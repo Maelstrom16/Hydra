@@ -1,8 +1,12 @@
+use std::rc::Rc;
+
 use cpal::Sample;
 
-use crate::{common::errors::HydraIOError, deserialize, gameboy::{apu::channel::{Noise, Pulse, PulseType, Wave}, memory::MemoryMapped}, serialize};
+use crate::{common::errors::HydraIOError, deserialize, gameboy::{Model, apu::channel::{Noise, Pulse, PulseType, Wave}, memory::MemoryMapped}, serialize};
 
 pub struct ApuState {
+    model: Rc<Model>,
+
     master_enable: bool,
     master_amp_l: u8,
     master_amp_r: u8,
@@ -22,11 +26,13 @@ pub struct ApuState {
 }
 
 impl ApuState {
-    pub fn new() -> Self {
+    pub fn new(model: Rc<Model>) -> Self {
         ApuState {
+            model, 
+
             master_enable: true,
-            master_amp_l: 1,
-            master_amp_r: 1,
+            master_amp_l: 7,
+            master_amp_r: 7,
             div: 0,
 
             pulse1: Pulse::new(PulseType::Pulse1),
@@ -150,6 +156,14 @@ impl ApuState {
             [7] as bool =>> (self.master_enable);
         );
     }
+
+    fn read_pcm12(&self) -> u8 {
+        0x00 // TODO: Implement properly
+    }
+
+    fn read_pcm34(&self) -> u8 {
+        0x00 // TODO: Implement properly
+    }
 }
 
 impl MemoryMapped for ApuState {
@@ -181,6 +195,9 @@ impl MemoryMapped for ApuState {
             0xFF24 => Ok(self.read_nr50()),
             0xFF25 => Ok(self.read_nr51()),
             0xFF26 => Ok(self.read_nr52()),
+
+            0xFF76 if self.model.is_color() => Ok(self.read_pcm12()),
+            0xFF77 if self.model.is_color() => Ok(self.read_pcm34()),
 
             _ => Err(HydraIOError::OpenBusAccess)
         }
