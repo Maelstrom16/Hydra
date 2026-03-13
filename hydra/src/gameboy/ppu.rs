@@ -18,11 +18,6 @@ use crate::{
 pub struct Ppu {
     model: Rc<Model>,
     fifo: FifoFetcher,
-
-    screen_buffer: Box<[u8]>,
-    next_frame_instant: Instant,
-    graphics: Arc<RwLock<Graphics>>,
-    proxy: EventLoopProxy<UserEvent>
 }
 
 #[repr(u8)]
@@ -65,27 +60,18 @@ const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
 impl Ppu {
-    pub fn new(model: Rc<Model>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
-        let screen_buffer = vec![0; BUFFER_SIZE].into_boxed_slice();
-        let mut result = Ppu {
+    pub fn new(model: Rc<Model>) -> Self {
+        Ppu {
             model,
             fifo: FifoFetcher::new(),
-
-            screen_buffer,
-            next_frame_instant: Instant::now(),
-            graphics,
-            proxy,
-        };
-        result.init_graphics();
-        result
-    }
-
-    fn init_graphics(&mut self) {
-        self.graphics.write().unwrap().resize_screen_texture(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
+        }
     }
 
     #[inline(always)]
-    pub fn coro(&mut self, memory: &mut MemoryMap, turbo: bool) {
+    pub fn coro(&mut self, memory: &mut MemoryMap) {
+        // Do nothing if PPU is disabled
+        if !memory.ppu_state.lcd_enabled {return;}
+
         let (lx, ly) = memory.ppu_state.get_dot_coords();
 
         // Perform mode-specific behavior
@@ -93,7 +79,7 @@ impl Ppu {
             PpuMode::HBlank => {
                 if ly == SCREEN_HEIGHT {
                     memory.ppu_state.set_mode(PpuMode::VBlank, &mut memory.interrupt_flags);
-                    self.push_to_viewport(turbo);
+                    memory.ppu_state.push_to_viewport();
                 } else if lx == 0 {
                     memory.ppu_state.set_mode(PpuMode::default_oam(), &mut memory.interrupt_flags);
                     self.fifo.scanline_objects.clear();
@@ -135,7 +121,7 @@ impl Ppu {
                 let color = self.fifo.resolve_color(memory);
 
                 let buffer_address = (screen_x as usize + (screen_y as usize * SCREEN_WIDTH as usize)) * 4;
-                self.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(&color);
+                memory.ppu_state.screen_buffer[buffer_address..buffer_address + 4].copy_from_slice(&color);
 
                 // Return to HBlank upon completion of the scanline
                 if self.fifo.screen_x == 0 {
@@ -143,25 +129,5 @@ impl Ppu {
                 }
             }
         }
-    }
-
-    fn push_to_viewport(&mut self, turbo: bool) {
-        if turbo {
-            // If turbo is on, instantly render next frame without delays
-            self.next_frame_instant = Instant::now();
-        } else {
-            // Delay thread until next frame if turbo is off
-            let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
-            thread::sleep(duration_until_next);
-        }
-
-        // Set expected time for next frame
-        const SECS_PER_FRAME: f64 = 1f64 / 60f64;
-        self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
-
-        // Send redraw request through event loop proxy
-        let graphics = self.graphics.read().unwrap();
-        graphics.update_screen_texture(&self.screen_buffer);
-        self.proxy.send_event(UserEvent::RedrawRequest).expect("Unable to render Game Boy graphics: Main event loop closed unexpectedly");
     }
 }

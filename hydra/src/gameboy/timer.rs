@@ -6,6 +6,7 @@ pub struct MasterTimer {
     model: Rc<Model>,
     mode: Rc<GbMode>,
 
+    master_dot_counter: ModuloCounter<u32>,
     machine_cycle_timer: ModuloCounter<u8>,
     div_full: u16,
     tima: u8,
@@ -19,8 +20,11 @@ pub struct MasterTimer {
 }
 
 impl MasterTimer {
+    const DOTS_PER_FRAME: u32 = 70224;
+
     pub fn new(model: Rc<Model>, mode: Rc<GbMode>) -> Self {
         MasterTimer { 
+            master_dot_counter: ModuloCounter::new(0, Self::DOTS_PER_FRAME),
             machine_cycle_timer: ModuloCounter::new(0, 4),
             div_full: match *model { 
                 Model::GameBoy(GBRevision::DMG0) => 0x18,
@@ -47,6 +51,7 @@ impl MasterTimer {
     pub const PPU_DOTS_PER_FRAME: u32 = 70224;
 
     pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags, ppu_state: &mut PpuState, apu_state: &mut ApuState) {
+        self.master_dot_counter.increment();
         if self.machine_cycle_timer.increment() {
             self.timer_interrupt_status = match self.timer_interrupt_status {
                 InterruptStatus::Idle | InterruptStatus::Requesting => InterruptStatus::Idle,
@@ -66,8 +71,8 @@ impl MasterTimer {
         self.machine_cycle_timer.has_completed_cycle()
     }
 
-    pub fn get_ppu_dots(&self, ppu_state: &mut PpuState) -> u32 {
-        ppu_state.get_dots()
+    pub fn is_new_frame(&self) -> bool {
+        self.master_dot_counter.has_completed_cycle()
     }
 
     pub fn refresh_tima_if_overflowing(&mut self) {

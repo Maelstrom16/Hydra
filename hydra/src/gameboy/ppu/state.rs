@@ -1,6 +1,8 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc, sync::{Arc, RwLock}, time::Duration};
 
-use crate::{common::{bit::BitVec, errors::HydraIOError}, deserialize, gameboy::{GBRevision, Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::PpuMode}, serialize};
+use winit::event_loop::EventLoopProxy;
+
+use crate::{common::{bit::BitVec, errors::HydraIOError}, deserialize, gameboy::{GBRevision, Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::{self, Ppu, PpuMode}}, graphics::Graphics, serialize, window::UserEvent};
 
 pub struct PpuState {
     pub(super) ppu_mode: PpuMode,
@@ -26,17 +28,24 @@ pub struct PpuState {
     pub(super) wx: u8,
 
     stat_interrupt_select: u8,
+
+    pub(super) screen_buffer: Box<[u8]>,
+    graphics: Arc<RwLock<Graphics>>,
+    proxy: EventLoopProxy<UserEvent>
 }
 
 impl PpuState {
-    pub fn new(model: &Rc<Model>) -> Self {
+    pub fn new(model: &Rc<Model>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+        let screen_buffer = vec![0; ppu::BUFFER_SIZE].into_boxed_slice();
+
         // Start at beginning of OAM scan for selected ly
         let ly = match **model {
             Model::GameBoy(GBRevision::DMG0) => 0x91,
             Model::GameBoy(_) => 0x00,
             Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
         };
-        PpuState { 
+        
+        let mut result = PpuState { 
             ppu_mode: PpuMode::default_oam(),
 
             dots: ly as u32 * Self::DOTS_PER_SCANLINE,
@@ -60,13 +69,27 @@ impl PpuState {
             wx: 0x00,
 
             stat_interrupt_select: 0,
-        }
+
+            screen_buffer,
+            graphics,
+            proxy
+        };
+
+        result.init_graphics();
+        return result;
+    }
+
+    fn init_graphics(&mut self) {
+        self.graphics.write().unwrap().resize_screen_texture(ppu::SCREEN_WIDTH as u32, ppu::SCREEN_HEIGHT as u32);
     }
 
     const DOTS_PER_SCANLINE: u32 = 456;
     const DOTS_PER_FRAME: u32 = 70224;
 
     pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags) {
+        // Do nothing if PPU is disabled
+        if !self.lcd_enabled {return;}
+
         self.dots = (self.dots + 1) % Self::DOTS_PER_FRAME;
         let ly = (self.dots / Self::DOTS_PER_SCANLINE) as u8;
         self.ly_eq_lyc_check(ly == self.lyc, interrupt_flags);
@@ -74,6 +97,9 @@ impl PpuState {
     }
 
     fn ly_eq_lyc_check(&mut self, new_ly_eq_lyc: bool, interrupt_flags: &mut InterruptFlags) {
+        // Do nothing if PPU is disabled
+        if !self.lcd_enabled {return;}
+
         // Detect rising edge on stat interrupt line
         if (new_ly_eq_lyc && self.ly != self.lyc && self.stat_interrupt_select.test_bit(6))
         && (!self.stat_interrupt_select.test_bits(self.ppu_mode.as_stat_line_flag())) {
@@ -104,12 +130,24 @@ impl PpuState {
         self.ppu_mode = ppu_mode;
     }
 
-    pub fn get_dots(&self) -> u32 {
-        self.dots
-    }
-
     pub fn get_dot_coords(&self) -> (u32, u8) {
         (self.dots % Self::DOTS_PER_SCANLINE, self.ly)
+    }
+
+    fn disable_lcd(&mut self) {
+        self.dots = 0;
+        self.ly = 0;
+        self.ppu_mode = PpuMode::HBlank;
+        
+        self.screen_buffer.fill(0xFF);
+        self.push_to_viewport();
+    }
+
+    pub(super) fn push_to_viewport(&mut self) {
+        // Send redraw request through event loop proxy
+        let graphics = self.graphics.read().unwrap();
+        graphics.update_screen_texture(&self.screen_buffer);
+        self.proxy.send_event(UserEvent::RedrawRequest).expect("Unable to render Game Boy graphics: Main event loop closed unexpectedly");
     }
 }
 
@@ -130,7 +168,7 @@ impl PpuState {
 
     pub fn write_lcdc(&mut self, val: u8) {
         deserialize!(val;
-            [7] as bool =>> (self.lcd_enabled);
+            [7] as bool =>> lcd_enabled;
             [6] as bool =>> win_map_area;
             [5] as bool =>> (self.window_enabled);
             [4] as bool =>> tilemaps_data_area;
@@ -143,6 +181,15 @@ impl PpuState {
         self.tilemaps_data_area = TileLowDataArea::from_bool(tilemaps_data_area);
         self.bg_map_area = TileMapArea::from_bool(bg_map_area);
         self.object_size = ObjectHeight::from_bool(object_size);
+
+        if lcd_enabled && !self.lcd_enabled {
+            // Update mode to correct one for dot 0
+            self.ppu_mode = PpuMode::default_oam();
+        } else if !lcd_enabled && self.lcd_enabled {
+            self.disable_lcd();
+        }
+
+        self.lcd_enabled = lcd_enabled;
     }
 
     pub fn read_stat(&self) -> u8 {

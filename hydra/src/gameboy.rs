@@ -102,6 +102,7 @@ pub struct GameBoy {
     running: bool,
     turbo: bool,
     dump_cpu: bool,
+    next_frame_instant: Instant,
 }
 
 fn read_rom(path: &Path) -> Result<Rom, HydraIOError> {
@@ -135,10 +136,10 @@ impl GameBoy {
             let model = Rc::new(model);
             let mode = Rc::new(mode);
 
-            let ppu = Ppu::new(model.clone(), graphics, proxy);
+            let ppu = Ppu::new(model.clone());
             let apu = Apu::new(audio);
             let cpu = Some(Cpu::new(&rom, &model, &mode));
-            let mut memory = MemoryMap::new(model.clone(), mode.clone()).unwrap(); // TODO: Error should be handled rather than unwrapped
+            let mut memory = MemoryMap::new(model.clone(), mode.clone(), graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
             memory.hot_swap_rom(rom).unwrap();
 
             GameBoy {
@@ -152,6 +153,7 @@ impl GameBoy {
                 running: true,
                 turbo: false,
                 dump_cpu: false,
+                next_frame_instant: Instant::now()
             }.main_thread();
         });
         Ok(send)
@@ -179,10 +181,22 @@ impl GameBoy {
         // Loop until next M-cycle
         loop { 
             // Finish current T-cycle
-            self.ppu.coro(memory, self.turbo);
+            self.ppu.coro(memory);
             
             // Every frame
-            if memory.timer.get_ppu_dots(&mut memory.ppu_state) == 0 {
+            if memory.timer.is_new_frame() {
+                // Sleep until next frame (unless turbo is active)
+                if self.turbo {
+                    // If turbo is on, instantly render next frame without delays
+                    self.next_frame_instant = Instant::now();
+                } else {
+                    // Delay thread until next frame if turbo is off
+                    let duration_until_next = self.next_frame_instant.saturating_duration_since(Instant::now());
+                    thread::sleep(duration_until_next);
+                }
+                // Set expected timing for next frame
+                const SECS_PER_FRAME: f64 = 1f64 / 60f64;
+                self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
 
                 // Send audio for playback
                 self.apu.frame();

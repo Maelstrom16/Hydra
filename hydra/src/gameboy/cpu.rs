@@ -259,10 +259,6 @@ impl Cpu {
                     u16::from_le_bytes(self.hl),
                     self.sp
                 );
-                if self.pc - 1 == 0x49A8 {
-                    println!("SPLASH");
-                    std::thread::sleep(Duration::from_secs_f32(3.0));
-                }
             }
             let op_index = self.ir as usize;
             return Box::new(move |cpu_inner, system_inner| Self::OP_TABLE[op_index](cpu_inner, system_inner));
