@@ -153,8 +153,17 @@ impl ApuState {
 
     fn write_nr52(&mut self, val: u8) {
         deserialize!(val;
-            [7] as bool =>> (self.master_enable);
+            [7] as bool =>> master_enable;
         );
+
+        // If disabling APU, reset registers
+        if !master_enable && self.master_enable {
+            for address in 0xFF10..=0xFF25 {
+                self.write(0x00, address);
+            }
+        }
+
+        self.master_enable = master_enable;
     }
 
     fn read_pcm12(&self) -> u8 {
@@ -205,31 +214,31 @@ impl MemoryMapped for ApuState {
 
     fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
         match address {
-            0xFF10 => Ok(self.pulse1.write_nr10(val)),
-            0xFF11 => Ok(self.pulse1.write_nrx1(val)),
-            0xFF12 => Ok(self.pulse1.write_nrx2(val)),
-            0xFF13 => Ok(self.pulse1.write_nrx3(val)),
-            0xFF14 => Ok(self.pulse1.write_nrx4(val)),
+            0xFF10 if self.master_enable => Ok(self.pulse1.write_nr10(val)),
+            0xFF11 if self.master_enable => Ok(self.pulse1.write_nrx1(val)),
+            0xFF12 if self.master_enable => Ok(self.pulse1.write_nrx2(val)),
+            0xFF13 if self.master_enable => Ok(self.pulse1.write_nrx3(val)),
+            0xFF14 if self.master_enable => Ok(self.pulse1.write_nrx4(val)),
 
-            0xFF16 => Ok(self.pulse2.write_nrx1(val)),
-            0xFF17 => Ok(self.pulse2.write_nrx2(val)),
-            0xFF18 => Ok(self.pulse2.write_nrx3(val)),
-            0xFF19 => Ok(self.pulse2.write_nrx4(val)),
+            0xFF16 if self.master_enable => Ok(self.pulse2.write_nrx1(val)),
+            0xFF17 if self.master_enable => Ok(self.pulse2.write_nrx2(val)),
+            0xFF18 if self.master_enable => Ok(self.pulse2.write_nrx3(val)),
+            0xFF19 if self.master_enable => Ok(self.pulse2.write_nrx4(val)),
 
-            0xFF1A => Ok(self.wave.write_nr30(val)),
-            0xFF1B => Ok(self.wave.write_nr31(val)),
-            0xFF1C => Ok(self.wave.write_nr32(val)),
-            0xFF1D => Ok(self.wave.write_nr33(val)),
-            0xFF1E => Ok(self.wave.write_nr34(val)),
+            0xFF1A if self.master_enable => Ok(self.wave.write_nr30(val)),
+            0xFF1B if self.master_enable => Ok(self.wave.write_nr31(val)),
+            0xFF1C if self.master_enable => Ok(self.wave.write_nr32(val)),
+            0xFF1D if self.master_enable => Ok(self.wave.write_nr33(val)),
+            0xFF1E if self.master_enable => Ok(self.wave.write_nr34(val)),
             0xFF30..=0xFF3F => Ok(self.wave.write_waveram(val, address as usize - 0xFF30)),
 
-            0xFF20 => Ok(self.noise.write_nr41(val)),
-            0xFF21 => Ok(self.noise.write_nr42(val)),
-            0xFF22 => Ok(self.noise.write_nr43(val)),
-            0xFF23 => Ok(self.noise.write_nr44(val)),
+            0xFF20 if self.master_enable => Ok(self.noise.write_nr41(val)),
+            0xFF21 if self.master_enable => Ok(self.noise.write_nr42(val)),
+            0xFF22 if self.master_enable => Ok(self.noise.write_nr43(val)),
+            0xFF23 if self.master_enable => Ok(self.noise.write_nr44(val)),
 
-            0xFF24 => Ok(self.write_nr50(val)),
-            0xFF25 => Ok(self.write_nr51(val)),
+            0xFF24 if self.master_enable => Ok(self.write_nr50(val)),
+            0xFF25 if self.master_enable => Ok(self.write_nr51(val)),
             0xFF26 => Ok(self.write_nr52(val)),
 
             _ => Err(HydraIOError::OpenBusAccess)
