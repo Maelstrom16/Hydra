@@ -30,7 +30,7 @@ impl SerialConnection {
     }
 
     pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags) {
-        if self.transfer_cycles_remaining > 0 && self.m_cycle_counter.increment() {
+        if self.local_clock && self.transfer_cycles_remaining > 0 && self.m_cycle_counter.increment() {
             self.data <<= 1;
             self.data |= 1; // TODO: replace with incoming bit once link play is implemented
             self.transfer_cycles_remaining -= 1;
