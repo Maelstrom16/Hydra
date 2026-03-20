@@ -85,8 +85,8 @@ impl HdmAccessor for CgbHdmAccessor {
 
         if hdma_active_this_tick {
             let row_offset = self.row_counter.value as u16;
-            let destination = self.dest_addr + 0x8000;
-            let val = memory.read_u8(self.source_addr + row_offset, false);
+            let destination = (self.dest_addr & 0x1FF0) + 0x8000;
+            let val = memory.read_u8((self.source_addr & 0xFFF0) + row_offset, false);
             memory.write_u8(val, destination + row_offset);
 
             if self.row_counter.increment() {
