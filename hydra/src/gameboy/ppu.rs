@@ -53,8 +53,8 @@ impl PpuMode {
 }
 
 const SCANLINES: u32 = 154;
-const SCREEN_WIDTH: u8 = 160;
-const SCREEN_HEIGHT: u8 = 144;
+pub(super) const SCREEN_WIDTH: u8 = 160;
+pub(super) const SCREEN_HEIGHT: u8 = 144;
 const MAP_WIDTH: u8 = 32;
 const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;

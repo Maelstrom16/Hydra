@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::{fs::File, io::BufReader, path::Path, sync::Arc};
 
 use muda::dpi::PhysicalSize;
+use png::Transformations;
 use wgpu::*;
 use winit::window::Window;
 
@@ -91,7 +92,7 @@ impl Graphics {
             cache: None,
         });
 
-        let result = Graphics {
+        let mut result = Graphics {
             window,
             device,
             queue,
@@ -103,6 +104,7 @@ impl Graphics {
             render_pipeline,
         };
         result.configure_surface();
+        result.clear_screen_texture();
         return result;
     }
 
@@ -232,6 +234,14 @@ impl Graphics {
 
     pub fn resize_screen_texture(&mut self, width: u32, height: u32) {
         (self.screen_texture, self.bind_group) = Self::bind_screen_texture(&self.device, width, height);
+
+        // Adjust aspect ratio
+        let inner_size = self.window.inner_size();
+        let area = inner_size.width * inner_size.height;
+        let aspect_ratio = height as f64 / width as f64;
+        let inner_width = (area as f64 / aspect_ratio).sqrt().round() as u32;
+        let inner_height = (inner_width as f64 * aspect_ratio).round() as u32;
+        self.window.request_inner_size(PhysicalSize::new(inner_width, inner_height));
     }
 
     pub fn update_screen_texture(&self, new_buffer: &[u8]) {
@@ -254,5 +264,25 @@ impl Graphics {
                 depth_or_array_layers: 1,
             },
         );
+    }
+
+    pub fn clear_screen_texture(&mut self) {
+        let logo_file = File::open(Path::new("images/logo.png")).unwrap();
+        let mut decoder = png::Decoder::new(BufReader::new(logo_file));
+        let info = decoder.read_header_info().unwrap();
+        let width = info.width;
+        let height = info.height;
+        let mut reader = decoder.read_info().unwrap();
+        let mut buf = vec![0xFF; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut buf).unwrap();
+
+        for [r, g, b, a] in buf.as_chunks_mut().0 {
+            *r += (((0xFF - *r) as u16 * (0xFF - *a) as u16) / 255) as u8;
+            *g += (((0xFF - *g) as u16 * (0xFF - *a) as u16) / 255) as u8;
+            *b += (((0xFF - *b) as u16 * (0xFF - *a) as u16) / 255) as u8;
+        }
+
+        self.resize_screen_texture(width, height);
+        self.update_screen_texture(&buf);
     }
 }

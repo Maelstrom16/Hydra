@@ -12,12 +12,10 @@ use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
-    },
-    gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer},
-    window::HydraApp
+    }, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}, graphics::Graphics, window::HydraApp
 };
 use std::{
-    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::mpsc::{Receiver, Sender, channel}, thread, time::{Duration, Instant}
+    cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}, thread, time::{Duration, Instant}
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -131,6 +129,8 @@ impl GameBoy {
         let audio = app.clone_audio();
         let proxy = app.clone_proxy();
 
+        Self::init_graphics(&graphics);
+
         // Build Game Boy on a new thread
         thread::spawn(move || {
             let model = Rc::new(model);
@@ -157,6 +157,10 @@ impl GameBoy {
             }.main_thread();
         });
         Ok(send)
+    }
+
+    fn init_graphics(graphics: &Arc<RwLock<Graphics>>) {
+        graphics.write().unwrap().resize_screen_texture(ppu::SCREEN_WIDTH as u32, ppu::SCREEN_HEIGHT as u32);
     }
 
     pub fn is_running(&self) -> bool {

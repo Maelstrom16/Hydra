@@ -45,7 +45,7 @@ impl PpuState {
             Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
         };
         
-        let mut result = PpuState { 
+        PpuState { 
             ppu_mode: PpuMode::default_oam(),
 
             dots: ly as u32 * Self::DOTS_PER_SCANLINE,
@@ -73,14 +73,7 @@ impl PpuState {
             screen_buffer,
             graphics,
             proxy
-        };
-
-        result.init_graphics();
-        return result;
-    }
-
-    fn init_graphics(&mut self) {
-        self.graphics.write().unwrap().resize_screen_texture(ppu::SCREEN_WIDTH as u32, ppu::SCREEN_HEIGHT as u32);
+        }
     }
 
     const DOTS_PER_SCANLINE: u32 = 456;
