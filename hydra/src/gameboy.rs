@@ -160,7 +160,7 @@ impl GameBoy {
     }
 
     fn init_graphics(graphics: &Arc<RwLock<Graphics>>) {
-        graphics.write().unwrap().resize_screen_texture(ppu::SCREEN_WIDTH as u32, ppu::SCREEN_HEIGHT as u32);
+        graphics.write().unwrap().init_emulator(ppu::SCREEN_WIDTH as u32, ppu::SCREEN_HEIGHT as u32);
     }
 
     pub fn is_running(&self) -> bool {

@@ -56,7 +56,7 @@ impl HydraApp {
     fn init_app(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes().with_title("Hydra");
         self.window = Some(Arc::new(event_loop.create_window(window_attributes).unwrap()));
-        self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(self.window.clone().unwrap(), None)))));
+        self.graphics = Some(Arc::new(RwLock::new(futures::executor::block_on(Graphics::new(self.window.clone().unwrap())))));
         self.audio = Some(Arc::new(RwLock::new(Audio::new())));
         self.ui = Some(UserInterface::initialize(self.window.as_ref().unwrap(), &self.config));
     }
