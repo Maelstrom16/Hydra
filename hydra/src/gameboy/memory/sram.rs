@@ -1,15 +1,13 @@
-use crate::{common::errors::HydraIOError, gameboy::memory::rom::Rom};
+use crate::{common::errors::HydraIOError, gameboy::memory::rom::{Rom, RomHeader}};
 
-pub struct Sram(Box<[[u8; Sram::BYTES_PER_BANK]]>);
+pub const ADDRESS_OFFSET: usize = 0xA000;
 
-impl Sram {
-    /// The number of bytes in one bank of cartridge ROM.
-    pub const BYTES_PER_BANK: usize = 0x2000;
-    pub const ADDRESS_OFFSET: usize = 0xA000;
+pub struct Sram<const BYTES_PER_BANK: usize>(Box<[[u8; BYTES_PER_BANK]]>);
 
+impl<const BYTES_PER_BANK: usize> Sram<BYTES_PER_BANK> {
     /// Constructs a new SRAM using the size specified by a cartridge ROM.
-    pub fn from_rom(rom: &Rom) -> Result<Self, HydraIOError> {
-        Ok(Sram(vec![[0x00; Sram::BYTES_PER_BANK]; rom.get_ram_bank_count()?].into_boxed_slice()))
+    pub fn from_header(header: &RomHeader) -> Result<Self, HydraIOError> {
+        Ok(Sram(vec![[0x00; BYTES_PER_BANK]; header.get_ram_bank_count()?].into_boxed_slice()))
     }
 
     /// Reads the byte from this SRAM at the provided address and bank. 
@@ -25,5 +23,10 @@ impl Sram {
     /// Returns the number of banks this SRAM consists of.
     pub fn get_bank_count(&self) -> usize {
         self.0.len()
+    }
+
+    /// Returns the size (in bytes) of this SRAM's banks.
+    pub const fn bank_size(&self) -> usize {
+        BYTES_PER_BANK
     }
 }

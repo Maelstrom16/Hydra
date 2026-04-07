@@ -12,7 +12,7 @@ use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
-    }, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}, graphics::Graphics, window::HydraApp
+    }, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}, graphics::Graphics, window::HydraApp
 };
 use std::{
     cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}, thread, time::{Duration, Instant}
@@ -103,8 +103,8 @@ pub struct GameBoy {
     next_frame_instant: Instant,
 }
 
-fn read_rom(path: &Path) -> Result<Rom, HydraIOError> {
-    Ok(Rom::from_vec(fs::read(path)?)?)
+fn read_as_rom(path: &Path) -> Result<RomHeader, HydraIOError> {
+    Ok(RomHeader::from_vec(fs::read(path)?)?)
 }
 
 impl GameBoy {
@@ -114,16 +114,16 @@ impl GameBoy {
             return Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string)));
         }
 
-        let rom = read_rom(path)?;
-        let mode = match model.is_color() && rom.supports_cgb_mode() {
+        let header = read_as_rom(path)?;
+        let mode = match model.is_color() && header.supports_cgb_mode() {
             true => GbMode::CGB,
             false => GbMode::DMG
         };
 
-        GameBoy::with_mode(rom, model, mode, app)
+        GameBoy::with_mode(header, model, mode, app)
     }
 
-    fn with_mode(rom: Rom, model: Model, mode: GbMode, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
+    fn with_mode(header: RomHeader, model: Model, mode: GbMode, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let (send, recv) = channel();
         let graphics = app.clone_graphics();
         let audio = app.clone_audio();
@@ -138,9 +138,9 @@ impl GameBoy {
 
             let ppu = Ppu::new(model.clone());
             let apu = Apu::new(audio);
-            let cpu = Some(Cpu::new(&rom, &model, &mode));
+            let cpu = Some(Cpu::new(&header, &model, &mode));
             let mut memory = MemoryMap::new(model.clone(), mode.clone(), graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
-            memory.hot_swap_rom(rom).unwrap();
+            memory.hot_swap_rom(header).unwrap();
 
             GameBoy {
                 apu,
@@ -223,7 +223,7 @@ impl GameBoy {
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
-                            if let Err(e) = read_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
+                            if let Err(e) = read_as_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
                                 println!("{}", e);
                             }
                         },

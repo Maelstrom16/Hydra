@@ -7,7 +7,7 @@ use futures::FutureExt;
 use crate::{
     common::{bit::BitVec, timing::{DelayedTickCounter, ModuloCounter}}, gameboy::{
         AGBRevision, CGBRevision, GBRevision, GameBoy, GbMode, Joypad, Model, SGBRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, OpcodeFn}, interrupt::{Interrupt, InterruptEnable, InterruptFlags}, memory::{
-            MemoryMap, rom::Rom
+            MemoryMap, rom::{Rom, RomHeader}
         }, timer::MasterTimer
     },
 };
@@ -66,7 +66,7 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn new(rom: &Rom, model: &Rc<Model>, mode: &GbMode) -> Self {
+    pub fn new(header: &RomHeader, model: &Rc<Model>, mode: &GbMode) -> Self {
         let dmg_mode = matches!(mode, GbMode::DMG);
         
         let af;
@@ -81,13 +81,13 @@ impl Cpu {
                 hl = [0x03, 0x84];
             }
             Model::GameBoy(GBRevision::DMG) => {
-                af = [if rom.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
+                af = [if header.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
                 bc = [0x13, 0x00];
                 de = [0xD8, 0x00];
                 hl = [0x4D, 0x01];
             }
             Model::GameBoy(GBRevision::MGB) => {
-                af = [if rom.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
+                af = [if header.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
                 bc = [0x13, 0x00];
                 de = [0xD8, 0x00];
                 hl = [0x4D, 0x01];
@@ -107,9 +107,9 @@ impl Cpu {
             Model::GameBoyColor(_) if dmg_mode => {
                 let mut b = 0x00;
                 let mut hl_bytes = [0x7C, 0x00];
-                if rom.has_publisher_rnd1() {
+                if header.has_publisher_rnd1() {
                     // If either licensee code is 0x01, B = sum of all title bytes
-                    b = rom.get_title().iter().sum();
+                    b = header.get_title().iter().sum();
                     if b == 0x43 || b == 0x58 {
                         // And, check special cases for HL
                         hl_bytes = [0x1A, 0x99];
@@ -124,9 +124,9 @@ impl Cpu {
                 let mut b = 0x01;
                 let mut hl_bytes = [0x7C, 0x00];
                 let mut f = 0b00000000;
-                if rom.has_publisher_rnd1() {
+                if header.has_publisher_rnd1() {
                     // If either licensee code is 0x01, B = sum of all title bytes
-                    b = rom.get_title().iter().sum();
+                    b = header.get_title().iter().sum();
                     if b & 0b1111 == 0 {
                         // Last op is an INC; set h flag...
                         f |= 0b0010 << 4;

@@ -3,10 +3,10 @@ use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
 use crate::gameboy::memory::mbc;
 use crate::gameboy::memory::sram::Sram;
-use crate::gameboy::memory::rom::Rom;
+use crate::gameboy::memory::rom::{Rom, RomHeader};
 
 pub struct MBC2 {
-    rom: Rom,
+    rom: Rom<0x4000>,
     ram: [u8; 0x200],
 
     ram_enabled: bool,
@@ -14,10 +14,10 @@ pub struct MBC2 {
 }
 
 impl MBC2 {
-    pub fn from_rom(rom: Rom) -> Result<Self, HydraIOError> {
+    pub fn from_header(header: RomHeader) -> Result<Self, HydraIOError> {
         Ok(MBC2 {
             ram: [0x00; 0x200],
-            rom,
+            rom: header.into_rom(),
 
             ram_enabled: false,
             rom_bank: 1,
@@ -27,7 +27,7 @@ impl MBC2 {
     fn localize_rom_address(&self, address: u16) -> BankedAddress<u16, usize> {
         match address {
             0x0000..=0x3FFF => BankedAddress {address: address, bank: 0},
-            0x4000..=0x7FFF => BankedAddress {address: address - Rom::BYTES_PER_BANK as u16, bank: self.rom_bank as usize % self.rom.get_bank_count()},
+            0x4000..=0x7FFF => BankedAddress {address: address - self.rom.bank_size() as u16, bank: self.rom_bank as usize % self.rom.get_bank_count()},
             _ => unimplemented!("Attempted to localize invalid ROM address {}", address)
         }
     }

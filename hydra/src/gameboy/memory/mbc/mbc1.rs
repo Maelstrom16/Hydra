@@ -1,12 +1,12 @@
 use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
-use crate::gameboy::memory::mbc;
+use crate::gameboy::memory::{mbc, sram};
 use crate::gameboy::memory::sram::Sram;
-use crate::gameboy::memory::rom::Rom;
+use crate::gameboy::memory::rom::{Rom, RomHeader};
 
 pub struct MBC1 {
-    rom: Rom,
-    ram: Sram,
+    rom: Rom<0x4000>,
+    ram: Sram<0x2000>,
 
     ram_enabled: bool,
     rom_bank: u8,
@@ -15,10 +15,10 @@ pub struct MBC1 {
 }
 
 impl MBC1 {
-    pub fn from_rom(rom: Rom) -> Result<Self, HydraIOError> {
+    pub fn from_header(header: RomHeader) -> Result<Self, HydraIOError> {
         Ok(MBC1 {
-            ram: Sram::from_rom(&rom)?,
-            rom,
+            ram: Sram::from_header(&header)?,
+            rom: header.into_rom(),
 
             ram_enabled: false,
             rom_bank: 1,
@@ -34,7 +34,7 @@ impl MBC1 {
         };
         match address {
             0x0000..=0x3FFF => BankedAddress {address: address, bank: (0 | bank_upper) as usize % self.rom.get_bank_count()},
-            0x4000..=0x7FFF => BankedAddress {address: address - Rom::BYTES_PER_BANK as u16, bank: (self.rom_bank | bank_upper) as usize % self.rom.get_bank_count()},
+            0x4000..=0x7FFF => BankedAddress {address: address - self.rom.bank_size() as u16, bank: (self.rom_bank | bank_upper) as usize % self.rom.get_bank_count()},
             _ => panic!("Attempted to localize invalid ROM address {}", address)
         }
     }
@@ -45,7 +45,7 @@ impl MBC1 {
             false => 0
         };
         match address {
-            0xA000..=0xBFFF => BankedAddress {address: address - Sram::ADDRESS_OFFSET as u16, bank},
+            0xA000..=0xBFFF => BankedAddress {address: address - sram::ADDRESS_OFFSET as u16, bank},
             _ => panic!("Attempted to localize invalid RAM address {}", address)
         }
     }

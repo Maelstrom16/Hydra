@@ -10,7 +10,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::{
     common::errors::HydraIOError, deserialize, gameboy::{
-        GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{hdma::HdmAccessor, oam::Oam, rom::Rom, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
+        GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{hdma::HdmAccessor, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
     }, graphics::Graphics, serialize, window::UserEvent
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, sync::{Arc, RwLock}, time::Duration};
@@ -87,8 +87,8 @@ impl MemoryMap {
         })
     }
 
-    pub fn hot_swap_rom(&mut self, rom: Rom,) -> Result<(), HydraIOError> {
-        self.cartridge = Some(rom.into_mbc()?);
+    pub fn hot_swap_rom(&mut self, header: RomHeader) -> Result<(), HydraIOError> {
+        self.cartridge = Some(header.into_mbc()?);
         Ok(())
     }
 
@@ -130,7 +130,7 @@ impl MemoryMap {
     pub fn read_u8(&self, address: u16, is_dma: bool) -> u8 {
         let read_result = match address {
             0x0000..=0x7FFF if is_dma || self.is_cart_accessible() => self.cartridge.as_ref().map(|this| this.read_rom_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
-            0x8000..=0x9FFF if self.is_vram_accessible() => self.vram.read_u8(address),
+            0x8000..=0x9FFF if is_dma || self.is_vram_accessible() => self.vram.read_u8(address),
             0xA000..=0xBFFF if is_dma || self.is_cart_accessible() => self.cartridge.as_ref().map(|this| this.read_ram_u8(address)).ok_or(HydraIOError::OpenBusAccess).flatten(),
             0xC000..=0xDFFF if is_dma || self.is_wram_accessible() => Ok(self.wram.read_u8(address)),
             0xE000..=0xFFFF if is_dma => Ok(self.wram.read_u8(address - 0x2000)), // OAM DMA echo RAM mirrors the entirety of WRAM

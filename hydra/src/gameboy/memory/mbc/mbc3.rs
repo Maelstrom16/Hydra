@@ -2,14 +2,14 @@ use std::time::{Duration, Instant};
 
 use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
-use crate::gameboy::memory::mbc;
+use crate::gameboy::memory::{mbc, sram};
 use crate::gameboy::memory::sram::Sram;
-use crate::gameboy::memory::rom::Rom;
+use crate::gameboy::memory::rom::{Rom, RomHeader};
 use crate::{deserialize, serialize};
 
 pub struct MBC3 {
-    rom: Rom,
-    ram: Sram,
+    rom: Rom<0x4000>,
+    ram: Sram<0x2000>,
 
     ram_area_enabled: bool,
     rom_bank: u8,
@@ -20,11 +20,11 @@ pub struct MBC3 {
 }
 
 impl MBC3 {
-    pub fn from_rom(rom: Rom) -> Result<Self, HydraIOError> {
+    pub fn from_header(header: RomHeader) -> Result<Self, HydraIOError> {
         Ok(MBC3 {
-            ram: Sram::from_rom(&rom)?,
-            rtc: rom.get_rtc(),
-            rom,
+            ram: Sram::from_header(&header)?,
+            rtc: header.get_rtc(),
+            rom: header.into_rom(),
 
             ram_area_enabled: false,
             rom_bank: 1,
@@ -37,14 +37,14 @@ impl MBC3 {
     fn localize_rom_address(&self, address: u16) -> BankedAddress<u16, usize> {
         match address {
             0x0000..=0x3FFF => BankedAddress {address: address, bank: 0},
-            0x4000..=0x7FFF => BankedAddress {address: address - Rom::BYTES_PER_BANK as u16, bank: self.rom_bank as usize % self.rom.get_bank_count()},
+            0x4000..=0x7FFF => BankedAddress {address: address - self.rom.bank_size() as u16, bank: self.rom_bank as usize % self.rom.get_bank_count()},
             _ => panic!("Attempted to localize invalid ROM address {}", address)
         }
     }
 
     fn localize_ram_address(&self, address: u16) -> BankedAddress<u16, usize> {
         match address {
-            0xA000..=0xBFFF => BankedAddress {address: address - Sram::ADDRESS_OFFSET as u16, bank: self.ram_bank as usize % self.ram.get_bank_count()},
+            0xA000..=0xBFFF => BankedAddress {address: address - sram::ADDRESS_OFFSET as u16, bank: self.ram_bank as usize % self.ram.get_bank_count()},
             _ => panic!("Attempted to localize invalid RAM address {}", address)
         }
     }
