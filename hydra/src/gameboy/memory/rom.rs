@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6}, sram::Sram}};
+use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7}, sram::Sram}};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;
@@ -31,7 +31,7 @@ impl RomHeader {
             0x0F..=0x13 => Ok(Box::new(MBC3::from_header(self)?)),
             0x19..=0x1E => Ok(Box::new(MBC5::from_header(self)?)),
             0x20 => Ok(Box::new(MBC6::from_header(self)?)),
-            0x22 => panic!("MBC7 not yet supported"),
+            0x22 => Ok(Box::new(MBC7::from_header(self)?)),
             0xFC => panic!("POCKET CAMERA not yet supported"),
             0xFD => panic!("TAMA5 not yet supported"),
             0xFE => panic!("HuC3 not yet supported"),
