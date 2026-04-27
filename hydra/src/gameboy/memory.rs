@@ -11,7 +11,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::{
     common::errors::HydraIOError, deserialize, gameboy::{
         GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{hdma::HdmAccessor, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
-    }, graphics::Graphics, serialize, window::UserEvent
+    }, gamepad::{ControllerState, SdlContainer}, graphics::Graphics, serialize, window::UserEvent
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, sync::{Arc, RwLock}, time::Duration};
 
@@ -42,10 +42,10 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
-    pub fn new(model: Rc<Model>, mode: Rc<GbMode>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Result<MemoryMap, HydraIOError> {
+    pub fn new(model: Rc<Model>, mode: Rc<GbMode>, controllers: Arc<RwLock<ControllerState>>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Result<MemoryMap, HydraIOError> {
         let interrupt_flags = InterruptFlags::new();
         let interrupt_enable = InterruptEnable::new();
-        let joypad = Joypad::new(&model);
+        let joypad = Joypad::new(&model, controllers);
         let serial = SerialConnection::new(mode.clone());
         let vram = Vram::new(model.clone(), mode.clone());
         let wram = Wram::new(mode.clone());

@@ -12,7 +12,7 @@ use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, emulator::{EmuMessage, Emulator}, errors::HydraIOError
-    }, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{Button, Dpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}, graphics::Graphics, window::HydraApp
+    }, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{JoypButton, JoypDpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}, graphics::Graphics, window::HydraApp
 };
 use std::{
     cell::{Cell, RefCell}, ffi::OsStr, fs, path::Path, rc::Rc, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}, thread, time::{Duration, Instant}
@@ -125,6 +125,7 @@ impl GameBoy {
 
     fn with_mode(header: RomHeader, model: Model, mode: GbMode, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let (send, recv) = channel();
+        let controllers = app.clone_controllers();
         let graphics = app.clone_graphics();
         let audio = app.clone_audio();
         let proxy = app.clone_proxy();
@@ -139,7 +140,7 @@ impl GameBoy {
             let ppu = Ppu::new(model.clone());
             let apu = Apu::new(audio);
             let cpu = Some(Cpu::new(&header, &model, &mode));
-            let mut memory = MemoryMap::new(model.clone(), mode.clone(), graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
+            let mut memory = MemoryMap::new(model.clone(), mode.clone(), controllers, graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
             memory.hot_swap_rom(header).unwrap();
 
             GameBoy {
@@ -210,14 +211,14 @@ impl GameBoy {
                     match msg {
                         // TODO: Allow remapping controls in the future
                         EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
-                            KeyCode::KeyW => memory.joypad.press_dpad(Dpad::Up, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::KeyS => memory.joypad.press_dpad(Dpad::Down, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::KeyA => memory.joypad.press_dpad(Dpad::Left, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::KeyD => memory.joypad.press_dpad(Dpad::Right, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::KeyK => memory.joypad.press_button(Button::A, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::KeyJ => memory.joypad.press_button(Button::B, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::Enter => memory.joypad.press_button(Button::Start, state.is_pressed(), &mut memory.interrupt_flags),
-                            KeyCode::ShiftRight => memory.joypad.press_button(Button::Select, state.is_pressed(), &mut memory.interrupt_flags),
+                            KeyCode::KeyW => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Up, state.is_pressed()),
+                            KeyCode::KeyS => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Down, state.is_pressed()),
+                            KeyCode::KeyA => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Left, state.is_pressed()),
+                            KeyCode::KeyD => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Right, state.is_pressed()),
+                            KeyCode::KeyK => memory.joypad.keyboard_vecs.press_button(JoypButton::A, state.is_pressed()),
+                            KeyCode::KeyJ => memory.joypad.keyboard_vecs.press_button(JoypButton::B, state.is_pressed()),
+                            KeyCode::Enter => memory.joypad.keyboard_vecs.press_button(JoypButton::Start, state.is_pressed()),
+                            KeyCode::ShiftRight => memory.joypad.keyboard_vecs.press_button(JoypButton::Select, state.is_pressed()),
                             KeyCode::Space => self.turbo = state.is_pressed(),
                             KeyCode::AltLeft => self.dump_cpu = state.is_pressed(),
                             _ => {}
@@ -231,6 +232,8 @@ impl GameBoy {
                         _ => {} // Do nothing
                     }
                 }
+
+                memory.joypad.update_controller_vecs(&mut memory.interrupt_flags);
             }
 
             // Next T-cycle

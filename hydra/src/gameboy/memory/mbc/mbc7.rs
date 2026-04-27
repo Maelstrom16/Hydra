@@ -193,7 +193,6 @@ impl Eeprom93LC56 {
                     }
                 }
             }
-            println!("{:?}", self.state);
         }
 
         // Update clock when done
@@ -232,7 +231,6 @@ impl Eeprom93LC56 {
     }
 }
 
-#[derive(Debug)]
 enum EepromState {
     Standby,
     Opcode(u8),

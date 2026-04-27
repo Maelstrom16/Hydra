@@ -17,6 +17,7 @@ use crate::common::emulator::{self, EmuMessage};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
 use crate::gameboy;
+use crate::gamepad::{ControllerState, SdlContainer};
 use crate::graphics::Graphics;
 use crate::ui::UserInterface;
 
@@ -26,6 +27,7 @@ pub struct HydraApp {
     config: Config,
     window: Option<Arc<Window>>,
     graphics: Option<Arc<RwLock<Graphics>>>,
+    sdl: SdlContainer,
     audio: Option<Arc<RwLock<Audio>>>,
     ui: Option<UserInterface>,
     proxy: EventLoopProxy<UserEvent>,
@@ -42,6 +44,7 @@ impl HydraApp {
             config: Config::from_toml(),
             window: None, // Initialized on app startup
             graphics: None, // Initialized on app startup
+            sdl: SdlContainer::new(),
             audio: None, // Initialized on app startup
             ui: None, // Initialized on app startup
             proxy,
@@ -67,6 +70,10 @@ impl HydraApp {
 
     pub fn clone_window(&self) -> Arc<Window> {
         Arc::clone(self.window.as_ref().unwrap())
+    }
+
+    pub fn clone_controllers(&self) -> Arc<RwLock<ControllerState>> {
+        self.sdl.clone_p1()
     }
 
     pub fn clone_graphics(&self) -> Arc<RwLock<Graphics>> {
@@ -133,6 +140,10 @@ impl ApplicationHandler<UserEvent> for HydraApp {
         }
     }
 
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.sdl.tick();
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
@@ -156,7 +167,7 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                 if let Some(emu) = &self.emulator {
                     emu.send(EmuMessage::KeyboardInput(event));
                 }
-            },
+            }
             WindowEvent::Resized(_) => {
                 if let Some(graphics) = &self.graphics {
                     graphics.read().unwrap().resize();

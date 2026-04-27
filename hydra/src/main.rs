@@ -2,6 +2,7 @@ mod audio;
 mod common;
 mod config;
 mod gameboy;
+mod gamepad;
 mod graphics;
 mod ui;
 mod window;
