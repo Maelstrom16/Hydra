@@ -1,32 +1,39 @@
+use std::sync::{Arc, RwLock};
+
+use crate::common::bit::BitVec;
 use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
 use crate::gameboy::memory::{mbc, sram};
 use crate::gameboy::memory::sram::Sram;
 use crate::gameboy::memory::rom::{Rom, RomHeader};
+use crate::gamepad::{ControllerMessage, ControllerState};
 
 pub struct MBC5 {
     rom: Rom<0x4000>,
     ram: Sram<0x2000>,
+    controllers: Arc<RwLock<ControllerState>>,
 
     ram_enabled: bool,
     rom_bank: u16,
     ram_bank: u8,
 
-    rumble: bool,
+    rumble: Option<bool>,
+    rumble_aggregate: u16
 }
 
 impl MBC5 {
-    pub fn from_header(header: RomHeader) -> Result<Self, HydraIOError> {
+    pub fn from_header(header: RomHeader, controllers: Arc<RwLock<ControllerState>>) -> Result<Self, HydraIOError> {
         Ok(MBC5 {
             ram: Sram::from_header(&header)?,
+            rumble: header.get_rumble(),
             rom: header.into_rom(),
+            controllers,
 
             ram_enabled: false,
             rom_bank: 1,
             ram_bank: 0,
             
-            // TODO: Implement rumble for controllers
-            rumble: false
+            rumble_aggregate: 0
         })
     }
 
@@ -65,7 +72,8 @@ impl mbc::MemoryBankController for MBC5 {
             0x2000..=0x2FFF => {self.rom_bank = (self.rom_bank & 0b100000000) | value as u16}
             0x3000..=0x3FFF => {self.rom_bank = (self.rom_bank & 0b011111111) | ((value as u16 & 1) << 8)}
             0x4000..=0x5FFF => {
-                self.ram_bank = if self.rumble {
+                self.ram_bank = if let Some(ref mut rumbling) = self.rumble {
+                    *rumbling = value.test_bit(3);
                     value & 0b0111
                 } else {
                     value & 0b1111
@@ -82,5 +90,14 @@ impl mbc::MemoryBankController for MBC5 {
         } else {
             Err(HydraIOError::OpenBusAccess)
         }
+    }
+
+    fn tick(&mut self) {
+        self.rumble.inspect(|rumbling| self.rumble_aggregate = self.rumble_aggregate.wrapping_add(*rumbling as u16));
+    }
+
+    fn frame(&mut self) {
+        self.controllers.read().unwrap().channel().send(ControllerMessage::Rumble(self.rumble_aggregate));
+        self.rumble_aggregate = 0;
     }
 }

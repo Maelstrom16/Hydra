@@ -1,5 +1,6 @@
-use std::{array, sync::{Arc, RwLock}};
+use std::{array, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}};
 
+use hydra_macros::bijective_array;
 use sdl3::{self, EventPump, GamepadSubsystem, Sdl, event::Event, gamepad::{Axis, Button, Gamepad}, sensor::SensorType, sys::joystick::SDL_JoystickID};
 
 pub struct SdlContainer {
@@ -7,6 +8,7 @@ pub struct SdlContainer {
     gp_sys: GamepadSubsystem,
     event_pump: EventPump,
     controllers: [(Option<Gamepad>, Arc<RwLock<ControllerState>>); Self::NUM_PLAYERS],
+    recv: Receiver<ControllerMessage>
 }
 
 impl SdlContainer {
@@ -16,11 +18,13 @@ impl SdlContainer {
         let sdl = sdl3::init().unwrap();
         let gp_sys = sdl.gamepad().unwrap();
         let event_pump = sdl.event_pump().unwrap();
+        let (send, recv) = channel();
         SdlContainer { 
             sdl,
             gp_sys,
             event_pump,
-            controllers: array::from_fn(|_| (None, Arc::new(RwLock::new(ControllerState::new())))),
+            controllers: array::from_fn(|_| (None, Arc::new(RwLock::new(ControllerState::new(send.clone()))))),
+            recv
         }
     }
 
@@ -64,6 +68,13 @@ impl SdlContainer {
             let Some(gamepad) = optgp else {continue;};
             state.write().unwrap().update(gamepad);
         }
+
+        // Process any incoming contoller events
+        for msg in self.recv.try_iter() {
+            match msg {
+                ControllerMessage::Rumble(intensity) => self.controllers[0].0.as_mut().unwrap().set_rumble(intensity, intensity, 1000)
+            };
+        }
     }
 
     pub fn clone_p1(&self) -> Arc<RwLock<ControllerState>> {
@@ -75,10 +86,12 @@ pub struct ControllerState {
     buttons: [bool; Self::NUM_BUTTONS],
     axes: [i16; Self::NUM_AXES],
     sensors: [[f32; 3]; Self::NUM_SENSORS],
+    send: Sender<ControllerMessage>
 }
 
 impl ControllerState {
     const NUM_BUTTONS: usize = 25;
+    #[bijective_array(button)]
     const BUTTON_MAPPING: [Button; Self::NUM_BUTTONS] = [
         Button::South,
         Button::East,
@@ -106,38 +119,11 @@ impl ControllerState {
         Button::Misc4,
         Button::Misc5,
     ];
-    const fn button_index(button: Button) -> usize {
-        match button {
-            Button::South => 0,
-            Button::East => 1,
-            Button::West => 2,
-            Button::North => 3,
-            Button::Back => 4,
-            Button::Guide => 5,
-            Button::Start => 6,
-            Button::LeftStick => 7,
-            Button::RightStick => 8,
-            Button::LeftShoulder => 9,
-            Button::RightShoulder => 10,
-            Button::DPadUp => 11,
-            Button::DPadDown => 12,
-            Button::DPadLeft => 13,
-            Button::DPadRight => 14,
-            Button::Misc1 => 15,
-            Button::RightPaddle1 => 16,
-            Button::LeftPaddle1 => 17,
-            Button::RightPaddle2 => 18,
-            Button::LeftPaddle2 => 19,
-            Button::Touchpad => 20,
-            Button::Misc2 => 21,
-            Button::Misc3 => 22,
-            Button::Misc4 => 23,
-            Button::Misc5 => 24,
-        }
-    }
 
     const NUM_AXES: usize = 6;
-    const STICK_THRESHOLD: i16 = 4000;
+    const STICK_DEADZONE: i16 = 4000;
+    const AXIS_THRESHOLD: i16 = 10000;
+    #[bijective_array(axis)]
     const AXIS_MAPPING: [Axis; Self::NUM_AXES] = [
         Axis::LeftX,
         Axis::LeftY,
@@ -148,6 +134,7 @@ impl ControllerState {
     ];
 
     const NUM_SENSORS: usize = 6;
+    #[bijective_array(sensor)]
     const SENSOR_MAPPING: [SensorType; Self::NUM_SENSORS] = [
         SensorType::Gyroscope,
         SensorType::Accelerometer,
@@ -157,18 +144,18 @@ impl ControllerState {
         SensorType::GyroscopeRight,
     ];
 
-    pub fn new() -> Self {
+    pub fn new(send: Sender<ControllerMessage>) -> Self {
         ControllerState {
             buttons: [false; Self::NUM_BUTTONS], 
             axes: [0; Self::NUM_AXES], 
-            sensors: [[0.0; 3]; Self::NUM_SENSORS] 
+            sensors: [[0.0; 3]; Self::NUM_SENSORS],
+            send
         }
     }
 
     pub fn update(&mut self, gamepad: &Gamepad) {
         // Poll all buttons
         for (index, button) in Self::BUTTON_MAPPING.iter().enumerate() {
-
             self.buttons[index] = gamepad.button(*button);
         }
 
@@ -193,19 +180,28 @@ impl ControllerState {
     pub fn poll_button(&self, button: Button) -> bool {
         self.buttons[Self::button_index(button)]
     }
+    pub fn poll_axis(&self, axis: Axis) -> i16 {
+        self.axes[Self::axis_index(axis)]
+    }
+    pub fn poll_sensor(&self, sensor: SensorType) -> [f32; 3] {
+        self.sensors[Self::sensor_index(sensor)]
+    }
 
     pub fn poll_direction(&self, direction: Direction) -> bool {
-        // kinda ugly but it works
         let (button_index, axis_index, axis_sign) = match direction {
-            Direction::Up => (11, 1, -1),
-            Direction::Down => (12, 1, 1),
-            Direction::Left => (13, 0, -1),
-            Direction::Right => (14, 0, 1),
+            Direction::Up => (Self::button_index(Button::DPadUp), Self::axis_index(Axis::LeftY), -1),
+            Direction::Down => (Self::button_index(Button::DPadDown), Self::axis_index(Axis::LeftY), 1),
+            Direction::Left => (Self::button_index(Button::DPadLeft), Self::axis_index(Axis::LeftX), -1),
+            Direction::Right => (Self::button_index(Button::DPadRight), Self::axis_index(Axis::LeftX), 1),
         };
 
         let button_active = self.buttons[button_index];
-        let axis_active = self.axes[axis_index] * axis_sign > Self::STICK_THRESHOLD;
+        let axis_active = self.axes[axis_index] * axis_sign > Self::AXIS_THRESHOLD;
         button_active || axis_active
+    }
+
+    pub fn channel(&self) -> &Sender<ControllerMessage> {
+        &self.send
     }
 }
 
@@ -214,4 +210,8 @@ pub enum Direction {
     Down,
     Left,
     Right
+}
+
+pub enum ControllerMessage {
+    Rumble(u16)
 }

@@ -203,6 +203,9 @@ impl GameBoy {
                 const SECS_PER_FRAME: f64 = 1f64 / 60f64;
                 self.next_frame_instant += Duration::from_secs_f64(SECS_PER_FRAME);
 
+                // Process rumble (if applicable)
+                if let Some(ref mut mbc) = memory.cartridge {mbc.frame();};
+
                 // Send audio for playback
                 self.apu.frame();
 
@@ -246,6 +249,7 @@ impl GameBoy {
 
         // Start next M-cycle
         memory.tick_dma();
+        if let Some(ref mut mbc) = memory.cartridge {mbc.tick();};
         memory.serial.tick(&mut memory.interrupt_flags);
     }
 }

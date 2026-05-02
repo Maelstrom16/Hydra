@@ -1,6 +1,11 @@
+use std::sync::{Arc, RwLock};
+
+use sdl3::sensor::SensorType;
+
 use crate::common::bit::BitVec;
 use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
+use crate::gamepad::ControllerState;
 use crate::{deserialize, serialize};
 use crate::gameboy::memory::{mbc, sram};
 use crate::gameboy::memory::sram::Sram;
@@ -8,6 +13,7 @@ use crate::gameboy::memory::rom::{Rom, RomHeader};
 
 pub struct MBC7 {
     rom: Rom<0x4000>,
+    controllers: Arc<RwLock<ControllerState>>,
 
     ram_enables: [u8; 2],
     rom_bank: u8,
@@ -20,16 +26,19 @@ pub struct MBC7 {
 }
 
 impl MBC7 {
-    pub fn from_header(header: RomHeader) -> Result<Self, HydraIOError> {
+    const ACCELEROMETER_RESET: u16 = 0x8000;
+    const ACCELEROMETER_CENTER: u16 = 0x81D0;
+    pub fn from_header(header: RomHeader, controllers: Arc<RwLock<ControllerState>>) -> Result<Self, HydraIOError> {
         Ok(MBC7 {
             rom: header.into_rom(),
+            controllers,
 
             ram_enables: [0x00; 2],
             rom_bank: 1,
             
             latch_ready: true,
-            accel_x: 0x8000,
-            accel_y: 0x8000,
+            accel_x: Self::ACCELEROMETER_RESET,
+            accel_y: Self::ACCELEROMETER_RESET,
 
             eeprom: Eeprom93LC56::new()
         })
@@ -83,14 +92,16 @@ impl mbc::MemoryBankController for MBC7 {
         if self.is_ram_enabled() {
             Ok(match address & 0xF0F0 {
                 0xA000 => if value == 0x55 {
-                    self.accel_x = 0x8000;
-                    self.accel_y = 0x8000;
+                    self.accel_x = Self::ACCELEROMETER_RESET;
+                    self.accel_y = Self::ACCELEROMETER_RESET;
                     self.latch_ready = true;
                 }
                 0xA010 => if value == 0xAA && self.latch_ready {
-                    // TODO: Poll controller tilt for accelerometer values
-                    self.accel_x = 0x8000;
-                    self.accel_y = 0x8000;
+                    let controller = self.controllers.read().unwrap();
+                    let [accel_x_f32, accel_y_f32, accel_z_f32] = controller.poll_sensor(SensorType::Accelerometer);
+                    self.accel_x = Self::ACCELEROMETER_CENTER.saturating_add_signed((accel_x_f32 * 11.0) as i16);
+                    self.accel_y = Self::ACCELEROMETER_CENTER.saturating_add_signed((accel_z_f32 * 11.0) as i16);
+                    println!("{:#06X}, {:#06X}", self.accel_x, self.accel_y);
                     self.latch_ready = false;
                 }
                 0xA080 => self.eeprom.update_inputs(value),

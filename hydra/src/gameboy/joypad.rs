@@ -7,7 +7,7 @@ use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy
 pub struct Joypad {
     pub keyboard_vecs: InputVectors,
     controller_vecs: InputVectors,
-    controllers: Arc<RwLock<ControllerState>>,
+    pub controllers: Arc<RwLock<ControllerState>>,
     joyp: MaskedBitVec<u8, true>,
 }
 

@@ -1,6 +1,6 @@
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::{Arc, RwLock}};
 
-use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7}, sram::Sram}};
+use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7}, sram::Sram}, gamepad::ControllerState};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;
@@ -22,16 +22,16 @@ impl RomHeader {
     }
 
     /// Consumes this ROM, wrapping it in a new memory bank controller
-    pub fn into_mbc(self) -> Result<Box<dyn MemoryBankController>, HydraIOError> {
+    pub fn into_mbc(self, controllers: Arc<RwLock<ControllerState>>) -> Result<Box<dyn MemoryBankController>, HydraIOError> {
         match self.0[HARDWARE_ADDRESS] {
             0x00 | 0x08..=0x09 => Ok(Box::new(MBC0::from_header(self)?)),
             0x01..=0x03 => Ok(Box::new(MBC1::from_header(self)?)),
             0x05..=0x06 => Ok(Box::new(MBC2::from_header(self)?)),
             0x0B..=0x0D => panic!("MMM01 not yet supported"),
             0x0F..=0x13 => Ok(Box::new(MBC3::from_header(self)?)),
-            0x19..=0x1E => Ok(Box::new(MBC5::from_header(self)?)),
+            0x19..=0x1E => Ok(Box::new(MBC5::from_header(self, controllers)?)),
             0x20 => Ok(Box::new(MBC6::from_header(self)?)),
-            0x22 => Ok(Box::new(MBC7::from_header(self)?)),
+            0x22 => Ok(Box::new(MBC7::from_header(self, controllers)?)),
             0xFC => panic!("POCKET CAMERA not yet supported"),
             0xFD => panic!("TAMA5 not yet supported"),
             0xFE => panic!("HuC3 not yet supported"),
@@ -102,6 +102,14 @@ impl RomHeader {
     pub fn get_rtc(&self) -> Option<RealTimeClock> {
         match self.0[HARDWARE_ADDRESS] {
             0x0F..=0x10 => Some(RealTimeClock::new()),
+            _ => None,
+        }
+    }
+
+    /// Constructs a rumble status if the provided ROM indicates a need for one.
+    pub fn get_rumble(&self) -> Option<bool> {
+        match self.0[HARDWARE_ADDRESS] {
+            0x1C..=0x1E => Some(false),
             _ => None,
         }
     }

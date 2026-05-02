@@ -19,7 +19,7 @@ pub struct MemoryMap {
     model: Rc<Model>,
     mode: Rc<GbMode>,
 
-    cartridge: Option<Box<dyn mbc::MemoryBankController>>,
+    pub(super) cartridge: Option<Box<dyn mbc::MemoryBankController>>,
     pub(super) vram: Vram,
     wram: Wram,
     pub(super) oam: Oam,
@@ -88,7 +88,7 @@ impl MemoryMap {
     }
 
     pub fn hot_swap_rom(&mut self, header: RomHeader) -> Result<(), HydraIOError> {
-        self.cartridge = Some(header.into_mbc()?);
+        self.cartridge = Some(header.into_mbc(self.joypad.controllers.clone())?);
         Ok(())
     }
 

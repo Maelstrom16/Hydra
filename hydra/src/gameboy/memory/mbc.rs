@@ -18,4 +18,7 @@ pub trait MemoryBankController: Send + Sync + 'static {
     fn read_ram_u8(&self, address: u16) -> Result<u8, HydraIOError>;
     fn write_rom_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError>;
     fn write_ram_u8(&mut self, value: u8, address: u16) -> Result<(), HydraIOError>;
+
+    fn tick(&mut self) { /* Do nothing by default */ }
+    fn frame(&mut self) { /* Do nothing by default */ }
 }
