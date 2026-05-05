@@ -72,7 +72,7 @@ impl SdlContainer {
         // Process any incoming contoller events
         for msg in self.recv.try_iter() {
             match msg {
-                ControllerMessage::Rumble(intensity) => self.controllers[0].0.as_mut().unwrap().set_rumble(intensity, intensity, 1000)
+                ControllerMessage::Rumble(intensity) => self.controllers[0].0.as_mut().map(|gp| gp.set_rumble(intensity, intensity, 1000))
             };
         }
     }
