@@ -6,10 +6,10 @@ pub mod mbc5;
 pub mod mbc6;
 pub mod mbc7;
 // pub mod mmm01;
-// pub mod huc1;
-// pub mod huc3;
-// pub mod pocketcamera;
-// pub mod tama5;
+pub mod huc1;
+pub mod huc3;
+pub mod pocketcamera;
+pub mod tama5;
 
 use crate::common::errors::HydraIOError;
 
