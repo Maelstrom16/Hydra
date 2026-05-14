@@ -5,7 +5,7 @@ use sdl3::sensor::SensorType;
 use crate::common::bit::BitVec;
 use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
-use crate::gamepad::ControllerState;
+use crate::input::ControllerState;
 use crate::{deserialize, serialize};
 use crate::gameboy::memory::{mbc, sram};
 use crate::gameboy::memory::sram::Sram;

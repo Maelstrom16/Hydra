@@ -6,7 +6,7 @@ use crate::common::util::BankedAddress;
 use crate::gameboy::memory::{mbc, sram};
 use crate::gameboy::memory::sram::Sram;
 use crate::gameboy::memory::rom::{Rom, RomHeader};
-use crate::gamepad::{ControllerMessage, ControllerState};
+use crate::input::{ControllerMessage, ControllerState};
 
 pub struct TAMA5 {
     rom: Rom<0x4000>,

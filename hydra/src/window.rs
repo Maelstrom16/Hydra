@@ -17,7 +17,7 @@ use crate::common::emulator::{self, EmuMessage};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
 use crate::gameboy;
-use crate::gamepad::{ControllerState, SdlContainer};
+use crate::input::{ControllerState, SdlContainer};
 use crate::graphics::Graphics;
 use crate::ui::UserInterface;
 

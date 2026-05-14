@@ -215,3 +215,15 @@ pub enum Direction {
 pub enum ControllerMessage {
     Rumble(u16)
 }
+
+pub fn initialize_camera() {
+    if cfg!(target_os = "macos") {
+        nokhwa::nokhwa_initialize(initialize_camera_inner);
+    } else {
+        initialize_camera_inner(true);
+    }
+}
+
+fn initialize_camera_inner(initialization_successful: bool) {
+
+}

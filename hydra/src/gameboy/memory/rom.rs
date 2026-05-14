@@ -1,6 +1,6 @@
 use std::{ops::RangeInclusive, sync::{Arc, RwLock}};
 
-use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, huc1::HuC1, huc3::HuC3, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7, pocketcamera::PocketCamera, tama5::TAMA5}, sram::Sram}, gamepad::ControllerState};
+use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, huc1::HuC1, huc3::HuC3, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7, pocketcamera::PocketCamera, tama5::TAMA5}, sram::Sram}, input::ControllerState};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;

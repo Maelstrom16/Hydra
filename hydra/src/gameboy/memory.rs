@@ -11,7 +11,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::{
     common::errors::HydraIOError, deserialize, gameboy::{
         GbMode, Model, apu::{Apu, channel::{Noise, Pulse, PulseType, Wave}, state::ApuState}, interrupt::{InterruptEnable, InterruptFlags}, joypad::Joypad, memory::{hdma::HdmAccessor, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{PpuMode, colormap::{self, ColorMap}, state::PpuState}, serial::SerialConnection, timer::MasterTimer
-    }, gamepad::{ControllerState, SdlContainer}, graphics::Graphics, serialize, window::UserEvent
+    }, input::{ControllerState, SdlContainer}, graphics::Graphics, serialize, window::UserEvent
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, sync::{Arc, RwLock}, time::Duration};
 

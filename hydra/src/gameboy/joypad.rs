@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc, sync::{Arc, RwLock}};
 
 use sdl3::gamepad::Button;
 
-use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy::{Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}, gamepad::{ControllerState, Direction, SdlContainer}};
+use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, gameboy::{Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}, input::{ControllerState, Direction, SdlContainer}};
 
 pub struct Joypad {
     pub keyboard_vecs: InputVectors,
