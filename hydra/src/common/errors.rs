@@ -7,9 +7,12 @@ pub enum HydraIOError {
     MalformedROM(&'static str),
     OpenBusAccess,
 
+    NoCamera,
+
     IOError(std::io::Error),
     DeserializationError(toml::de::Error),
     SerializationError(toml::ser::Error),
+    CameraError(nokhwa::NokhwaError),
 }
 
 impl fmt::Display for HydraIOError {
@@ -21,9 +24,12 @@ impl fmt::Display for HydraIOError {
             HydraIOError::MalformedROM(details) => write!(f, "Malformed ROM file: {}", details),
             HydraIOError::OpenBusAccess => write!(f, "Attempted to access an unmapped memory block"),
 
+            HydraIOError::NoCamera => write!(f, "Camera doesn't exist, or access to the camera was denied"),
+
             HydraIOError::IOError(error) => write!(f, "{}", error),
             HydraIOError::DeserializationError(error) => write!(f, "{}", error),
             HydraIOError::SerializationError(error) => write!(f, "{}", error),
+            HydraIOError::CameraError(error) => write!(f, "{}", error),
         }
     }
 }
@@ -45,6 +51,12 @@ impl From<toml::de::Error> for HydraIOError {
 impl From<toml::ser::Error> for HydraIOError {
     fn from(err: toml::ser::Error) -> Self {
         HydraIOError::SerializationError(err)
+    }
+}
+
+impl From<nokhwa::NokhwaError> for HydraIOError {
+    fn from(err: nokhwa::NokhwaError) -> Self {
+        HydraIOError::CameraError(err)
     }
 }
 

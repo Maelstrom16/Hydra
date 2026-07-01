@@ -8,6 +8,7 @@ cpal = "0.17.2"
 funty = "2.0.0"
 futures = "0.3.31"
 hydra_macros = {path = "../hydra_macros"}
+image = "0.25.10"
 muda = "0.17.1"
 nokhwa = { version = "0.10.10", features = ["input-native", "output-wgpu"] }
 png = "0.18.1"

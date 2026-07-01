@@ -1,7 +1,14 @@
-use std::{array, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}};
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
+use std::{array, ops::Deref, sync::{Arc, Condvar, RwLock, mpsc::{Receiver, Sender, channel}}};
 
 use hydra_macros::bijective_array;
+#[cfg(target_os = "macos")]
+use nokhwa::Camera;
+use nokhwa::{pixel_format::{LumaFormat, RgbFormat}, utils::{CameraIndex, RequestedFormat, RequestedFormatType}};
 use sdl3::{self, EventPump, GamepadSubsystem, Sdl, event::Event, gamepad::{Axis, Button, Gamepad}, sensor::SensorType, sys::joystick::SDL_JoystickID};
+
+use crate::common::errors::HydraIOError;
 
 pub struct SdlContainer {
     sdl: Sdl,
@@ -216,14 +223,34 @@ pub enum ControllerMessage {
     Rumble(u16)
 }
 
-pub fn initialize_camera() {
+pub fn initialize_camera() -> Result<Camera, HydraIOError> {
     if cfg!(target_os = "macos") {
-        nokhwa::nokhwa_initialize(initialize_camera_inner);
-    } else {
-        initialize_camera_inner(true);
+        // If on MacOS, ask for camera permissions first
+        let pair = Arc::new((Mutex::new(None), Condvar::new()));
+        let (mutex, cvar) = &*pair;
+
+        let pair2 = pair.clone();
+        nokhwa::nokhwa_initialize(move |init_successful| initialize_camera_inner(init_successful, pair2.clone()));
+        
+        cvar.wait_while(mutex.lock().unwrap(), |cam| cam.is_none()).unwrap().take().unwrap()?;
     }
+
+    // Use first camera at highest framerate
+    let index = CameraIndex::Index(0); 
+    let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+    
+    Camera::new(index, requested).map_err(|err| err.into())
 }
 
-fn initialize_camera_inner(initialization_successful: bool) {
+#[cfg(target_os = "macos")]
+fn initialize_camera_inner(init_successful: bool, condvar_pair: Arc<(Mutex<Option<Result<(), HydraIOError>>>, Condvar)>) {
+    let (ref mutex, ref cvar) = *condvar_pair;
 
+    let mut camera = mutex.lock().unwrap();
+    *camera = if init_successful {
+        Some(Ok(()))
+    } else {
+        Some(Err(HydraIOError::NoCamera))
+    };
+    cvar.notify_all();
 }
