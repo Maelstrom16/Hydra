@@ -145,7 +145,7 @@ impl mbc::MemoryBankController for PocketCamera {
                     let webcam_view_cropped = image::imageops::crop_imm(&webcam_view, (webcam_x - webcam_short) / 2, (webcam_y - webcam_short) / 2, webcam_short, webcam_short).to_image();
                     // Resize to Game Boy Camera dimensions and crop top/bottom rows
                     let sensor_view = image::imageops::resize(&webcam_view_cropped, SENSOR_WIDTH as u32, SENSOR_HEIGHT_UNCROPPED as u32, FilterType::Nearest);
-                    let sensor_view_cropped = image::imageops::crop_imm(&sensor_view, 0, 8, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32).to_image();
+                    let sensor_view_cropped = image::imageops::crop_imm(&sensor_view, 0, TILE_SIZE as u32, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32).to_image();
                     // Convert to Game Boy tile data
                     for (i, pixels) in sensor_view_cropped.as_chunks::<8>().0.into_iter().enumerate() {
                         let bitplanes = pixels.iter().fold((0, 0), |(b0, b1), pixel| {
