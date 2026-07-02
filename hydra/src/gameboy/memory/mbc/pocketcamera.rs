@@ -14,12 +14,14 @@ use crate::gameboy::memory::rom::{Rom, RomHeader};
 use crate::{deserialize, input, serialize};
 
 const SENSOR_WIDTH_TILES: usize = 16;
-const SENSOR_WIDTH: usize = SENSOR_WIDTH_TILES * 8;
+const SENSOR_WIDTH: usize = SENSOR_WIDTH_TILES * TILE_SIZE;
 const SENSOR_HEIGHT_TILES: usize = 14;
-const SENSOR_HEIGHT: usize = SENSOR_HEIGHT_TILES * 8;
+const SENSOR_HEIGHT_TILES_UNCROPPED: usize = 16;
+const SENSOR_HEIGHT: usize = SENSOR_HEIGHT_TILES * TILE_SIZE;
+const SENSOR_HEIGHT_UNCROPPED: usize = SENSOR_HEIGHT_TILES_UNCROPPED * TILE_SIZE;
 const SENSOR_BUFFER_SIZE: usize = SENSOR_WIDTH * SENSOR_HEIGHT;
 
-const TILE_HEIGHT: usize = 8;
+const TILE_SIZE: usize = 8;
 
 pub struct PocketCamera {
     rom: Rom<0x4000>,
@@ -136,16 +138,23 @@ impl mbc::MemoryBankController for PocketCamera {
         if self.cam_selected {
             match address {
                 0xA000 => {
-                    let temp = self.camera.frame().unwrap().decode_image::<LumaFormat>().unwrap();
-                    let temp_resized = image::imageops::resize(&temp, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32, FilterType::Nearest);
-                    for (i, pixels) in temp_resized.as_chunks::<8>().0.into_iter().enumerate() {
+                    // Get webcam frame and crop to a square
+                    let webcam_view = self.camera.frame().unwrap().decode_image::<LumaFormat>().unwrap();
+                    let (webcam_x, webcam_y) = webcam_view.dimensions();
+                    let webcam_short = std::cmp::min(webcam_x, webcam_y);
+                    let webcam_view_cropped = image::imageops::crop_imm(&webcam_view, (webcam_x - webcam_short) / 2, (webcam_y - webcam_short) / 2, webcam_short, webcam_short).to_image();
+                    // Resize to Game Boy Camera dimensions and crop top/bottom rows
+                    let sensor_view = image::imageops::resize(&webcam_view_cropped, SENSOR_WIDTH as u32, SENSOR_HEIGHT_UNCROPPED as u32, FilterType::Nearest);
+                    let sensor_view_cropped = image::imageops::crop_imm(&sensor_view, 0, 8, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32).to_image();
+                    // Convert to Game Boy tile data
+                    for (i, pixels) in sensor_view_cropped.as_chunks::<8>().0.into_iter().enumerate() {
                         let bitplanes = pixels.iter().fold((0, 0), |(b0, b1), pixel| {
                             ((b0 << 1) | !pixel.test_bit(6) as u8, (b1 << 1) | !pixel.test_bit(7) as u8)
                         });
                         let tile_x = i % SENSOR_WIDTH_TILES;
-                        let tile_y = i / (SENSOR_WIDTH_TILES * TILE_HEIGHT);
-                        let y = (i / SENSOR_WIDTH_TILES) % TILE_HEIGHT;
-                        let buffer_index = ((tile_y * SENSOR_WIDTH_TILES * TILE_HEIGHT) + (tile_x * TILE_HEIGHT) + y) * 2;
+                        let tile_y = i / (SENSOR_WIDTH_TILES * TILE_SIZE);
+                        let y = (i / SENSOR_WIDTH_TILES) % TILE_SIZE;
+                        let buffer_index = ((tile_y * SENSOR_WIDTH_TILES * TILE_SIZE) + (tile_x * TILE_SIZE) + y) * 2;
                         self.image_buffer[buffer_index] = bitplanes.0;
                         self.image_buffer[buffer_index + 1] = bitplanes.1;
                     }
