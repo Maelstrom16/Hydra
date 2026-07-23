@@ -43,6 +43,7 @@ pub struct PocketCamera {
     enhance_ratio: f32,
     invert: bool,
     voltage: f32,
+    dithering_thresholds: [[[u32; 4]; 4]; 3],
     rtc_latch: u8,
 }
 
@@ -68,6 +69,7 @@ impl PocketCamera {
             enhance_ratio: 0.50,
             invert: false,
             voltage: 0.0,
+            dithering_thresholds: [[[0; 4]; 4]; 3],
             rtc_latch: 0xFF,
         };
 
@@ -138,25 +140,32 @@ impl mbc::MemoryBankController for PocketCamera {
         if self.cam_selected {
             match address {
                 0xA000 => {
-                    // Get webcam frame and crop to a square
-                    let webcam_view = self.camera.frame().unwrap().decode_image::<LumaFormat>().unwrap();
-                    let (webcam_x, webcam_y) = webcam_view.dimensions();
-                    let webcam_short = std::cmp::min(webcam_x, webcam_y);
-                    let webcam_view_cropped = image::imageops::crop_imm(&webcam_view, (webcam_x - webcam_short) / 2, (webcam_y - webcam_short) / 2, webcam_short, webcam_short).to_image();
-                    // Resize to Game Boy Camera dimensions and crop top/bottom rows
-                    let sensor_view = image::imageops::resize(&webcam_view_cropped, SENSOR_WIDTH as u32, SENSOR_HEIGHT_UNCROPPED as u32, FilterType::Nearest);
-                    let sensor_view_cropped = image::imageops::crop_imm(&sensor_view, 0, TILE_SIZE as u32, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32).to_image();
-                    // Convert to Game Boy tile data
-                    for (i, pixels) in sensor_view_cropped.as_chunks::<8>().0.into_iter().enumerate() {
-                        let bitplanes = pixels.iter().fold((0, 0), |(b0, b1), pixel| {
-                            ((b0 << 1) | !pixel.test_bit(6) as u8, (b1 << 1) | !pixel.test_bit(7) as u8)
-                        });
-                        let tile_x = i % SENSOR_WIDTH_TILES;
-                        let tile_y = i / (SENSOR_WIDTH_TILES * TILE_SIZE);
-                        let y = (i / SENSOR_WIDTH_TILES) % TILE_SIZE;
-                        let buffer_index = ((tile_y * SENSOR_WIDTH_TILES * TILE_SIZE) + (tile_x * TILE_SIZE) + y) * 2;
-                        self.image_buffer[buffer_index] = bitplanes.0;
-                        self.image_buffer[buffer_index + 1] = bitplanes.1;
+                    if value.test_bit(0) {
+                        // Get webcam frame and crop to a square
+                        let webcam_view = self.camera.frame().unwrap().decode_image::<LumaFormat>().unwrap();
+                        let (webcam_x, webcam_y) = webcam_view.dimensions();
+                        let webcam_short = std::cmp::min(webcam_x, webcam_y);
+                        let webcam_view_cropped = image::imageops::crop_imm(&webcam_view, (webcam_x - webcam_short) / 2, (webcam_y - webcam_short) / 2, webcam_short, webcam_short).to_image();
+                        
+                        // Resize to Game Boy Camera dimensions and crop top/bottom rows
+                        let sensor_view = image::imageops::resize(&webcam_view_cropped, SENSOR_WIDTH as u32, SENSOR_HEIGHT_UNCROPPED as u32, FilterType::Nearest);
+                        let sensor_view_cropped = image::imageops::crop_imm(&sensor_view, 0, TILE_SIZE as u32, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32).to_image();
+
+                        // Process edge enhancement
+                        // let sensor_view_enhanced = image::imageops::filter3x3(&sensor_view_cropped, &[0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0]);
+
+                        // Convert to Game Boy tile data
+                        // for (i, pixels) in sensor_view_enhanced.as_chunks::<8>().0.into_iter().enumerate() {
+                        //     let bitplanes = pixels.iter().fold((0, 0), |(b0, b1), pixel| {
+                        //         ((b0 << 1) | !pixel.test_bit(6) as u8, (b1 << 1) | !pixel.test_bit(7) as u8)
+                        //     });
+                        //     let tile_x = i % SENSOR_WIDTH_TILES;
+                        //     let tile_y = i / (SENSOR_WIDTH_TILES * TILE_SIZE);
+                        //     let y = (i / SENSOR_WIDTH_TILES) % TILE_SIZE;
+                        //     let buffer_index = ((tile_y * SENSOR_WIDTH_TILES * TILE_SIZE) + (tile_x * TILE_SIZE) + y) * 2;
+                        //     self.image_buffer[buffer_index] = bitplanes.0;
+                        //     self.image_buffer[buffer_index + 1] = bitplanes.1;
+                        // }
                     }
                     Ok(())
                 }
@@ -165,7 +174,15 @@ impl mbc::MemoryBankController for PocketCamera {
                 0xA003 => {Err(HydraIOError::OpenBusAccess)}
                 0xA004 => {Err(HydraIOError::OpenBusAccess)}
                 0xA005 => {Err(HydraIOError::OpenBusAccess)}
-                0xA006..=0xA035 => {Err(HydraIOError::OpenBusAccess)}
+                0xA006..=0xA035 => {
+                    let localized_address = address as usize - 0xA006;
+                    let threshold_index = localized_address % 3;
+                    let matrix_x = (localized_address / 3) % 4;
+                    let matrix_y = localized_address / 12;
+                    self.dithering_thresholds[threshold_index][matrix_y][matrix_x] = value as u32;
+
+                    Ok(())
+                }
                 _ => {Err(HydraIOError::OpenBusAccess)}
             }
         } else if !self.capture_in_progress {

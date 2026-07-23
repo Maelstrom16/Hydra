@@ -40,7 +40,7 @@ impl Graphics {
 
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shader/default.wgsl").into()),
+            source: ShaderSource::Wgsl(include_str!("../../shader/fullscreen_texture.wgsl").into()),
         });
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
