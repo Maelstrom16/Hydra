@@ -91,13 +91,6 @@ impl PocketCamera {
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
         });
 
-        // let mapping_result = Arc::new(OnceLock::new());
-        // let result_clone = mapping_result.clone();
-        // 
-        // });
-        // let _ = device.poll(PollType::Wait);
-        // let _ = mapping_result.get().expect("Unable to map image buffer to memory");
-
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             entries: &[
                 BindGroupLayoutEntry {
@@ -201,9 +194,6 @@ impl PocketCamera {
             compute_pipeline
         };
 
-        println!("{:?}", result.camera.compatible_camera_formats());
-        let e = result.camera.set_frame_format(nokhwa::utils::FrameFormat::GRAY);
-        println!("{:?}", e);
         result.camera.open_stream()?;
 
         Ok(result)
@@ -241,14 +231,6 @@ impl mbc::MemoryBankController for PocketCamera {
                     let lower_bound = localized_address as u64 & 0xFFF8;
                     let upper_bound = lower_bound + 8;
                     let offset = localized_address as usize & 0b111;
-                    let address_as_range = localized_address..=localized_address;
-                    // let result = Arc::new(OnceLock::new());
-                    // let result_clone = result.clone();
-                    // self.image_buffer.slice(address_as_range.clone()).map_async(wgpu::MapMode::Read, move |value| {
-                    //     let _ = result_clone.set(value);
-                    // });
-                    // let _ = self.device.poll(PollType::Wait);
-                    // let _ = result.get().expect("Unable to map image buffer to memory");
 
                     Ok(self.staging_buffer.get_mapped_range(lower_bound..upper_bound)[offset])
                 }
@@ -293,6 +275,10 @@ impl mbc::MemoryBankController for PocketCamera {
                         // Resize to Game Boy Camera dimensions and crop top/bottom rows
                         let sensor_view = image::imageops::resize(&webcam_view_cropped, SENSOR_WIDTH as u32, SENSOR_HEIGHT_UNCROPPED as u32, FilterType::Nearest);
                         let sensor_view_cropped = image::imageops::crop_imm(&sensor_view, 0, TILE_SIZE as u32, SENSOR_WIDTH as u32, SENSOR_HEIGHT as u32).to_image();
+
+                        // Process edge enhancement
+                        // let sensor_view_enhanced = image::imageops::filter3x3(&sensor_view_cropped, &[0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0]);
+
                         self.queue.write_buffer(&self.sensor_buffer, 0, &sensor_view_cropped);
 
                         // Apply dithering thru compute shader
@@ -324,22 +310,6 @@ impl mbc::MemoryBankController for PocketCamera {
                         self.staging_buffer.map_async(wgpu::MapMode::Read, .., move |_| {
                             status_clone.store(false, Ordering::Relaxed);
                         });
-
-                        // Process edge enhancement
-                        // let sensor_view_enhanced = image::imageops::filter3x3(&sensor_view_cropped, &[0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0]);
-
-                        // Convert to Game Boy tile data
-                        // for (i, pixels) in sensor_view_enhanced.as_chunks::<8>().0.into_iter().enumerate() {
-                        //     let bitplanes = pixels.iter().fold((0, 0), |(b0, b1), pixel| {
-                        //         ((b0 << 1) | !pixel.test_bit(6) as u8, (b1 << 1) | !pixel.test_bit(7) as u8)
-                        //     });
-                        //     let tile_x = i % SENSOR_WIDTH_TILES;
-                        //     let tile_y = i / (SENSOR_WIDTH_TILES * TILE_SIZE);
-                        //     let y = (i / SENSOR_WIDTH_TILES) % TILE_SIZE;
-                        //     let buffer_index = ((tile_y * SENSOR_WIDTH_TILES * TILE_SIZE) + (tile_x * TILE_SIZE) + y) * 2;
-                        //     self.image_buffer[buffer_index] = bitplanes.0;
-                        //     self.image_buffer[buffer_index + 1] = bitplanes.1;
-                        // }
                     }
                     Ok(())
                 }
@@ -349,8 +319,6 @@ impl mbc::MemoryBankController for PocketCamera {
                 0xA004 => {Err(HydraIOError::OpenBusAccess)}
                 0xA005 => {Err(HydraIOError::OpenBusAccess)}
                 0xA006..=0xA035 => {
-                    // dith[y][x][t]
-                    // dith[t][y][x]
                     let localized_address = address as u64 - 0xA006;
                     // The exact address is recalculated to better suit the shader
                     let relocalized_address = (16 * (localized_address % 3)) + (4 * ((localized_address / 12) % 4)) + ((localized_address / 3) % 4);
