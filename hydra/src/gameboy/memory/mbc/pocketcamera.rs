@@ -163,7 +163,11 @@ impl PocketCamera {
             compilation_options: PipelineCompilationOptions::default(),
             cache: None
         });
-        let mut result = PocketCamera {
+
+        let mut camera = input::initialize_camera()?;
+        camera.open_stream()?;
+
+        Ok(PocketCamera {
             ram: Sram::from_header(&header)?,
             rom: header.into_rom(),
 
@@ -173,7 +177,7 @@ impl PocketCamera {
 
             cam_selected: false,
             capture_in_progress: Arc::new(false.into()),
-            camera: input::initialize_camera()?,
+            camera,
             image_buffer,
             sensor_buffer,
             gain: 14.0,
@@ -192,11 +196,7 @@ impl PocketCamera {
             staging_buffer,
             bind_group,
             compute_pipeline
-        };
-
-        result.camera.open_stream()?;
-
-        Ok(result)
+        })
     }
 
     fn localize_rom_address(&self, address: u16) -> BankedAddress<u16, usize> {
