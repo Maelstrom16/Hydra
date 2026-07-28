@@ -1,5 +1,7 @@
 use std::{ops::RangeInclusive, sync::{Arc, RwLock}};
 
+use wgpu::{Device, Queue};
+
 use crate::{common::{bit::BitVec, errors::HydraIOError}, gameboy::memory::{mbc::{MemoryBankController, huc1::HuC1, huc3::HuC3, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7, pocketcamera::PocketCamera, tama5::TAMA5}, sram::Sram}, input::ControllerState};
 
 // Header Registers
@@ -22,7 +24,7 @@ impl RomHeader {
     }
 
     /// Consumes this ROM, wrapping it in a new memory bank controller
-    pub fn into_mbc(self, controllers: Arc<RwLock<ControllerState>>) -> Result<Box<dyn MemoryBankController>, HydraIOError> {
+    pub fn into_mbc(self, controllers: Arc<RwLock<ControllerState>>, device: Arc<Device>, queue: Arc<Queue>) -> Result<Box<dyn MemoryBankController>, HydraIOError> {
         match self.0[HARDWARE_ADDRESS] {
             0x00 | 0x08..=0x09 => Ok(Box::new(MBC0::from_header(self)?)),
             0x01..=0x03 => Ok(Box::new(MBC1::from_header(self)?)),
@@ -32,7 +34,7 @@ impl RomHeader {
             0x19..=0x1E => Ok(Box::new(MBC5::from_header(self, controllers)?)),
             0x20 => Ok(Box::new(MBC6::from_header(self)?)),
             0x22 => Ok(Box::new(MBC7::from_header(self, controllers)?)),
-            0xFC => Ok(Box::new(PocketCamera::from_header(self)?)),
+            0xFC => Ok(Box::new(PocketCamera::from_header(self, device, queue)?)),
             0xFD => Ok(Box::new(TAMA5::from_header(self, controllers)?)),
             0xFE => Ok(Box::new(HuC3::from_header(self)?)),
             0xFF => Ok(Box::new(HuC1::from_header(self)?)),

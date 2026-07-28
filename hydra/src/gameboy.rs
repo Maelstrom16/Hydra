@@ -7,6 +7,7 @@ mod ppu;
 mod serial;
 mod timer;
 
+use wgpu::{Device, Queue};
 use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 
 use crate::{
@@ -96,6 +97,8 @@ pub struct GameBoy {
     ppu: Ppu,
 
     channel: Receiver<EmuMessage>,
+    device: Arc<Device>,
+    queue: Arc<Queue>,
 
     running: bool,
     turbo: bool,
@@ -127,6 +130,10 @@ impl GameBoy {
         let (send, recv) = channel();
         let controllers = app.clone_controllers();
         let graphics = app.clone_graphics();
+        let (device, queue) = {
+            let gtemp = graphics.read().unwrap();
+            (gtemp.get_device(), gtemp.get_queue())
+        };
         let audio = app.clone_audio();
         let proxy = app.clone_proxy();
 
@@ -141,7 +148,7 @@ impl GameBoy {
             let apu = Apu::new(audio);
             let cpu = Some(Cpu::new(&header, &model, &mode));
             let mut memory = MemoryMap::new(model.clone(), mode.clone(), controllers, graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
-            memory.hot_swap_rom(header).unwrap();
+            memory.hot_swap_rom(header, device.clone(), queue.clone()).unwrap();
 
             GameBoy {
                 apu,
@@ -150,6 +157,8 @@ impl GameBoy {
                 ppu,
 
                 channel: recv,
+                device,
+                queue,
 
                 running: true,
                 turbo: false,
@@ -227,7 +236,7 @@ impl GameBoy {
                             _ => {}
                         }
                         EmuMessage::HotSwap(path) => {
-                            if let Err(e) = read_as_rom(path).and_then(|rom| memory.hot_swap_rom(rom)) {
+                            if let Err(e) = read_as_rom(path).and_then(|rom| memory.hot_swap_rom(rom, self.device.clone(), self.queue.clone())) {
                                 println!("{}", e);
                             }
                         },

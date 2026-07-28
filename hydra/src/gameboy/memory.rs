@@ -6,6 +6,7 @@ mod sram;
 pub mod vram;
 pub mod wram;
 
+use wgpu::{Device, Queue};
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
@@ -87,8 +88,8 @@ impl MemoryMap {
         })
     }
 
-    pub fn hot_swap_rom(&mut self, header: RomHeader) -> Result<(), HydraIOError> {
-        self.cartridge = Some(header.into_mbc(self.joypad.controllers.clone())?);
+    pub fn hot_swap_rom(&mut self, header: RomHeader, device: Arc<Device>, queue: Arc<Queue>) -> Result<(), HydraIOError> {
+        self.cartridge = Some(header.into_mbc(self.joypad.controllers.clone(), device, queue)?);
         Ok(())
     }
 

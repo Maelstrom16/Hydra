@@ -5,9 +5,9 @@ use wgpu::*;
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub struct Graphics {
-    window: Arc<winit::window::Window>,
-    device: Device,
-    queue: Queue,
+    window: Arc<Window>,
+    device: Arc<Device>,
+    queue: Arc<Queue>,
     size_buffer: Buffer,
     surface: Surface<'static>,
     surface_format: TextureFormat,
@@ -99,8 +99,8 @@ impl Graphics {
 
         let mut result = Graphics {
             window,
-            device,
-            queue,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
             size_buffer,
             surface,
             surface_format,
@@ -325,5 +325,13 @@ impl Graphics {
         self.resize_screen_texture(width, height);
         self.update_screen_texture(&buf);
         self.clear_color = Color::WHITE;
+    }
+
+    pub fn get_device(&self) -> Arc<Device> {
+        self.device.clone()
+    }
+
+    pub fn get_queue(&self) -> Arc<Queue> {
+        self.queue.clone()
     }
 }
