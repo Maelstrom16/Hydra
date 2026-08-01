@@ -35,8 +35,23 @@ To run this application, run the following in the terminal:
 ```
 cargo run --release
 ```
-The `--release` flag is not strictly necessary—however, it offers a decent boost in performance.
+As of now, the `--release` flag is mandatory, as there are a couple instances of intentional mathematical overflows which are not yet handled by their respective functions. It also offers a significant boost in performance over the debug version.
 
-In its current state, the program will generate a window with some dummy options whose functionality is to be implemented once the GB emulator is able to support them. Currently, only the DMG emulator is functional. Loading a ROM into any original Game Boy console will launch the emulator (which I have nicknamed "Wyrm"). The CPU will run cycles in the background, and the PPU will render noise to a single, gradated triangle on the viewport to ensure wgpu can handle a dynamically-generated texture of the Game Boy's screen size.
+In its current state, the program will generate a window with some dummy options whose functionality is to be implemented once the GB emulator is able to support them. Both original Game Boy and Game Boy Color emulation is supported, and Super Game Boy features are planned for the future. Save for a couple of odd outliers, most of the titles I'm able to test seem to work just fine.
+
+Once launched, click `File > Load ROM...` and select your dumped cartridge ROM. It will be automatically loaded into a supported emulator.
 
 I plan to support Windows, MacOS, and Linux, but I do not currently have the means to test the program on Linux. As such, it may be buggy there.
+
+## Sources
+### Game Boy (Wyrm)
+* [Pan Docs](https://gbdev.io/pandocs/)
+* [Game Boy: Complete Technical Reference](https://gekkio.fi/files/gb-docs/gbctr.pdf) 
+* [Nitty Gritty Gameboy Cycle Timing - by Kevin Horton](http://blog.kevtris.org/blogfiles/Nitty%20Gritty%20Gameboy%20VRAM%20Timing.txt)
+* [1K/2K/4K 2.5V Microwire Serial EEPROM (93LC46/56/66)](https://ww1.microchip.com/downloads/en/DeviceDoc/21712C.pdf) - 93LC56 EEPROM used by MBC7 cartridges
+* [Low-Cost ±2 *g* Dual-Axis Accelerometer with Duty Cycle Output (ADXL202E)](https://www.analog.com/media/en/technical-documentation/data-sheets/adxl202e.pdf#:~:text=An%20analog%20output%20can%20be,hermetic%20LCC%20package.) - Accelerometer used by MBC7 cartridges
+* [Mitsubishi Integrated Circuit M64282FP Image Sensor (Artificial Retina LSI)](https://people.ece.cornell.edu/land/courses/ece4760/FinalProjects/f2012/qs44_twc55/qs44_twc55/datasheets/MITSUB_image_sensor.pdf) - Image sensor used by POCKETCAMERA cartridges
+
+### 3DS (Lemonshark)
+* [ARM11 MPCore Processor Technical Reference Manual r2p0](https://support.arm.com/documentation/ddi0360/f/)
+* [ARM Architecture Reference Manual (ARM DDI 0100I)](https://support.arm.com/documentation/ddi0100/i/) - ARM's official website denotes it as an ARMv5 reference manual, but it contains a lot of information pertaining to ARMv6 as well
