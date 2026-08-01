@@ -195,7 +195,6 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     "load_gba" => self.try_init_gameboy(gameboy::Model::GameBoyAdvance(self.config.gb.default_models.agb)),
                     "load_gba_agb0" => self.try_init_gameboy(gameboy::Model::GameBoyAdvance(gameboy::AGBRevision::AGB0)),
                     "load_gba_agb" => self.try_init_gameboy(gameboy::Model::GameBoyAdvance(gameboy::AGBRevision::AGB)),
-                    "toggle_revisions" => self.ui.as_ref().unwrap().toggle_revisions(&mut self.config),
 
                     "stop_emulation" => {
                         self.emulator.as_ref().unwrap().send(EmuMessage::Stop).unwrap();

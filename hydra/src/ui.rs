@@ -15,8 +15,7 @@ use crate::{
 pub struct UserInterface {
     hydra_menu: Menu,
     file_submenu: Submenu,
-    load_to_console_submenu_abridged: Submenu,
-    load_to_console_submenu_full: Submenu,
+    load_to_console_submenu: Submenu,
 }
 
 impl UserInterface {
@@ -30,14 +29,13 @@ impl UserInterface {
                 AboutMetadataBuilder::new()
                     .authors(Some(vec!["Programmed by Kohradon, with love ♥".to_owned()]))
                     .credits(Some("Programmed by Kohradon, with love ♥".to_owned()))
-                    .version(Some("Hydra 0.0.1\n------------\nWyrm (GB) 0.0.1\nLindwyrm (GBA) 0.0.0"))
+                    .version(Some("Hydra 0.0.1\n------------\nWyrm (GB) 0.1.0\nLemonshark (3DS) 0.0.1"))
                     .build(),
             ),
         );
         let about_submenu = Submenu::with_items("About", true, &[&about_menuitem, &PredefinedMenuItem::separator(), &PredefinedMenuItem::quit(None)]).unwrap();
 
-        let toggle_revisions_checkmenuitem = CheckMenuItem::with_id("toggle_revisions", "Show All Revisions", true, false, None);
-        let load_to_console_submenu_abridged = Submenu::with_items(
+        let load_to_console_submenu = Submenu::with_items(
             "Load ROM to Console",
             true,
             &[
@@ -45,25 +43,8 @@ impl UserInterface {
                 &MenuItem::with_id("load_sgb", "Super Game Boy...", false, None),
                 &MenuItem::with_id("load_gbc", "Game Boy Color...", true, None),
                 &MenuItem::with_id("load_gba", "Game Boy Advance...", true, None),
-                &toggle_revisions_checkmenuitem,
-            ],
-        )
-        .unwrap();
-
-        let load_to_console_submenu_full = Submenu::with_items(
-            "Load ROM to Console",
-            true,
-            &[
-                &MenuItem::with_id("load_gb_dmg0", "Game Boy (DMG0)...", true, None),
-                &MenuItem::with_id("load_gb_dmg", "Game Boy (DMG)...", true, None),
-                &MenuItem::with_id("load_gb_mgb", "Game Boy Pocket...", true, None),
-                &MenuItem::with_id("load_sgb_sgb", "Super Game Boy...", false, None),
-                &MenuItem::with_id("load_sgb_sgb2", "Super Game Boy 2...", false, None),
-                &MenuItem::with_id("load_gbc_cgb0", "Game Boy Color (CGB0)...", true, None),
-                &MenuItem::with_id("load_gbc_cgb", "Game Boy Color (CGB)...", true, None),
-                &MenuItem::with_id("load_gba_agb0", "Game Boy Advance (AGB0)...", true, None),
-                &MenuItem::with_id("load_gba_agb", "Game Boy Advance (AGB)...", true, None),
-                &toggle_revisions_checkmenuitem,
+                &MenuItem::with_id("load_ds", "DS...", false, None),
+                &MenuItem::with_id("load_3ds", "3DS...", true, None),
             ],
         )
         .unwrap();
@@ -73,7 +54,7 @@ impl UserInterface {
             true,
             &[
                 &MenuItem::with_id("load_rom", "&Load ROM...", true, None),
-                &load_to_console_submenu_abridged,
+                &load_to_console_submenu,
                 &PredefinedMenuItem::separator(),
                 &MenuItem::new("Save State", true, Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyS))),
                 &MenuItem::new("Load State", true, None),
@@ -123,27 +104,22 @@ impl UserInterface {
         )
         .unwrap();
 
-        menu.append_items(&[&about_submenu, &file_submenu, &gameboy_submenu]).unwrap();
+        let n3ds_submenu = Submenu::with_items(
+            "3DS",
+            false,
+            &[],
+        )
+        .unwrap();
+
+        menu.append_items(&[&about_submenu, &file_submenu, &gameboy_submenu, &n3ds_submenu]).unwrap();
 
         apply_to_window(&menu, window);
 
         UserInterface {
             hydra_menu: menu,
             file_submenu,
-            load_to_console_submenu_abridged,
-            load_to_console_submenu_full,
+            load_to_console_submenu,
         }
-    }
-
-    pub fn toggle_revisions(&self, config: &mut Config) {
-        if config.gb.show_all_revisions {
-            self.file_submenu.remove(&self.load_to_console_submenu_full);
-            self.file_submenu.insert(&self.load_to_console_submenu_abridged, 1);
-        } else {
-            self.file_submenu.remove(&self.load_to_console_submenu_abridged);
-            self.file_submenu.insert(&self.load_to_console_submenu_full, 1);
-        }
-        config.gb.show_all_revisions = !config.gb.show_all_revisions;
     }
 }
 
