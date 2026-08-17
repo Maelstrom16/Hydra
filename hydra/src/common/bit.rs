@@ -72,6 +72,7 @@ macro_rules! deserialize {
 pub trait BitVec: Integral {
     fn test_bit(self, bit: Self) -> bool;
     fn test_bits(self, bitmask: Self) -> bool;
+    fn range_bits(self, hi_bound: Self, lo_bound: Self) -> Self;
     fn set_bit(&mut self, bit: Self);
     fn set_bits(&mut self, bitmask: Self);
     fn reset_bit(&mut self, bit: Self);
@@ -89,6 +90,10 @@ impl<T: Integral> BitVec for T {
     #[inline(always)]
     fn test_bits(self, bitmask: T) -> bool {
         self & bitmask != T::ZERO
+    }
+
+    fn range_bits(self, hi_bound: T, lo_bound: T) -> T {
+        (self >> lo_bound) & ((T::ONE << (hi_bound - lo_bound + T::ONE)) - T::ONE)
     }
 
     #[inline(always)]
