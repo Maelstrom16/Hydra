@@ -57,7 +57,6 @@ fn decode_fullsize(cpu: &dyn ArmCpu, inst32: u32) -> ArmInstruction {
             0b101 => decode_fullsize_branch(cpu, inst32),
             0b110 => decode_fullsize_loadcoprocessor(cpu, inst32),
             0b111 => decode_fullsize_coprocessor(cpu, inst32),
-
             _ => unreachable!()
         }
     }
@@ -65,8 +64,38 @@ fn decode_fullsize(cpu: &dyn ArmCpu, inst32: u32) -> ArmInstruction {
 
 #[inline]
 fn decode_fullsize_unconditional(cpu: &dyn ArmCpu, major_op: u32, inst32: u32) -> ArmInstruction {
-    // TODO: Stub
-    ArmInstruction::Undefined
+    match major_op {
+        0b000 => match (inst32.range_bits(24, 20), inst32.test_bit(16)) {
+            (0b10000, false) if inst32 & 0b100000 == 0 => ArmInstruction::CPS,
+            (0b10000, true) if inst32 & 0b11100000000011110000 == 0 => ArmInstruction::SETEND,
+            _ => ArmInstruction::Undefined,
+        }
+        0b001 => ArmInstruction::Undefined,
+        0b010 | 0b011 if inst32 & 0b1011100001111000000000000 == 0b1010100001111000000000000 => ArmInstruction::PLD,
+        0b100 => match (inst32.test_bit(22), inst32.test_bit(20)) {
+            (true, false) => ArmInstruction::SRS,
+            (false, true) => ArmInstruction::RFE,
+            _ => ArmInstruction::Undefined,
+        }
+        0b101 => {
+            let mut offset = extract_imm_branch_offset(inst32);
+            offset.map_bit(1, inst32.test_bit(24));
+            ArmInstruction::BLX{offset: BlxVariant::Immediate(offset)}
+        }
+        0b110 => match (inst32.range_bits(24, 21), inst32.test_bit(20)) {
+            (0b0010, true) => ArmInstruction::MRRC2,
+            (_, true) => ArmInstruction::LDC2,
+            (0b0010, false) => ArmInstruction::MCRR2,
+            (_, false) => ArmInstruction::STC2,
+        }
+        0b111 => match (inst32.test_bit(24), inst32.test_bit(20), inst32.test_bit(4)) {
+            (false, _, false) => ArmInstruction::CDP2,
+            (false, false, true) => ArmInstruction::MCR2,
+            (false, true, true) => ArmInstruction::MRC2,
+            _ => ArmInstruction::Undefined,
+        }
+        _ => unreachable!()
+    }
 }
 
 #[inline]
