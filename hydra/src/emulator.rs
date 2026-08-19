@@ -31,7 +31,7 @@ pub trait Emulator {
 pub struct AllEmulator;
 
 impl Emulator for AllEmulator {
-    const CONSOLE_NAME: &str = "dummy";
+    const CONSOLE_NAME: &str = "";
     const CORE_NAME: &str = "Hydra";
     const FILE_FILTERS: &[(&str, &[&str])] = &[ALL_FILE_FILTER, GB_FILE_FILTER, GBA_FILE_FILTER, NDS_FILE_FILTER, N3DS_FILE_FILTER];
 
