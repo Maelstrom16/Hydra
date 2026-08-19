@@ -62,14 +62,22 @@ fn benchmark(input: &String) {
     let rom = std::fs::read(Path::new(input)).unwrap();
     let mut cpu = TestCpu{rom, pc: 0};
     
-    let mut i = cpu.rom.len();
-    println!("Decoding 32-bit ARM for {}. Length: {:#010X} bytes", input, i);
+    println!("Decoding 32-bit ARM for {}. Length: {:#010X} bytes", input, cpu.rom.len());
 
-    let start_instant = std::time::Instant::now();
-    while i > 0 {
-        std::hint::black_box(common::arm::decode_instruction(std::hint::black_box(&mut cpu)));
-        i -= 4;
-    }
+    let durs: [f64; 5] = std::array::from_fn(|_| {
+        cpu.pc = 0;
+        let mut i = cpu.rom.len();
 
-    println!("Done in {} seconds", start_instant.elapsed().as_secs_f64());
+        let start_instant = std::time::Instant::now();
+        while i > 0 {
+            std::hint::black_box(common::arm::decode_instruction(std::hint::black_box(&mut cpu)));
+            i -= 4;
+        }
+        start_instant.elapsed().as_secs_f64()
+    });
+
+    println!("\nDone in {} seconds.", durs.iter().sum::<f64>());
+    println!("Best: {}", durs.into_iter().reduce(f64::min).unwrap_or(0.0));
+    println!("Worst: {}", durs.into_iter().reduce(f64::max).unwrap_or(0.0));
+    println!("Average: {}", durs.iter().sum::<f64>() / 5.0);
 }
