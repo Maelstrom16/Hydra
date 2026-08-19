@@ -1,4 +1,4 @@
-use std::{matches, unreachable};
+use std::{matches, ops::Shl, println, unreachable};
 
 use funty::Unsigned;
 
@@ -28,12 +28,12 @@ pub enum ArmAddress {
 }
 
 pub trait ArmCpu {
-    fn fetch_instruction(&self) -> ArmAddress;
+    fn fetch_instruction(&mut self) -> ArmAddress;
     fn get_architecture(&self) -> &ArmArchitecture;
 }
 
 
-pub fn decode_instruction(cpu: &dyn ArmCpu) -> ArmInstruction {
+pub fn decode_instruction(cpu: &mut dyn ArmCpu) -> ArmInstruction {
     match cpu.fetch_instruction() {
         ArmAddress::Inst32(inst) => decode_fullsize(cpu, inst),
         ArmAddress::Thumb16(thumb) => decode_thumb(cpu, thumb),
@@ -94,7 +94,7 @@ fn decode_fullsize_unconditional(cpu: &dyn ArmCpu, major_op: u32, inst32: u32) -
             (false, true, true) => ArmInstruction::MRC2,
             _ => ArmInstruction::Undefined,
         }
-        _ => unreachable!()
+        _ => ArmInstruction::Undefined
     }
 }
 
@@ -422,8 +422,9 @@ fn decode_fullsize_coprocessor(cpu: &dyn ArmCpu, inst32: u32) -> ArmInstruction 
     }
 }
 
-fn extract_imm_branch_offset(inst32: u32) -> u32 {
-    inst32.range_bits(23, 0)
+fn extract_imm_branch_offset(inst32: u32) -> i32 {
+    // Sign extension from u24 to u30, leaving the result partially shifted to the left to keep it aligned
+    (inst32 << 8).cast_signed() >> 6
 }
 
 
@@ -433,16 +434,17 @@ fn decode_thumb(cpu: &dyn ArmCpu, thumb16: u16) -> ArmInstruction {
     ArmInstruction::Undefined
 }
 
-enum ArmInstruction {
+#[derive(Debug)]
+pub enum ArmInstruction {
     Undefined,
 
     ADC,
     ADD,
     AND,
-    B{offset: u32},
+    B{offset: i32},
     BIC,
     BKPT,
-    BL{offset: u32},
+    BL{offset: i32},
     BLX{offset: BlxVariant}, // Multiple encodings
     BX,
     BXJ,
@@ -589,27 +591,32 @@ enum ArmInstruction {
 
 
 
+#[derive(Debug)]
 enum BitHalf {
     Bottom,
     Top,
 }
 
+#[derive(Debug)]
 enum BlxVariant {
-    Immediate(u32),
+    Immediate(i32),
     Register,
 }
 
+#[derive(Debug)]
 enum PkhForm {
     BT,
     TB
 }
 
+#[derive(Debug)]
 enum LdmForm {
     Standard,
     UserRegisters,
     Restore
 }
 
+#[derive(Debug)]
 enum StmForm {
     Standard,
     UserRegisters,
