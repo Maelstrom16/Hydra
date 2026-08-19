@@ -364,7 +364,7 @@ fn decode_fullsize_loadmultiple(cpu: &dyn ArmCpu, inst32: u32) -> ArmInstruction
         (true, false, true, false) => ArmInstruction::LDM(LdmForm::UserRegisters),
         (true, _, true, true) => ArmInstruction::LDM(LdmForm::Restore),
         (false, _, false, _) => ArmInstruction::STM(StmForm::Standard),
-        (true, false, false, _) => ArmInstruction::STM(StmForm::Standard),
+        (true, false, false, _) => ArmInstruction::STM(StmForm::UserRegisters),
 
         _ => ArmInstruction::Undefined
     }
