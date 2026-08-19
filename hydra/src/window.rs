@@ -13,15 +13,16 @@ use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{Window, WindowId};
 
 use crate::audio::Audio;
-use crate::common::emulator::{self, EmuMessage};
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
-use crate::gameboy;
+use crate::emulator::gameboy::GameBoy;
+use crate::emulator::gba::{self, GameBoyAdvance};
+use crate::emulator::n3ds::N3ds;
+use crate::emulator::nds::Nds;
+use crate::emulator::{self, AllEmulator, EmuMessage, Emulator, gameboy};
 use crate::input::{ControllerState, SdlContainer};
 use crate::graphics::Graphics;
 use crate::ui::UserInterface;
-
-const GB_FILE_FILTER: (&str, &[&str]) = ("Game Boy (Color)", &["gb", "gbc"]);
 
 pub struct HydraApp {
     config: Config,
@@ -88,14 +89,11 @@ impl HydraApp {
         self.proxy.clone()
     }
 
-    fn try_init_emulator<F>(&mut self, filters: &[(&str, &[&str])], func: F)
-    where
-        F: Fn(&PathBuf, &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError>,
-    {
+    fn try_init_emulator<E: Emulator>(&mut self, model: E::Model) {
         println!("Loading ROM.");
-        let file_dialog = filters.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
+        let file_dialog = E::FILE_FILTERS.iter().fold(rfd::FileDialog::new(), |a, elem| a.add_filter(elem.0, elem.1));
         match file_dialog.pick_file() {
-            Some(path) => match func(&path, &self) {
+            Some(path) => match E::try_init(model, &path, &self) {
                 // If a file was selected, try to initialize Emulator
                 Ok(emu) => {
                     // If Emulator construction succeeds, close current emulator (if any) and save communication channel to app state
@@ -117,18 +115,6 @@ impl HydraApp {
             },
             None => {} // No file selected -- do nothing
         };
-    }
-
-    fn try_init_generic(&mut self) {
-        self.try_init_emulator(&[GB_FILE_FILTER], |path, this| {
-            emulator::init_from_file(path, this)
-        })
-    }
-
-    fn try_init_gameboy(&mut self, model: gameboy::Model) {
-        self.try_init_emulator(&[GB_FILE_FILTER], |path, this| {
-            gameboy::GameBoy::new(path, model, this)
-        })
     }
 }
 
@@ -181,20 +167,13 @@ impl ApplicationHandler<UserEvent> for HydraApp {
         match event {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
-                    "load_rom" => self.try_init_generic(),
-                    "load_gb" => self.try_init_gameboy(gameboy::Model::GameBoy(self.config.gb.default_models.dmg)),
-                    "load_gb_dmg0" => self.try_init_gameboy(gameboy::Model::GameBoy(gameboy::GBRevision::DMG0)),
-                    "load_gb_dmg" => self.try_init_gameboy(gameboy::Model::GameBoy(gameboy::GBRevision::DMG0)),
-                    "load_gb_mgb" => self.try_init_gameboy(gameboy::Model::GameBoy(gameboy::GBRevision::DMG0)),
-                    "load_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(self.config.gb.default_models.sgb)),
-                    "load_sgb_sgb" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(gameboy::SGBRevision::SGB)),
-                    "load_sgb_sgb2" => self.try_init_gameboy(gameboy::Model::SuperGameBoy(gameboy::SGBRevision::SGB2)),
-                    "load_gbc" => self.try_init_gameboy(gameboy::Model::GameBoyColor(self.config.gb.default_models.cgb)),
-                    "load_gbc_cgb0" => self.try_init_gameboy(gameboy::Model::GameBoyColor(gameboy::CGBRevision::CGB0)),
-                    "load_gbc_cgb" => self.try_init_gameboy(gameboy::Model::GameBoyColor(gameboy::CGBRevision::CGB)),
-                    "load_gba" => self.try_init_gameboy(gameboy::Model::GameBoyAdvance(self.config.gb.default_models.agb)),
-                    "load_gba_agb0" => self.try_init_gameboy(gameboy::Model::GameBoyAdvance(gameboy::AGBRevision::AGB0)),
-                    "load_gba_agb" => self.try_init_gameboy(gameboy::Model::GameBoyAdvance(gameboy::AGBRevision::AGB)),
+                    "load_rom" => self.try_init_emulator::<AllEmulator>(()),
+                    "load_gb" => self.try_init_emulator::<GameBoy>(gameboy::Model::GameBoy(self.config.gb.default_models.dmg)),
+                    "load_sgb" => self.try_init_emulator::<GameBoy>(gameboy::Model::SuperGameBoy(self.config.gb.default_models.sgb)),
+                    "load_gbc" => self.try_init_emulator::<GameBoy>(gameboy::Model::GameBoyColor(self.config.gb.default_models.cgb)),
+                    "load_gba" => self.try_init_emulator::<GameBoyAdvance>(gba::GbaTarget::Gb(gameboy::Model::GameBoyAdvance(self.config.gb.default_models.agb))),
+                    "load_nds" => self.try_init_emulator::<Nds>(()),
+                    "load_n3ds" => self.try_init_emulator::<N3ds>(()),
 
                     "stop_emulation" => {
                         self.emulator.as_ref().unwrap().send(EmuMessage::Stop).unwrap();

@@ -9,7 +9,7 @@ use winit::window::Window;
 
 use crate::{
     config::Config,
-    gameboy::{AGBRevision, CGBRevision, GBRevision, SGBRevision},
+    emulator::gameboy::{AGBRevision, CGBRevision, GBRevision, SGBRevision},
 };
 
 pub struct UserInterface {
@@ -43,7 +43,7 @@ impl UserInterface {
                 &MenuItem::with_id("load_sgb", "Super Game Boy...", false, None),
                 &MenuItem::with_id("load_gbc", "Game Boy Color...", true, None),
                 &MenuItem::with_id("load_gba", "Game Boy Advance...", true, None),
-                &MenuItem::with_id("load_ds", "DS...", false, None),
+                &MenuItem::with_id("load_nds", "DS...", true, None),
                 &MenuItem::with_id("load_3ds", "3DS...", true, None),
             ],
         )
@@ -104,6 +104,20 @@ impl UserInterface {
         )
         .unwrap();
 
+        let gba_submenu = Submenu::with_items(
+            "GBA",
+            false,
+            &[],
+        )
+        .unwrap();
+
+        let nds_submenu = Submenu::with_items(
+            "DS",
+            false,
+            &[],
+        )
+        .unwrap();
+
         let n3ds_submenu = Submenu::with_items(
             "3DS",
             false,
@@ -111,7 +125,7 @@ impl UserInterface {
         )
         .unwrap();
 
-        menu.append_items(&[&about_submenu, &file_submenu, &gameboy_submenu, &n3ds_submenu]).unwrap();
+        menu.append_items(&[&about_submenu, &file_submenu, &gameboy_submenu, &gba_submenu, &nds_submenu, &n3ds_submenu]).unwrap();
 
         apply_to_window(&menu, window);
 
