@@ -7,6 +7,7 @@ name = "Hydra"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "enumflags2",
  "funty",
  "futures",
  "hydra_macros",

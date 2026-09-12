@@ -133,6 +133,73 @@ impl<T: Integral> BitVec for T {
     }
 }
 
+// TODO: Remove once const traits are stabilized
+macro_rules! define_const_bitvec_fns {
+    ($ty:ident) => {
+        pub mod $ty {
+            #[inline(always)]
+            pub const fn const_test_bit(num: $ty, bit: $ty) -> bool {
+                const_test_bits(num, 1 << bit)
+            }
+
+            #[inline(always)]
+            pub const fn const_test_bits(num: $ty, bitmask: $ty) -> bool {
+                num & bitmask != 1
+            }
+
+            pub const fn const_range_bits(num: $ty, hi_bound: $ty, lo_bound: $ty) -> $ty {
+                (num >> lo_bound) & ((1 << (hi_bound - lo_bound + 1)) - 1)
+            }
+
+            #[inline(always)]
+            pub const fn const_set_bit(num: &mut $ty, bit: $ty) {
+                const_set_bits(num, 1 << bit)
+            }
+
+            #[inline(always)]
+            pub const fn const_set_bits(num: &mut $ty, bitmask: $ty) {
+                *num |= bitmask
+            }
+
+            #[inline(always)]
+            pub const fn const_reset_bit(num: &mut $ty, bit: $ty) {
+                const_reset_bits(num, 1 << bit)
+            }
+
+            #[inline(always)]
+            pub const fn const_reset_bits(num: &mut $ty, bitmask: $ty) {
+                *num &= !bitmask
+            }
+
+            #[inline(always)]
+            pub const fn const_map_bit(num: &mut $ty, bit: $ty, cond: bool) {
+                match cond {
+                    true => const_set_bit(num, bit),
+                    false => const_reset_bit(num, bit),
+                }
+            }
+
+            #[inline(always)]
+            pub const fn const_map_bits(num: &mut $ty, bitmask: $ty, cond: bool) {
+                match cond {
+                    true => const_set_bits(num, bitmask),
+                    false => const_reset_bits(num, bitmask),
+                }
+            }
+        }
+    };
+}
+
+define_const_bitvec_fns!(u8);
+define_const_bitvec_fns!(u16);
+define_const_bitvec_fns!(u32);
+define_const_bitvec_fns!(u64);
+define_const_bitvec_fns!(i8);
+define_const_bitvec_fns!(i16);
+define_const_bitvec_fns!(i32);
+define_const_bitvec_fns!(i64);
+
+
 pub struct MaskedBitVec<T: BitVec, const MASKED_READ_VALUE: bool> {
     inner: T,
     read_mask: T,

@@ -1,0 +1,1 @@
+pub struct Arm7Tdmi;

@@ -1,3 +1,5 @@
+mod cpu;
+
 use std::{path::PathBuf, sync::mpsc::Sender};
 
 use crate::{common::errors::HydraIOError, emulator::{EmuMessage, Emulator}, window::HydraApp};

@@ -17,7 +17,7 @@ use crate::window::{HydraApp, UserEvent};
 pub fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|elem| elem == "--benchmark") && let Some(input) = args.get(i + 1) {
-        benchmark(input);
+        decode_benchmark(input);
     } else {
         launch();
     }
@@ -44,35 +44,25 @@ fn launch() {
 /// Debug function used to test efficiency of other code
 /// 
 /// Will likely be moved into a separate module as additional, more complex tests are written
-fn benchmark(input: &String) {
-    struct TestCpu {
-        rom: Vec<u8>,
-        pc: usize
-    }
-    impl common::arm::ArmCpu for TestCpu {
-        fn fetch_instruction(&mut self) -> common::arm::ArmAddress {
-            let result = u32::from_le_bytes(self.rom[self.pc..self.pc+4].try_into().unwrap());
-            self.pc += 4;
-            return common::arm::ArmAddress::Inst32(result)
-        }
-        fn get_architecture(&self) -> &common::arm::ArmArchitecture {
-            unimplemented!()
-        }
-    }
+fn decode_benchmark(input: &String) {
     let rom = std::fs::read(Path::new(input)).unwrap();
-    let mut cpu = TestCpu{rom, pc: 0};
+    let mut cpu = common::arm::ArmCpuRuntime::new(
+        common::arm::ArmArchitecture::new(common::arm::ArmVersion::V4, common::arm::ArmFeatures::Thumb.into()),
+        &rom,
+    );
     
-    println!("Decoding 32-bit ARM for {}. Length: {:#010X} bytes", input, cpu.rom.len());
+    println!("Decoding 32-bit ARM for {}. Length: {:#010X} bytes", input, rom.len());
 
     let durs: [f64; 5] = std::array::from_fn(|_| {
-        cpu.pc = 0;
-        let mut i = cpu.rom.len();
+        let mut i = rom.len();
 
         let start_instant = std::time::Instant::now();
         while i > 0 {
-            std::hint::black_box(common::arm::decode_instruction(std::hint::black_box(&mut cpu)));
+            let inst = std::hint::black_box(common::arm::decode_instruction(std::hint::black_box(&mut cpu)));
+            std::hint::black_box(cpu.execute_instruction(inst));
             i -= 4;
         }
+        cpu.DEBUG_reset_pc();
         start_instant.elapsed().as_secs_f64()
     });
 

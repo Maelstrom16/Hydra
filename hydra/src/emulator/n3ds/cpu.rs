@@ -1,0 +1,1 @@
+pub struct Arm11MpCore;
