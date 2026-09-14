@@ -104,6 +104,8 @@ pub struct GameBoy {
     turbo: bool,
     dump_cpu: bool,
     next_frame_instant: Instant,
+
+    rom_path: PathBuf,
 }
 
 fn read_as_rom(path: &Path) -> Result<RomHeader, HydraIOError> {
@@ -111,22 +113,20 @@ fn read_as_rom(path: &Path) -> Result<RomHeader, HydraIOError> {
 }
 
 impl GameBoy {
-    pub fn new(path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
-        let ext = path.extension().and_then(OsStr::to_str);
+    pub fn new(rom_path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
+        let ext = rom_path.extension().and_then(OsStr::to_str);
         if !model.is_extension_valid(ext) {
             return Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string)));
         }
 
-        let header = read_as_rom(path)?;
+        let header = read_as_rom(rom_path)?;
         let mode = match model.is_color() && header.supports_cgb_mode() {
             true => GbMode::CGB,
             false => GbMode::DMG
         };
 
-        GameBoy::with_mode(header, model, mode, app)
-    }
+        let rom_path = rom_path.to_owned();
 
-    fn with_mode(header: RomHeader, model: Model, mode: GbMode, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let (send, recv) = channel();
         let controllers = app.clone_controllers();
         let graphics = app.clone_graphics();
@@ -163,7 +163,9 @@ impl GameBoy {
                 running: true,
                 turbo: false,
                 dump_cpu: false,
-                next_frame_instant: Instant::now()
+                next_frame_instant: Instant::now(),
+
+                rom_path
             }.main_thread();
         });
         Ok(send)
@@ -271,16 +273,20 @@ impl Emulator for GameBoy {
     type Model = Model;
     
     fn main_thread(mut self) {
-        println!("Launching Wyrm");
+        println!("Launching {}", Self::CORE_NAME);
 
         // Start main loop
         let mut cpu = self.cpu.take().unwrap();
         cpu.coro(&mut self, true);
 
-        println!("Exiting Wyrm");
+        println!("Exiting {}", Self::CORE_NAME);
 
         // Dump memory (for debugging)
         self.dump_mem();
+    }
+
+    fn rom_path(&self) -> &Path {
+        &self.rom_path
     }
     
     fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> { 

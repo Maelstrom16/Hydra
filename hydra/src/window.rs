@@ -35,8 +35,8 @@ pub struct HydraApp {
 
     emulator: Option<Sender<EmuMessage>>,
 
-    _temp_counter: u64,
-    _temp_time: std::time::Instant,
+    frame_counter: u64,
+    last_second: std::time::Instant,
 }
 
 impl HydraApp {
@@ -52,8 +52,8 @@ impl HydraApp {
 
             emulator: None, // Initialized when opening a ROM
 
-            _temp_counter: 0,
-            _temp_time: std::time::Instant::now(),
+            frame_counter: 0,
+            last_second: std::time::Instant::now(),
         }
     }
 
@@ -97,10 +97,10 @@ impl HydraApp {
                 // If a file was selected, try to initialize Emulator
                 Ok(emu) => {
                     // If Emulator construction succeeds, close current emulator (if any) and save communication channel to app state
-                    if let Some(emu_old) = self.emulator.take() {
-                        emu_old.send(EmuMessage::Stop);
-                    }
-                    println!("Successfully loaded {}. Launching emulator.", path.file_name().unwrap().display());
+                    self.stop_emulation();
+                    println!("Successfully loaded {}. Launching {}.", path.file_name().unwrap().display(), E::CORE_NAME);
+                    // println!("{} - {} FPS", path.file_prefix().unwrap().display(), 0);
+                    self.reset_frame_counter();
                     self.emulator = Some(emu);
                 }
                 Err(e) => {
@@ -115,6 +115,25 @@ impl HydraApp {
             },
             None => {} // No file selected -- do nothing
         };
+    }
+
+    fn stop_emulation(&mut self) {
+        if let Some(emulator) = self.emulator.take() {
+            emulator.send(EmuMessage::Stop).unwrap();
+        }
+    }
+
+    fn reset_frame_counter(&mut self) {
+        self.last_second = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        self.tick_frame_counter();
+    }
+
+    fn tick_frame_counter(&mut self) {
+        if let Some(_) = self.emulator {
+            self.window.as_ref().unwrap().set_title(&("Hydra - ".to_string() + &self.frame_counter.to_string() + " FPS"));
+            self.frame_counter = 0;
+            self.last_second += std::time::Duration::from_secs(1);
+        }
     }
 }
 
@@ -139,13 +158,10 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             WindowEvent::RedrawRequested => {
                 if let Some(graphics) = &self.graphics {
                     graphics.read().unwrap().render();
-                    self._temp_counter += 1;
-                    let now = std::time::Instant::now();
-                    let diff = (now - self._temp_time).as_secs_f64();
+                    self.frame_counter += 1;
+                    let diff = self.last_second.elapsed().as_secs_f64();
                     if diff > 1.0 {
-                        println!("{} frames, {} fps", self._temp_counter, self._temp_counter as f64 / diff);
-                        self._temp_counter = 0;
-                        self._temp_time = now;
+                        self.tick_frame_counter();
                     }
                 }
             }
@@ -176,8 +192,13 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     "load_n3ds" => self.try_init_emulator::<N3ds>(()),
 
                     "stop_emulation" => {
-                        self.emulator.as_ref().unwrap().send(EmuMessage::Stop).unwrap();
+                        self.stop_emulation();
                         self.graphics.as_mut().unwrap().write().unwrap().clear_screen_texture();
+                        self.window.as_ref().unwrap().set_title("Hydra");
+                    }
+
+                    "bug_report" => {
+                        webbrowser::open("https://github.com/Maelstrom16/Hydra/issues/new");
                     }
                     _ => {}
                 }

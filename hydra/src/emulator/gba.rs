@@ -1,6 +1,6 @@
 mod cpu;
 
-use std::{path::PathBuf, sync::mpsc::Sender};
+use std::{path::{Path, PathBuf}, sync::mpsc::Sender};
 
 use crate::{common::errors::HydraIOError, emulator::{EmuMessage, Emulator, gameboy::{self, GameBoy}}, window::HydraApp};
 
@@ -14,6 +14,7 @@ impl Emulator for GameBoyAdvance {
     type Model = GbaTarget;
     
     fn main_thread(self) { todo!() }
+    fn rom_path(&self) -> &Path { todo!() }
     fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         match model {
             GbaTarget::Gb(gbmodel) => GameBoy::try_init(gbmodel, rom_path, app),

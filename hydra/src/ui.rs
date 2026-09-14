@@ -29,7 +29,7 @@ impl UserInterface {
                 AboutMetadataBuilder::new()
                     .authors(Some(vec!["Programmed by Kohradon, with love ♥".to_owned()]))
                     .credits(Some("Programmed by Kohradon, with love ♥".to_owned()))
-                    .version(Some("Hydra 0.0.1\n------------\nWyrm (GB) 0.1.0\nLemonshark (3DS) 0.0.1"))
+                    .version(Some("Hydra 0.0.1\n------------\nWyrm (GB) 0.1.0"))
                     .build(),
             ),
         );
@@ -43,8 +43,8 @@ impl UserInterface {
                 &MenuItem::with_id("load_sgb", "Super Game Boy...", false, None),
                 &MenuItem::with_id("load_gbc", "Game Boy Color...", true, None),
                 &MenuItem::with_id("load_gba", "Game Boy Advance...", true, None),
-                &MenuItem::with_id("load_nds", "DS...", true, None),
-                &MenuItem::with_id("load_3ds", "3DS...", true, None),
+                &MenuItem::with_id("load_nds", "DS...", false, None),
+                &MenuItem::with_id("load_3ds", "3DS...", false, None),
             ],
         )
         .unwrap();
@@ -56,13 +56,13 @@ impl UserInterface {
                 &MenuItem::with_id("load_rom", "&Load ROM...", true, None),
                 &load_to_console_submenu,
                 &PredefinedMenuItem::separator(),
-                &MenuItem::new("Save State", true, Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyS))),
-                &MenuItem::new("Load State", true, None),
+                &MenuItem::new("Save State", false, Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyS))),
+                &MenuItem::new("Load State", false, None),
                 &PredefinedMenuItem::separator(),
-                &MenuItem::new("Reset", true, None),
+                &MenuItem::new("Reset", false, None),
                 &MenuItem::with_id("stop_emulation", "Stop", true, None),
                 &PredefinedMenuItem::separator(),
-                &MenuItem::new("Exit", true, None),
+                &PredefinedMenuItem::quit(None),
             ],
         )
         .unwrap();
@@ -125,7 +125,16 @@ impl UserInterface {
         )
         .unwrap();
 
-        menu.append_items(&[&about_submenu, &file_submenu, &gameboy_submenu, &gba_submenu, &nds_submenu, &n3ds_submenu]).unwrap();
+        let help_submenu = Submenu::with_items(
+            "Help", 
+            true, 
+            &[
+                &MenuItem::with_id("bug_report", "Report a Bug", true, None)
+            ]
+        )
+        .unwrap();
+
+        menu.append_items(&[&about_submenu, &file_submenu, &help_submenu]).unwrap();
 
         apply_to_window(&menu, window);
 

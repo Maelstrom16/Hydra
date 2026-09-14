@@ -22,9 +22,24 @@ pub trait Emulator {
     const CONSOLE_NAME: &str;
     const CORE_NAME: &str;
     const FILE_FILTERS: &'static [(&str, &[&str])];
+
     type Model;
+
     fn main_thread(self);
+    fn rom_path(&self) -> &Path;
     fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError>;
+
+    fn save_path(&self) -> PathBuf { 
+        let mut rom_path = self.rom_path().to_owned();
+        rom_path.add_extension("hysav");
+        rom_path
+    }
+
+    fn state_path(&self, slot: usize) -> PathBuf {
+        let mut rom_path = self.rom_path().to_owned();
+        rom_path.add_extension(&(slot.to_string() + ".hyst"));
+        rom_path
+    }
 }
 
 /// A dummy emulator which is used to represent that a console has not yet been chosen.
@@ -38,19 +53,16 @@ impl Emulator for AllEmulator {
     type Model = ();
     
     fn main_thread(self) { unimplemented!() }
+    fn rom_path(&self) -> &Path { unimplemented!() }
     fn try_init(_model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
-        init_from_file(rom_path, app)
-    }
-}
-
-pub fn init_from_file(path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
-    match path.extension().and_then(OsStr::to_str) {
-        Some("gb") => gameboy::GameBoy::try_init(gameboy::Model::GameBoy(app.get_config().gb.default_models.dmg), path, app),
-        Some("gbc") => gameboy::GameBoy::try_init(gameboy::Model::GameBoyColor(app.get_config().gb.default_models.cgb), path, app),
-        Some("gba") => gba::GameBoyAdvance::try_init(GbaTarget::Gba, path, app),
-        Some("nds" | "srl") => nds::Nds::try_init((), path, app),
-        Some("3ds" | "cci") => n3ds::N3ds::try_init((), path, app),
-        ext => Err(HydraIOError::InvalidEmulator("Hydra", ext.map(str::to_string))),
+        match rom_path.extension().and_then(OsStr::to_str) {
+            Some("gb") => gameboy::GameBoy::try_init(gameboy::Model::GameBoy(app.get_config().gb.default_models.dmg), rom_path, app),
+            Some("gbc") => gameboy::GameBoy::try_init(gameboy::Model::GameBoyColor(app.get_config().gb.default_models.cgb), rom_path, app),
+            Some("gba") => gba::GameBoyAdvance::try_init(GbaTarget::Gba, rom_path, app),
+            Some("nds" | "srl") => nds::Nds::try_init((), rom_path, app),
+            Some("3ds" | "cci") => n3ds::N3ds::try_init((), rom_path, app),
+            ext => Err(HydraIOError::InvalidEmulator("Hydra", ext.map(str::to_string))),
+        }
     }
 }
 

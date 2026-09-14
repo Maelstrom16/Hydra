@@ -1,7 +1,34 @@
 # Hydra
 An emulator for a number of retro game systems, written mostly to play around with Rust.
 
-## Files
+## Installation
+### Method 1: Direct Download
+See the releases tab on the right for pre-packaged executables for Windows, MacOS, and Linux.
+
+### Method 2: Run from Source
+With the repository cloned, run the following command from `Hydra/`:
+```
+cargo run --release
+```
+The program should open once the build is complete. If there are any platform-specific compilation errors, please write a new issue including the console output.
+
+## Testing
+In its current state, the program will generate a window with some dummy options whose functionality is to be implemented once the GB emulator is able to support them. Both original Game Boy and Game Boy Color emulation is supported, and Super Game Boy features are planned for the future. Save for a couple of odd outliers, most of the titles I'm able to test seem to work just fine.
+
+Once launched, click `File > Load ROM...` and select your dumped cartridge ROM. It will be automatically loaded into a supported emulator. Alternatively, select `File > Load ROM to Console` to load the ROM to something other than its "preferred" system (e.g. loading a Game Boy Color title on Game Boy Advance).
+
+I plan to support Windows, MacOS, and Linux, but I do not currently have the means to test the program on Linux. As such, it may be buggy there. I'd also like to make it compatible with WebAssembly if able, but it (likely) is not yet.
+
+## Planned Features
+* Saving
+* Save states
+* Super Game Boy Support
+
+## Files (outdated)
+
+<details>
+<summary>Click to Expand</summary>
+
 * **src/** - *Contains all Rust code.*
     * **common.rs** - *Contains all code to be shared between emulators.*
         * **emulator.rs** - *Defines the Emulator trait and other related types.*
@@ -30,18 +57,7 @@ An emulator for a number of retro game systems, written mostly to play around wi
 * **config.toml** - *Currently empty, but will be used to store emulator-specific settings (e.g. control mappings).*
 * **README.md** - *This file*
 
-## Testing
-To run this application, run the following in the terminal:
-```
-cargo run --release
-```
-As of now, the `--release` flag is mandatory, as there are a couple instances of intentional mathematical overflows which are not yet handled by their respective functions. It also offers a significant boost in performance over the debug version.
-
-In its current state, the program will generate a window with some dummy options whose functionality is to be implemented once the GB emulator is able to support them. Both original Game Boy and Game Boy Color emulation is supported, and Super Game Boy features are planned for the future. Save for a couple of odd outliers, most of the titles I'm able to test seem to work just fine.
-
-Once launched, click `File > Load ROM...` and select your dumped cartridge ROM. It will be automatically loaded into a supported emulator.
-
-I plan to support Windows, MacOS, and Linux, but I do not currently have the means to test the program on Linux. As such, it may be buggy there.
+</details>
 
 ## Sources
 ### Game Boy (Wyrm)
@@ -52,6 +68,8 @@ I plan to support Windows, MacOS, and Linux, but I do not currently have the mea
 * [Low-Cost ±2 *g* Dual-Axis Accelerometer with Duty Cycle Output (ADXL202E)](https://www.analog.com/media/en/technical-documentation/data-sheets/adxl202e.pdf#:~:text=An%20analog%20output%20can%20be,hermetic%20LCC%20package.) - Accelerometer used by MBC7 cartridges
 * [Mitsubishi Integrated Circuit M64282FP Image Sensor (Artificial Retina LSI)](https://people.ece.cornell.edu/land/courses/ece4760/FinalProjects/f2012/qs44_twc55/qs44_twc55/datasheets/MITSUB_image_sensor.pdf) - Image sensor used by POCKETCAMERA cartridges
 
-### 3DS (Lemonshark)
+### ARM
+* [ARM Architecture Reference Manual (ARM DDI 0100I)](https://support.arm.com/documentation/ddi0100/i/) - For general ARMv4-ARMv6 architectural information
+
+#### 3DS (Lemonshark)
 * [ARM11 MPCore Processor Technical Reference Manual r2p0](https://support.arm.com/documentation/ddi0360/f/)
-* [ARM Architecture Reference Manual (ARM DDI 0100I)](https://support.arm.com/documentation/ddi0100/i/) - ARM's official website denotes it as an ARMv5 reference manual, but it contains a lot of information pertaining to ARMv6 as well
