@@ -234,12 +234,34 @@ impl GameBoy {
                             EmuMessage::SaveStateSlot(slot) => {
                                 let path = self.state_path(slot);
                                 memory = &mut self.memory; // Restore memory reference after passing
-                                println!("SAVING STATE TO {}", path.into_string().unwrap());
+                                match std::fs::write(&path, &[]) {
+                                    Ok(_) => println!("SAVING STATE TO {}", path.to_str().unwrap()),
+                                    Err(e) => {
+                                        rfd::MessageDialog::new()
+                                            .set_title("Unable to Save State ".to_owned() + &slot.to_string())
+                                            .set_description(e.to_string())
+                                            .set_buttons(rfd::MessageButtons::Ok)
+                                            .set_level(rfd::MessageLevel::Warning)
+                                            .show();
+                                        self.next_frame_instant = Instant::now();
+                                    }
+                                }
                             }
                             EmuMessage::LoadStateSlot(slot) => {
                                 let path = self.state_path(slot);
                                 memory = &mut self.memory; // Restore memory reference after passing
-                                println!("LOADING STATE FROM {}", path.into_string().unwrap());
+                                match std::fs::read(&path) {
+                                    Ok(_) => println!("LOADING STATE FROM {}", path.to_str().unwrap()),
+                                    Err(e) => {
+                                        rfd::MessageDialog::new()
+                                            .set_title("Unable to Load State ".to_owned() + &slot.to_string())
+                                            .set_description(e.to_string())
+                                            .set_buttons(rfd::MessageButtons::Ok)
+                                            .set_level(rfd::MessageLevel::Warning)
+                                            .show();
+                                        self.next_frame_instant = Instant::now();
+                                    }
+                                }
                             }
                             EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) if self.running => match keycode {
                                 KeyCode::KeyW => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Up, state.is_pressed()),

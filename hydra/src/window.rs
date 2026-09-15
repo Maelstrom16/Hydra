@@ -119,7 +119,7 @@ impl HydraApp {
 
     fn stop_emulation(&mut self) {
         if let Some(emulator) = self.emulator.take() {
-            emulator.send(EmuMessage::Stop).unwrap();
+            emulator.send(EmuMessage::Stop);
         }
     }
 
