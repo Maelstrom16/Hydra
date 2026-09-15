@@ -37,7 +37,7 @@ pub trait Emulator {
 
     fn state_path(&self, slot: usize) -> PathBuf {
         let mut rom_path = self.rom_path().to_owned();
-        rom_path.add_extension(&(slot.to_string() + ".hyst"));
+        rom_path.add_extension(&("hysav.st".to_owned() + &slot.to_string()));
         rom_path
     }
 }
@@ -67,8 +67,11 @@ impl Emulator for AllEmulator {
 }
 
 pub enum EmuMessage {
-    Start,
+    Pause,
+    Reset,
     Stop,
+    SaveStateSlot(usize),
+    LoadStateSlot(usize),
     KeyboardInput(KeyEvent),
     HotSwap(&'static Path),
 }

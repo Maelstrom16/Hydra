@@ -191,6 +191,33 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     "load_nds" => self.try_init_emulator::<Nds>(()),
                     "load_n3ds" => self.try_init_emulator::<N3ds>(()),
 
+                    "save_state" => {
+                        if let Some(ref emulator) = self.emulator {
+                            // TODO: Allow saving to other slots
+                            emulator.send(EmuMessage::SaveStateSlot(0)).unwrap();
+                        }
+                    }
+
+                    "load_state" => {
+                        if let Some(ref emulator) = self.emulator {
+                            // TODO: Allow saving to other slots
+                            emulator.send(EmuMessage::LoadStateSlot(0)).unwrap();
+                        }
+                    }
+
+                    "pause_emulation" => {
+                        if let Some(ref emulator) = self.emulator {
+                            emulator.send(EmuMessage::Pause).unwrap();
+                            self.window.as_ref().unwrap().set_title("Hydra - Paused");
+                        }
+                    }
+
+                    "reset_emulation" => {
+                        if let Some(ref emulator) = self.emulator {
+                            emulator.send(EmuMessage::Reset).unwrap();
+                        }
+                    }
+
                     "stop_emulation" => {
                         self.stop_emulation();
                         self.graphics.as_mut().unwrap().write().unwrap().clear_screen_texture();

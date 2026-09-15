@@ -287,7 +287,7 @@ impl Cpu {
     }
 
     pub fn coro(&mut self, system: &mut GameBoy, debug: bool) {
-        while system.is_running() {
+        while system.is_powered_on() {
             // Skip iterations if halted or stopped
             self.mode = match self.mode {
                 CpuMode::Normal => CpuMode::Normal,

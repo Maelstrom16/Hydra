@@ -100,6 +100,7 @@ pub struct GameBoy {
     device: Arc<Device>,
     queue: Arc<Queue>,
 
+    powered_on: bool,
     running: bool,
     turbo: bool,
     dump_cpu: bool,
@@ -160,6 +161,7 @@ impl GameBoy {
                 device,
                 queue,
 
+                powered_on: true,
                 running: true,
                 turbo: false,
                 dump_cpu: false,
@@ -175,8 +177,8 @@ impl GameBoy {
         graphics.write().unwrap().init_emulator(ppu::SCREEN_WIDTH as u32, ppu::SCREEN_HEIGHT as u32);
     }
 
-    pub fn is_running(&self) -> bool {
-        self.running
+    pub fn is_powered_on(&self) -> bool {
+        self.powered_on
     }
 
     fn dump_mem(&self) {
@@ -190,7 +192,7 @@ impl GameBoy {
     }
 
     fn cycle_components(&mut self) {
-        let memory = &mut self.memory;
+        let mut memory = &mut self.memory;
         // Finish current M-cycle
         memory.timer.refresh_tima_if_overflowing();
 
@@ -221,30 +223,47 @@ impl GameBoy {
                 self.apu.frame();
 
                 // Process any new messages
-                for msg in self.channel.try_iter() {
-                    match msg {
-                        // TODO: Allow remapping controls in the future
-                        EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) => match keycode {
-                            KeyCode::KeyW => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Up, state.is_pressed()),
-                            KeyCode::KeyS => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Down, state.is_pressed()),
-                            KeyCode::KeyA => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Left, state.is_pressed()),
-                            KeyCode::KeyD => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Right, state.is_pressed()),
-                            KeyCode::KeyK => memory.joypad.keyboard_vecs.press_button(JoypButton::A, state.is_pressed()),
-                            KeyCode::KeyJ => memory.joypad.keyboard_vecs.press_button(JoypButton::B, state.is_pressed()),
-                            KeyCode::Enter => memory.joypad.keyboard_vecs.press_button(JoypButton::Start, state.is_pressed()),
-                            KeyCode::ShiftRight => memory.joypad.keyboard_vecs.press_button(JoypButton::Select, state.is_pressed()),
-                            KeyCode::Space => self.turbo = state.is_pressed(),
-                            KeyCode::AltLeft => self.dump_cpu = state.is_pressed(),
-                            _ => {}
-                        }
-                        EmuMessage::HotSwap(path) => {
-                            if let Err(e) = read_as_rom(path).and_then(|rom| memory.hot_swap_rom(rom, self.device.clone(), self.queue.clone())) {
-                                println!("{}", e);
+                'message: loop {
+                    for msg in self.channel.try_iter() {
+                        match msg {
+                            // TODO: Allow remapping controls in the future
+                            EmuMessage::Pause => {
+                                self.running = !self.running;
+                                self.next_frame_instant = Instant::now();
                             }
-                        },
-                        EmuMessage::Stop => self.running = false,
-                        _ => {} // Do nothing
+                            EmuMessage::SaveStateSlot(slot) => {
+                                let path = self.state_path(slot);
+                                memory = &mut self.memory;
+                                println!("SAVING STATE TO {}", path.into_string().unwrap());
+                            }
+                            EmuMessage::LoadStateSlot(slot) => {
+                                let path = self.state_path(slot);
+                                memory = &mut self.memory;
+                                println!("LOADING STATE FROM {}", path.into_string().unwrap());
+                            }
+                            EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) if self.running => match keycode {
+                                KeyCode::KeyW => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Up, state.is_pressed()),
+                                KeyCode::KeyS => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Down, state.is_pressed()),
+                                KeyCode::KeyA => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Left, state.is_pressed()),
+                                KeyCode::KeyD => memory.joypad.keyboard_vecs.press_dpad(JoypDpad::Right, state.is_pressed()),
+                                KeyCode::KeyK => memory.joypad.keyboard_vecs.press_button(JoypButton::A, state.is_pressed()),
+                                KeyCode::KeyJ => memory.joypad.keyboard_vecs.press_button(JoypButton::B, state.is_pressed()),
+                                KeyCode::Enter => memory.joypad.keyboard_vecs.press_button(JoypButton::Start, state.is_pressed()),
+                                KeyCode::ShiftRight => memory.joypad.keyboard_vecs.press_button(JoypButton::Select, state.is_pressed()),
+                                KeyCode::Space => self.turbo = state.is_pressed(),
+                                KeyCode::AltLeft => self.dump_cpu = state.is_pressed(),
+                                _ => {}
+                            }
+                            EmuMessage::HotSwap(path) => {
+                                if let Err(e) = read_as_rom(path).and_then(|rom| memory.hot_swap_rom(rom, self.device.clone(), self.queue.clone())) {
+                                    println!("{}", e);
+                                }
+                            },
+                            EmuMessage::Stop => self.powered_on = false,
+                            _ => {} // Do nothing
+                        }
                     }
+                    if self.running {break 'message}
                 }
 
                 memory.joypad.update_controller_vecs(&mut memory.interrupt_flags);
