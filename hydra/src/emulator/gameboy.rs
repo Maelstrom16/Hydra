@@ -7,6 +7,7 @@ mod ppu;
 mod serial;
 mod timer;
 
+use serde::{Deserialize, Serialize};
 use wgpu::{Device, Queue};
 use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 
@@ -89,12 +90,15 @@ pub enum GbMode {
     CGB
 }
 
-
-pub struct GameBoy {
+pub struct GbState {
     apu: Apu,
     cpu: Option<Cpu>,
     memory: MemoryMap,
     ppu: Ppu,
+}
+
+pub struct GameBoy {
+    state: GbState,
 
     channel: Receiver<EmuMessage>,
     device: Arc<Device>,
@@ -152,10 +156,7 @@ impl GameBoy {
             memory.hot_swap_rom(header, device.clone(), queue.clone()).unwrap();
 
             GameBoy {
-                apu,
-                cpu,
-                memory,
-                ppu,
+                state: GbState { apu, cpu, memory, ppu },
 
                 channel: recv,
                 device,
@@ -185,21 +186,21 @@ impl GameBoy {
         for y in 0..=0xFFF {
             print!("{:#06X}:   ", y << 4);
             for x in 0..=0xF {
-                print!("{:02X} ", self.memory.read_u8(x | (y << 4), true));
+                print!("{:02X} ", self.state.memory.read_u8(x | (y << 4), true));
             }
             println!("");
         }
     }
 
     fn cycle_components(&mut self) {
-        let mut memory = &mut self.memory;
+        let mut memory = &mut self.state.memory;
         // Finish current M-cycle
         memory.timer.refresh_tima_if_overflowing();
 
         // Loop until next M-cycle
         loop { 
             // Finish current T-cycle
-            self.ppu.coro(memory);
+            self.state.ppu.coro(memory);
             
             // Every frame
             if memory.timer.is_new_frame() {
@@ -220,7 +221,7 @@ impl GameBoy {
                 if let Some(ref mut mbc) = memory.cartridge {mbc.frame();};
 
                 // Send audio for playback
-                self.apu.frame();
+                self.state.apu.frame();
 
                 // Process any new messages
                 'message: loop {
@@ -233,7 +234,7 @@ impl GameBoy {
                             }
                             EmuMessage::SaveStateSlot(slot) => {
                                 let path = self.state_path(slot);
-                                memory = &mut self.memory; // Restore memory reference after passing
+                                memory = &mut self.state.memory; // Restore memory reference after passing
                                 match std::fs::write(&path, &[]) {
                                     Ok(_) => println!("SAVING STATE TO {}", path.to_str().unwrap()),
                                     Err(e) => {
@@ -249,7 +250,7 @@ impl GameBoy {
                             }
                             EmuMessage::LoadStateSlot(slot) => {
                                 let path = self.state_path(slot);
-                                memory = &mut self.memory; // Restore memory reference after passing
+                                memory = &mut self.state.memory; // Restore memory reference after passing
                                 match std::fs::read(&path) {
                                     Ok(_) => println!("LOADING STATE FROM {}", path.to_str().unwrap()),
                                     Err(e) => {
@@ -293,7 +294,7 @@ impl GameBoy {
 
             // Next T-cycle
             memory.timer.tick(&mut memory.interrupt_flags, &mut memory.ppu_state, &mut memory.apu_state);
-            self.apu.dot_tick(&mut memory.apu_state);
+            self.state.apu.dot_tick(&mut memory.apu_state);
 
             // Break for next M-cycle when applicable
             if memory.timer.is_system_cycle() {break;}
@@ -317,7 +318,7 @@ impl Emulator for GameBoy {
         println!("Launching {}", Self::CORE_NAME);
 
         // Start main loop
-        let mut cpu = self.cpu.take().unwrap();
+        let mut cpu = self.state.cpu.take().unwrap();
         cpu.coro(&mut self, true);
 
         println!("Exiting {}", Self::CORE_NAME);

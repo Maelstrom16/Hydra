@@ -199,7 +199,7 @@ impl Cpu {
 
     #[inline(always)]
     pub fn interrupt_pending(&self, system: &mut GameBoy) -> bool {
-        system.memory.interrupt_enable.read_ie() & system.memory.interrupt_flags.read_if() != 0
+        system.state.memory.interrupt_enable.read_ie() & system.state.memory.interrupt_flags.read_if() != 0
     }
 
     #[inline(always)]
@@ -219,7 +219,7 @@ impl Cpu {
 
                 // Calculate address of interrupt handler
                 let mut jump_addr = 0x0000; // Handler address is 0x0000 if interrupt handling was somehow cancelled
-                let composite = system_inner.memory.interrupt_enable.read_ie() & system_inner.memory.interrupt_flags.read_if();
+                let composite = system_inner.state.memory.interrupt_enable.read_ie() & system_inner.state.memory.interrupt_flags.read_if();
                 // Update jump address with requested interrupt handler (if any)
                 for shift_width in 0..=4 {
                     let bitmask = 1 << shift_width;
@@ -228,7 +228,7 @@ impl Cpu {
                         continue;
                     } else {
                         // Calculate handler address from requested interrupt
-                        system_inner.memory.interrupt_flags.get_inner().reset_bits(bitmask);
+                        system_inner.state.memory.interrupt_flags.get_inner().reset_bits(bitmask);
                         jump_addr = (shift_width * 0x8) + 0x40;
                         break;
                     }
@@ -250,8 +250,8 @@ impl Cpu {
                     "{:#06X}: {:02X} {:02X} {:02X}  ---  A: {:#04X}   F: {:08b}   BC: {:#06X}   DE: {:#06X}   HL: {:#06X}   SP: {:#06X}",
                     self.pc - 1,
                     self.ir,
-                    system.memory.read_u8(self.pc, false),
-                    system.memory.read_u8(self.pc + 1, false),
+                    system.state.memory.read_u8(self.pc, false),
+                    system.state.memory.read_u8(self.pc + 1, false),
                     self.af[1],
                     self.af[0],
                     u16::from_le_bytes(self.bc),
@@ -268,7 +268,7 @@ impl Cpu {
     #[inline(always)]
     fn step_u8(&mut self, system: &mut GameBoy) -> u8 {
         system.cycle_components();
-        let result = system.memory.read_u8(self.pc, false);
+        let result = system.state.memory.read_u8(self.pc, false);
         self.pc = self.pc.wrapping_add(1);
         result
     }
@@ -276,14 +276,14 @@ impl Cpu {
     #[inline(always)]
     fn read_u8(&self, address: u16, system: &mut GameBoy) -> u8 {
         system.cycle_components();
-        let result = system.memory.read_u8(address, false);
+        let result = system.state.memory.read_u8(address, false);
         result
     }
 
     #[inline(always)]
     fn write_u8(&self, address: u16, value: u8, system: &mut GameBoy) -> () {
         system.cycle_components();
-        system.memory.write_u8(value, address);
+        system.state.memory.write_u8(value, address);
     }
 
     pub fn coro(&mut self, system: &mut GameBoy, debug: bool) {
@@ -292,7 +292,7 @@ impl Cpu {
             self.mode = match self.mode {
                 CpuMode::Normal => CpuMode::Normal,
                 CpuMode::Halted if self.interrupt_pending(system) || self.unhalt_timer.increment() => CpuMode::Normal,
-                CpuMode::Stopped if system.memory.interrupt_flags.is_requested(Interrupt::Joypad) => CpuMode::Normal,
+                CpuMode::Stopped if system.state.memory.interrupt_flags.is_requested(Interrupt::Joypad) => CpuMode::Normal,
                 _ => {
                     system.cycle_components();
                     continue;  
@@ -302,8 +302,8 @@ impl Cpu {
             // If not halted, process HDMA. Skip this cycle during HDMA transfer.
             // TODO: Remove unsafe block?
             let hdma_active = unsafe {
-                let memory: *mut MemoryMap = &mut system.memory;
-                (*memory).hdma.tick(&mut system.memory) 
+                let memory: *mut MemoryMap = &mut system.state.memory;
+                (*memory).hdma.tick(&mut system.state.memory) 
             };
             if hdma_active {continue;}
 
@@ -866,7 +866,7 @@ impl Cpu {
 
     #[inline(always)]
     fn stop(&mut self, system: &mut GameBoy) {
-        let (mode, speed_switch, extra_cycle, reset_div) = match (system.memory.joypad.is_input_active(), self.interrupt_pending(system), system.memory.timer.is_speed_switch_requested(), self.ime) {
+        let (mode, speed_switch, extra_cycle, reset_div) = match (system.state.memory.joypad.is_input_active(), self.interrupt_pending(system), system.state.memory.timer.is_speed_switch_requested(), self.ime) {
             (true, true, _, _) => (CpuMode::Normal, false, false, false),
             (true, false, _, _) => (CpuMode::Halted, false, true, false),
             (false, true, false, _) => (CpuMode::Stopped, false, false, true),
@@ -883,11 +883,11 @@ impl Cpu {
         self.mode = mode;
         
         if speed_switch {
-            system.memory.timer.toggle_speed(&mut system.memory.apu_state);
+            system.state.memory.timer.toggle_speed(&mut system.state.memory.apu_state);
         }
         
         if reset_div {
-            system.memory.timer.write_div(&mut system.memory.apu_state);
+            system.state.memory.timer.write_div(&mut system.state.memory.apu_state);
         }
     }
 }
