@@ -233,12 +233,12 @@ impl GameBoy {
                             }
                             EmuMessage::SaveStateSlot(slot) => {
                                 let path = self.state_path(slot);
-                                memory = &mut self.memory;
+                                memory = &mut self.memory; // Restore memory reference after passing
                                 println!("SAVING STATE TO {}", path.into_string().unwrap());
                             }
                             EmuMessage::LoadStateSlot(slot) => {
                                 let path = self.state_path(slot);
-                                memory = &mut self.memory;
+                                memory = &mut self.memory; // Restore memory reference after passing
                                 println!("LOADING STATE FROM {}", path.into_string().unwrap());
                             }
                             EmuMessage::KeyboardInput(KeyEvent {state, physical_key: PhysicalKey::Code(keycode), .. }) if self.running => match keycode {
