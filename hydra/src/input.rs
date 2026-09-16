@@ -1,9 +1,7 @@
-#[cfg(target_os = "macos")]
 use std::sync::Mutex;
 use std::{array, ops::Deref, sync::{Arc, Condvar, RwLock, mpsc::{Receiver, Sender, channel}}};
 
 use hydra_macros::bijective_array;
-#[cfg(target_os = "macos")]
 use nokhwa::Camera;
 use nokhwa::{pixel_format::{LumaFormat, RgbFormat}, utils::{CameraIndex, RequestedFormat, RequestedFormatType}};
 use sdl3::{self, EventPump, GamepadSubsystem, Sdl, event::Event, gamepad::{Axis, Button, Gamepad}, sensor::SensorType, sys::joystick::SDL_JoystickID};
@@ -242,7 +240,6 @@ pub fn initialize_camera() -> Result<Camera, HydraIOError> {
     Camera::new(index, requested).map_err(|err| err.into())
 }
 
-#[cfg(target_os = "macos")]
 fn initialize_camera_inner(init_successful: bool, condvar_pair: Arc<(Mutex<Option<Result<(), HydraIOError>>>, Condvar)>) {
     let (ref mutex, ref cvar) = *condvar_pair;
 
