@@ -180,6 +180,11 @@ impl ApplicationHandler<UserEvent> for HydraApp {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        macro_rules! emu_message_arm {
+            ($message:expr) => {
+                {self.emulator.as_ref().inspect(|e| e.send($message).unwrap());}
+            };
+        }
         match event {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
@@ -191,19 +196,27 @@ impl ApplicationHandler<UserEvent> for HydraApp {
                     "load_nds" => self.try_init_emulator::<Nds>(()),
                     "load_n3ds" => self.try_init_emulator::<N3ds>(()),
 
-                    "save_state" => {
-                        if let Some(ref emulator) = self.emulator {
-                            // TODO: Allow saving to other slots
-                            emulator.send(EmuMessage::SaveStateSlot(0)).unwrap();
-                        }
-                    }
+                    "save_state_1" => emu_message_arm!(EmuMessage::SaveStateSlot(1)),
+                    "save_state_2" => emu_message_arm!(EmuMessage::SaveStateSlot(2)),
+                    "save_state_3" => emu_message_arm!(EmuMessage::SaveStateSlot(3)),
+                    "save_state_4" => emu_message_arm!(EmuMessage::SaveStateSlot(4)),
+                    "save_state_5" => emu_message_arm!(EmuMessage::SaveStateSlot(5)),
+                    "save_state_6" => emu_message_arm!(EmuMessage::SaveStateSlot(6)),
+                    "save_state_7" => emu_message_arm!(EmuMessage::SaveStateSlot(7)),
+                    "save_state_8" => emu_message_arm!(EmuMessage::SaveStateSlot(8)),
+                    "save_state_9" => emu_message_arm!(EmuMessage::SaveStateSlot(9)),
+                    "save_state_10" => emu_message_arm!(EmuMessage::SaveStateSlot(10)),
 
-                    "load_state" => {
-                        if let Some(ref emulator) = self.emulator {
-                            // TODO: Allow saving to other slots
-                            emulator.send(EmuMessage::LoadStateSlot(0)).unwrap();
-                        }
-                    }
+                    "load_state_1" => emu_message_arm!(EmuMessage::LoadStateSlot(1)),
+                    "load_state_2" => emu_message_arm!(EmuMessage::LoadStateSlot(2)),
+                    "load_state_3" => emu_message_arm!(EmuMessage::LoadStateSlot(3)),
+                    "load_state_4" => emu_message_arm!(EmuMessage::LoadStateSlot(4)),
+                    "load_state_5" => emu_message_arm!(EmuMessage::LoadStateSlot(5)),
+                    "load_state_6" => emu_message_arm!(EmuMessage::LoadStateSlot(6)),
+                    "load_state_7" => emu_message_arm!(EmuMessage::LoadStateSlot(7)),
+                    "load_state_8" => emu_message_arm!(EmuMessage::LoadStateSlot(8)),
+                    "load_state_9" => emu_message_arm!(EmuMessage::LoadStateSlot(9)),
+                    "load_state_10" => emu_message_arm!(EmuMessage::LoadStateSlot(10)),
 
                     "pause_emulation" => {
                         if let Some(ref emulator) = self.emulator {

@@ -19,6 +19,8 @@ pub struct UserInterface {
 }
 
 impl UserInterface {
+    const CONTROL_MODIFIER: Modifiers = if cfg!(target_os = "macos") {Modifiers::SUPER} else {Modifiers::CONTROL};
+
     pub fn initialize(window: &Arc<Window>, config: &Config) -> Self {
         // Create the main menubar
         let menu = Menu::new();
@@ -48,6 +50,42 @@ impl UserInterface {
             ],
         )
         .unwrap();
+    
+        let save_state_submenu = Submenu::with_items(
+            "Save State", 
+            true, 
+            &[
+                &MenuItem::with_id("save_state_1", "Slot &1", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit1))),
+                &MenuItem::with_id("save_state_2", "Slot &2", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit2))),
+                &MenuItem::with_id("save_state_3", "Slot &3", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit3))),
+                &MenuItem::with_id("save_state_4", "Slot &4", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit4))),
+                &MenuItem::with_id("save_state_5", "Slot &5", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit5))),
+                &MenuItem::with_id("save_state_6", "Slot &6", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit6))),
+                &MenuItem::with_id("save_state_7", "Slot &7", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit7))),
+                &MenuItem::with_id("save_state_8", "Slot &8", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit8))),
+                &MenuItem::with_id("save_state_9", "Slot &9", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit9))),
+                &MenuItem::with_id("save_state_10", "Slot 1&0", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER), Code::Digit0))),
+            ]
+        )
+        .unwrap();
+
+        let load_state_submenu = Submenu::with_items(
+            "Load State", 
+            true, 
+            &[
+                &MenuItem::with_id("load_state_1", "Slot &1", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit1))),
+                &MenuItem::with_id("load_state_2", "Slot &2", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit2))),
+                &MenuItem::with_id("load_state_3", "Slot &3", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit3))),
+                &MenuItem::with_id("load_state_4", "Slot &4", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit4))),
+                &MenuItem::with_id("load_state_5", "Slot &5", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit5))),
+                &MenuItem::with_id("load_state_6", "Slot &6", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit6))),
+                &MenuItem::with_id("load_state_7", "Slot &7", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit7))),
+                &MenuItem::with_id("load_state_8", "Slot &8", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit8))),
+                &MenuItem::with_id("load_state_9", "Slot &9", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit9))),
+                &MenuItem::with_id("load_state_10", "Slot 1&0", true, Some(Accelerator::new(Some(Self::CONTROL_MODIFIER | Modifiers::SHIFT), Code::Digit0))),
+            ]
+        )
+        .unwrap();
 
         let file_submenu = Submenu::with_items(
             "File",
@@ -56,8 +94,8 @@ impl UserInterface {
                 &MenuItem::with_id("load_rom", "&Load ROM...", true, None),
                 &load_to_console_submenu,
                 &PredefinedMenuItem::separator(),
-                &MenuItem::with_id("save_state","Save State", true, Some(Accelerator::new(Some(Modifiers::CONTROL), Code::KeyS))),
-                &MenuItem::with_id("load_state","Load State", true, None),
+                &save_state_submenu,
+                &load_state_submenu,
                 &MenuItem::with_id("pause_emulation", "Pause/Unpause", true, None),
                 &PredefinedMenuItem::separator(),
                 &MenuItem::with_id("reset_emulation","Reset", true, None),
