@@ -73,4 +73,8 @@ impl mbc::MemoryBankController for HuC1 {
             Ok(())
         }
     }
+
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
 }

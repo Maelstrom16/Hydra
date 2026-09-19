@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use sdl3::sensor::SensorType;
@@ -23,13 +25,19 @@ pub struct MBC7 {
     accel_y: u16,
 
     eeprom: Eeprom93LC56,
+    save_path: PathBuf,
 }
 
 impl MBC7 {
     const ACCELEROMETER_RESET: u16 = 0x8000;
     const ACCELEROMETER_CENTER: u16 = 0x81D0;
     pub fn from_header(header: RomHeader, controllers: Arc<RwLock<ControllerState>>) -> Result<Self, HydraIOError> {
+        let save_path = header.save_path();
+
         Ok(MBC7 {
+            eeprom: Eeprom93LC56::new(save_path),
+            save_path: save_path.to_owned(),
+
             rom: header.into_rom(),
             controllers,
 
@@ -39,8 +47,6 @@ impl MBC7 {
             latch_ready: true,
             accel_x: Self::ACCELEROMETER_RESET,
             accel_y: Self::ACCELEROMETER_RESET,
-
-            eeprom: Eeprom93LC56::new()
         })
     }
 
@@ -112,6 +118,10 @@ impl mbc::MemoryBankController for MBC7 {
             Err(HydraIOError::OpenBusAccess)
         }
     }
+
+    fn save(&self) {
+        fs::write(&self.save_path, self.eeprom.memory.iter().flat_map(|&halfword| halfword.to_le_bytes()).collect::<Vec<u8>>());
+    }
 }
 
 struct Eeprom93LC56 {
@@ -131,7 +141,10 @@ struct Eeprom93LC56 {
 }
 
 impl Eeprom93LC56 {
-    pub fn new() -> Self {
+    pub fn new(save_path: &Path) -> Self {
+        let save_path = save_path.to_owned();
+        let memory: [u16; 128] = fs::read(&save_path).map_or([0xFFFF; 0x80], |save_file| save_file.as_chunks::<2>().0.iter().map(|&bytes| u16::from_le_bytes(bytes)).collect::<Vec<u16>>().try_into().expect("Invalid save file"));
+
         Eeprom93LC56 { 
             chip_select: false, 
             clock: false, 
@@ -142,7 +155,7 @@ impl Eeprom93LC56 {
             address_buffer: 0,
             data_buffer: 0,
             write_enabled: false, 
-            memory: [0xFF; 0x80]
+            memory
         }
     }
 

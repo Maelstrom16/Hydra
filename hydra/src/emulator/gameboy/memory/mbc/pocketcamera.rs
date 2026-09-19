@@ -335,4 +335,8 @@ impl mbc::MemoryBankController for PocketCamera {
             Err(HydraIOError::OpenBusAccess)
         }
     }
+
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
 }

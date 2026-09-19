@@ -1,8 +1,8 @@
-use std::{ops::RangeInclusive, sync::{Arc, RwLock}};
+use std::{fs, ops::RangeInclusive, path::{Path, PathBuf}, sync::{Arc, RwLock}};
 
 use wgpu::{Device, Queue};
 
-use crate::{common::{bit::BitVec, errors::HydraIOError}, emulator::gameboy::memory::{mbc::{MemoryBankController, huc1::HuC1, huc3::HuC3, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7, pocketcamera::PocketCamera, tama5::TAMA5}, sram::Sram}, input::ControllerState};
+use crate::{common::{bit::BitVec, errors::HydraIOError}, emulator::{SavePath, gameboy::memory::{mbc::{MemoryBankController, huc1::HuC1, huc3::HuC3, mbc0::MBC0, mbc1::MBC1, mbc2::MBC2, mbc3::{MBC3, RealTimeClock}, mbc5::MBC5, mbc6::MBC6, mbc7::MBC7, pocketcamera::PocketCamera, tama5::TAMA5}, sram::Sram}}, input::ControllerState};
 
 // Header Registers
 pub const TITLE_ADDRESS: RangeInclusive<usize> = 0x0134..=0x0143;
@@ -14,18 +14,25 @@ pub const RAM_SIZE_ADDRESS: usize = 0x0149;
 pub const OLD_LICENSEE_CODE_ADDRESS: usize = 0x014B;
 pub const HEADER_CHECKSUM_ADDRESS: usize = 0x014D;
 
-pub struct RomHeader(Vec<u8>);
+pub struct RomHeader {
+    data: Vec<u8>,
+    save_path: PathBuf,
+}
 
 impl RomHeader {
     /// Resizes and wraps a byte vector for use as cartridge ROM.
-    pub fn from_vec(mut romvec: Vec<u8>) -> Result<Self, HydraIOError> {
+    pub fn load_from_file(path: &Path) -> Result<Self, HydraIOError> {
+        let mut romvec = fs::read(path)?;
         romvec.resize(RomHeader::rom_size_from_vec(&romvec)?, 0x00);
-        Ok(RomHeader(romvec))
+        Ok(RomHeader {
+            data: romvec,
+            save_path: path.save_path()
+        })
     }
 
     /// Consumes this ROM, wrapping it in a new memory bank controller
     pub fn into_mbc(self, controllers: Arc<RwLock<ControllerState>>, device: Arc<Device>, queue: Arc<Queue>) -> Result<Box<dyn MemoryBankController>, HydraIOError> {
-        match self.0[HARDWARE_ADDRESS] {
+        match self.data[HARDWARE_ADDRESS] {
             0x00 | 0x08..=0x09 => Ok(Box::new(MBC0::from_header(self)?)),
             0x01..=0x03 => Ok(Box::new(MBC1::from_header(self)?)),
             0x05..=0x06 => Ok(Box::new(MBC2::from_header(self)?)),
@@ -44,7 +51,7 @@ impl RomHeader {
 
     // Builds a `Rom` using the `Vec` wrapped by this `RomHeader`
     pub fn into_rom<const BYTES_PER_BANK: usize>(self) -> Rom<BYTES_PER_BANK> {
-        let (banked, []) = self.0.as_chunks::<{BYTES_PER_BANK}>() else {panic!("FATAL: ROM resize failed")};
+        let (banked, []) = self.data.as_chunks::<{BYTES_PER_BANK}>() else {panic!("FATAL: ROM resize failed")};
         Rom(Box::from(banked))
     }
     
@@ -79,7 +86,7 @@ impl RomHeader {
 
     /// Reads the cartridge's RAM size (in banks) from this ROM's header.
     pub fn get_ram_bank_count(&self) -> Result<usize, HydraIOError> {
-        match self.0[RAM_SIZE_ADDRESS] {
+        match self.data[RAM_SIZE_ADDRESS] {
             0x00 => Ok(0), // 0 KiB
             0x01 => Err(HydraIOError::MalformedROM("2 KiB RAMs are currently unsupported").into()), // 2 KiB?
             0x02 => Ok(1), // 8 KiB
@@ -92,17 +99,17 @@ impl RomHeader {
 
     /// Reads the cartridge's title from this ROM's header.
     pub fn get_title(&self) -> &[u8] {
-        &self.0[TITLE_ADDRESS]
+        &self.data[TITLE_ADDRESS]
     }
 
     /// Returns whether this ROM supports CGB registers/features.
     pub fn supports_cgb_mode(&self) -> bool {
-        self.0[CGB_FLAG_ADDRESS].test_bit(7)
+        self.data[CGB_FLAG_ADDRESS].test_bit(7)
     }
 
     /// Constructs a new `RealTimeClock` if the provided ROM indicates a need for one.
     pub fn get_rtc(&self) -> Option<RealTimeClock> {
-        match self.0[HARDWARE_ADDRESS] {
+        match self.data[HARDWARE_ADDRESS] {
             0x0F..=0x10 => Some(RealTimeClock::new()),
             _ => None,
         }
@@ -110,7 +117,7 @@ impl RomHeader {
 
     /// Constructs a rumble status if the provided ROM indicates a need for one.
     pub fn get_rumble(&self) -> Option<bool> {
-        match self.0[HARDWARE_ADDRESS] {
+        match self.data[HARDWARE_ADDRESS] {
             0x1C..=0x1E => Some(false),
             _ => None,
         }
@@ -118,13 +125,17 @@ impl RomHeader {
 
     /// Reads the cartridge's header checksum.
     pub fn get_header_checksum(&self) -> u8 {
-        self.0[HEADER_CHECKSUM_ADDRESS]
+        self.data[HEADER_CHECKSUM_ADDRESS]
     }
     
     /// Returns true if the cartridge has a licensee ID of 0x01;
     /// i.e., was published by R&D1.
     pub fn has_publisher_rnd1(&self) -> bool {
-        self.0[OLD_LICENSEE_CODE_ADDRESS] == 0x01 || self.0[OLD_LICENSEE_CODE_ADDRESS] == 0x33 && self.0[NEW_LICENSEE_CODE_ADDRESS] == 0x01
+        self.data[OLD_LICENSEE_CODE_ADDRESS] == 0x01 || self.data[OLD_LICENSEE_CODE_ADDRESS] == 0x33 && self.data[NEW_LICENSEE_CODE_ADDRESS] == 0x01
+    }
+
+    pub fn save_path(&self) -> &Path {
+        &self.save_path
     }
 }
 

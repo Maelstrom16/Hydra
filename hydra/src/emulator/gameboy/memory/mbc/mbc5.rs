@@ -92,6 +92,10 @@ impl mbc::MemoryBankController for MBC5 {
         }
     }
 
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
+
     fn tick(&mut self) {
         self.rumble.inspect(|rumbling| self.rumble_aggregate = self.rumble_aggregate.wrapping_add(*rumbling as u16));
     }

@@ -49,4 +49,8 @@ impl mbc::MemoryBankController for MBC0 {
         let BankedAddress { address, bank } = self.localize_ram_address(address);
         Ok(self.ram.write_bank(value, address, bank))
     }
+
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
 }

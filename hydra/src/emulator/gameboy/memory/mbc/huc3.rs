@@ -167,6 +167,10 @@ impl mbc::MemoryBankController for HuC3 {
             _ => Err(HydraIOError::OpenBusAccess)
         }
     }
+
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
 }
 
 enum RamAreaMode {

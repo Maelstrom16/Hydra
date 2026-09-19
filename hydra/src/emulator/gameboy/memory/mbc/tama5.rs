@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use crate::common::bit::BitVec;
@@ -11,6 +13,7 @@ use crate::input::{ControllerMessage, ControllerState};
 pub struct TAMA5 {
     rom: Rom<0x4000>,
     ram: [u8; 32],
+    save_path: PathBuf,
     controllers: Arc<RwLock<ControllerState>>,
 
     rom_bank: u8,
@@ -23,9 +26,13 @@ pub struct TAMA5 {
 
 impl TAMA5 {
     pub fn from_header(header: RomHeader, controllers: Arc<RwLock<ControllerState>>) -> Result<Self, HydraIOError> {
+        let save_path = header.save_path().to_owned();
+        let ram = fs::read(&save_path).map_or([0x00; 32], |save_file| save_file.try_into().expect("Invalid save file"));
+
         Ok(TAMA5 {
             rom: header.into_rom(),
-            ram: [0x00; 32],
+            ram,
+            save_path,
             controllers,
 
             rom_bank: 1,
@@ -95,5 +102,9 @@ impl mbc::MemoryBankController for TAMA5 {
             }
             _ => unimplemented!("Attempted to write {:#04X} to invalid SRAM address {:#06X}", value, address)
         })
+    }
+
+    fn save(&self) {
+        fs::write(&self.save_path, self.ram);
     }
 }

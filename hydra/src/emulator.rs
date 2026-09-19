@@ -26,20 +26,7 @@ pub trait Emulator {
     type Model;
 
     fn main_thread(self);
-    fn rom_path(&self) -> &Path;
     fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError>;
-
-    fn save_path(&self) -> PathBuf { 
-        let mut rom_path = self.rom_path().to_owned();
-        rom_path.add_extension("hysav");
-        rom_path
-    }
-
-    fn state_path(&self, slot: usize) -> PathBuf {
-        let mut rom_path = self.rom_path().to_owned();
-        rom_path.add_extension(&("hysav.st".to_owned() + &slot.to_string()));
-        rom_path
-    }
 }
 
 /// A dummy emulator which is used to represent that a console has not yet been chosen.
@@ -53,7 +40,6 @@ impl Emulator for AllEmulator {
     type Model = ();
     
     fn main_thread(self) { unimplemented!() }
-    fn rom_path(&self) -> &Path { unimplemented!() }
     fn try_init(_model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         match rom_path.extension().and_then(OsStr::to_str) {
             Some("gb") => gameboy::GameBoy::try_init(gameboy::Model::GameBoy(app.get_config().gb.default_models.dmg), rom_path, app),
@@ -74,4 +60,23 @@ pub enum EmuMessage {
     LoadStateSlot(usize),
     KeyboardInput(KeyEvent),
     HotSwap(&'static Path),
+}
+
+pub trait SavePath {
+    fn save_path(&self) -> PathBuf;
+    fn state_path(&self, slot: usize) -> PathBuf;
+}
+
+impl SavePath for Path {
+    fn save_path(&self) -> PathBuf { 
+        let mut rom_path = self.to_owned();
+        rom_path.add_extension("hysav");
+        rom_path
+    }
+
+    fn state_path(&self, slot: usize) -> PathBuf {
+        let mut rom_path = self.to_owned();
+        rom_path.add_extension(&("hysav.st".to_owned() + &slot.to_string()));
+        rom_path
+    }
 }

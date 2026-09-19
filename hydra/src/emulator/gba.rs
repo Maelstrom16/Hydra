@@ -14,7 +14,6 @@ impl Emulator for GameBoyAdvance {
     type Model = GbaTarget;
     
     fn main_thread(self) { todo!() }
-    fn rom_path(&self) -> &Path { todo!() }
     fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         match model {
             GbaTarget::Gb(gbmodel) => GameBoy::try_init(gbmodel, rom_path, app),

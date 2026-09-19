@@ -14,6 +14,5 @@ impl Emulator for Nds {
     type Model = ();
     
     fn main_thread(self) { todo!() }
-    fn rom_path(&self) -> &Path { todo!() }
     fn try_init(_model: Self::Model, _rom_path: &PathBuf, _app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> { todo!() }
 }

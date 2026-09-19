@@ -14,7 +14,7 @@ use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, errors::HydraIOError
-    }, emulator::{EmuMessage, Emulator, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{JoypButton, JoypDpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}}, graphics::Graphics, window::HydraApp
+    }, emulator::{EmuMessage, Emulator, SavePath, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{JoypButton, JoypDpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}}, graphics::Graphics, window::HydraApp
 };
 use std::{
     cell::{Cell, RefCell}, ffi::OsStr, fs, path::{Path, PathBuf}, rc::Rc, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}, thread, time::{Duration, Instant}
@@ -114,7 +114,7 @@ pub struct GameBoy {
 }
 
 fn read_as_rom(path: &Path) -> Result<RomHeader, HydraIOError> {
-    Ok(RomHeader::from_vec(fs::read(path)?)?)
+    Ok(RomHeader::load_from_file(path)?)
 }
 
 impl GameBoy {
@@ -204,6 +204,9 @@ impl GameBoy {
             
             // Every frame
             if memory.timer.is_new_frame() {
+                // Push SRAM to file
+                memory.cartridge.as_ref().inspect(|rom| rom.save());
+
                 // Sleep until next frame (unless turbo is active)
                 if self.turbo {
                     // If turbo is on, instantly render next frame without delays
@@ -233,7 +236,7 @@ impl GameBoy {
                                 self.next_frame_instant = Instant::now();
                             }
                             EmuMessage::SaveStateSlot(slot) => {
-                                let path = self.state_path(slot);
+                                let path = self.rom_path.state_path(slot);
                                 memory = &mut self.state.memory; // Restore memory reference after passing
                                 match std::fs::write(&path, &[]) {
                                     Ok(_) => println!("SAVING STATE TO {}", path.to_str().unwrap()),
@@ -249,7 +252,7 @@ impl GameBoy {
                                 }
                             }
                             EmuMessage::LoadStateSlot(slot) => {
-                                let path = self.state_path(slot);
+                                let path = self.rom_path.state_path(slot);
                                 memory = &mut self.state.memory; // Restore memory reference after passing
                                 match std::fs::read(&path) {
                                     Ok(_) => println!("LOADING STATE FROM {}", path.to_str().unwrap()),
@@ -323,12 +326,11 @@ impl Emulator for GameBoy {
 
         println!("Exiting {}", Self::CORE_NAME);
 
+        // One last save to file
+        self.state.memory.cartridge.as_ref().inspect(|rom| rom.save());
+
         // Dump memory (for debugging)
         self.dump_mem();
-    }
-
-    fn rom_path(&self) -> &Path {
-        &self.rom_path
     }
     
     fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> { 

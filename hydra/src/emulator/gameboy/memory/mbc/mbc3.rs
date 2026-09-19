@@ -124,6 +124,10 @@ impl mbc::MemoryBankController for MBC3 {
             Err(HydraIOError::OpenBusAccess)
         }
     }
+
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
 }
 
 pub struct RealTimeClock {

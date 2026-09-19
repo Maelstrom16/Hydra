@@ -1,3 +1,6 @@
+use std::fs;
+use std::path::PathBuf;
+
 use crate::common::bit::BitVec;
 use crate::common::errors::HydraIOError;
 use crate::common::util::BankedAddress;
@@ -8,6 +11,7 @@ use crate::emulator::gameboy::memory::rom::{Rom, RomHeader};
 pub struct MBC2 {
     rom: Rom<0x4000>,
     ram: [u8; 0x200],
+    save_path: PathBuf,
 
     ram_enabled: bool,
     rom_bank: u8,
@@ -15,9 +19,13 @@ pub struct MBC2 {
 
 impl MBC2 {
     pub fn from_header(header: RomHeader) -> Result<Self, HydraIOError> {
+        let save_path = header.save_path().to_owned();
+        let ram = fs::read(&save_path).map_or([0x00; 0x200], |save_file| save_file.try_into().expect("Invalid save file"));
+
         Ok(MBC2 {
-            ram: [0x00; 0x200],
+            ram,
             rom: header.into_rom(),
+            save_path,
 
             ram_enabled: false,
             rom_bank: 1,
@@ -61,5 +69,9 @@ impl mbc::MemoryBankController for MBC2 {
         } else {
             Err(HydraIOError::OpenBusAccess)
         }
+    }
+
+    fn save(&self) {
+        fs::write(&self.save_path, self.ram);
     }
 }

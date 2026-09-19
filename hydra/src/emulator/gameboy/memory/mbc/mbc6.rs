@@ -100,6 +100,10 @@ impl mbc::MemoryBankController for MBC6 {
             Err(HydraIOError::OpenBusAccess)
         }
     }
+
+    fn save(&self) {
+        self.ram.save_to_file();
+    }
 }
 
 #[derive(Copy, Clone)]
