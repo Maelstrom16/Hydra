@@ -53,12 +53,12 @@ impl Config {
                 println!("Failed to delete config.toml: {}\nProgram will continue using old configurations.", e);
             }
         }
-        let config = propagate_or!(Ok(toml::from_slice::<Config>(std::fs::read(CONFIG_PATH)?.as_slice())?), Config::default());
+        let config = propagate_or!(toml::from_slice::<Config>(std::fs::read(CONFIG_PATH)?.as_slice())?, Config::default());
         return config;
     }
 
     pub fn write_to_toml(&self) {
-        if let Err(e) = propagate!(Ok(fs::write(CONFIG_PATH, toml::to_string_pretty(self)?)?)) {
+        if let Err(e) = propagate!(fs::write(CONFIG_PATH, toml::to_string_pretty(self)?)?) {
             println!("Failed to save config.toml: {}\nProgram will continue using old configurations.", e);
         }
     }

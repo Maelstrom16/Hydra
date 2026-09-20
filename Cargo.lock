@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Hydra"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "cpal",
  "enumflags2",
@@ -1844,7 +1844,7 @@ dependencies = [
 
 [[package]]
 name = "hydra_macros"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "funty",
  "proc-macro2",

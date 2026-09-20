@@ -63,18 +63,18 @@ impl From<nokhwa::NokhwaError> for HydraIOError {
 #[macro_export]
 macro_rules! propagate {
     ($expr:expr) => {
-        (|| -> Result<_, HydraIOError> { $expr })()
+        (|| -> Result<_, crate::common::errors::HydraIOError> { Ok($expr) })()
     };
 }
 #[macro_export]
 macro_rules! propagate_or {
     ($expr:expr, $def:expr) => {
-        propagate!($expr).unwrap_or($def)
+        crate::propagate!($expr).unwrap_or($def)
     };
 }
 #[macro_export]
 macro_rules! propagate_or_else {
     ($expr:expr, $func:expr) => {
-        propagate!($expr).unwrap_or_else($func)
+        crate::propagate!($expr).unwrap_or_else($func)
     };
 }

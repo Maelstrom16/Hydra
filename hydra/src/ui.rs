@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Display, fs, sync::Arc};
 
 use muda::{
     AboutMetadataBuilder, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu,
@@ -8,8 +8,7 @@ use rfd::FileDialog;
 use winit::window::Window;
 
 use crate::{
-    config::Config,
-    emulator::gameboy::{AGBRevision, CGBRevision, GBRevision, SGBRevision},
+    common::errors::HydraIOError, config::Config, emulator::gameboy::{AGBRevision, CGBRevision, GBRevision, SGBRevision}, propagate, propagate_or,
 };
 
 pub struct UserInterface {
@@ -24,14 +23,22 @@ impl UserInterface {
     pub fn initialize(window: &Arc<Window>, config: &Config) -> Self {
         // Create the main menubar
         let menu = Menu::new();
-
+        
         let about_menuitem = PredefinedMenuItem::about(
             None,
             Some(
                 AboutMetadataBuilder::new()
                     .authors(Some(vec!["Programmed by Kohradon, with love ♥".to_owned()]))
                     .credits(Some("Programmed by Kohradon, with love ♥".to_owned()))
-                    .version(Some("Hydra 0.0.1\n------------\nWyrm (GB) 0.1.0"))
+                    .version(Some(propagate!(
+                        toml::from_slice::<'_, toml::Value>(&fs::read("hydra/Cargo.toml")?)?
+                        .get("package")
+                            .and_then(|p| p.get("version"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Unable to find version in Cargo.toml")
+                            .to_owned())
+                        .unwrap_or_else(|e| e.to_string())
+                    ))
                     .build(),
             ),
         );
