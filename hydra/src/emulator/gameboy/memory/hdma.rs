@@ -1,35 +1,6 @@
-use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, emulator::gameboy::{GbMode, memory::{MemoryMap, MemoryMapped}, ppu::{PpuMode, state::PpuState}}, serialize};
+use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, emulator::gameboy::{GbModel, memory::{MemoryMap, MemoryMapped}, ppu::{PpuMode, state::PpuState}}, serialize};
 
-pub trait HdmAccessor {
-    fn tick(&mut self, memory: &mut MemoryMap) -> bool;
-    fn read(&self, address: u16) -> Result<u8, HydraIOError>;
-    fn write(&mut self, val: u8, address: u16, ppu_state: &PpuState) -> Result<(), HydraIOError>;
-}
-
-pub fn from_mode(mode: &GbMode) -> Box<dyn HdmAccessor> {
-    match mode {
-        GbMode::DMG => Box::new(DmgHdmAccessor),
-        GbMode::CGB => Box::new(CgbHdmAccessor::new()),
-    }
-}
-
-pub struct DmgHdmAccessor;
-
-impl HdmAccessor for DmgHdmAccessor {
-    fn tick(&mut self, memory: &mut MemoryMap) -> bool {
-        false // Do nothing
-    }
-    
-    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
-        Err(HydraIOError::OpenBusAccess)
-    }
-
-    fn write(&mut self, val: u8, address: u16, ppu_state: &PpuState) -> Result<(), HydraIOError> {
-        Err(HydraIOError::OpenBusAccess)
-    }
-}
-
-pub struct CgbHdmAccessor {
+pub struct HdmAccessor {
     source_addr: u16,
     dest_addr: u16,
     length: u8,
@@ -37,9 +8,9 @@ pub struct CgbHdmAccessor {
     row_counter: ModuloCounter<u8>
 }
 
-impl CgbHdmAccessor {
-    fn new() -> Self {
-        CgbHdmAccessor {
+impl HdmAccessor {
+    pub fn new() -> Self {
+        HdmAccessor {
             source_addr: 0xFFF0,
             dest_addr: 0x1FF0,
             length: 0x7F,
@@ -48,35 +19,9 @@ impl CgbHdmAccessor {
         }
     }
 
-    fn get_next_hblank(ppu_state: &PpuState) -> u8 {
-        let ly = ppu_state.read_ly();
-        if ly < 144 {ly} else {0}
-    }
-}
+    pub fn tick<M: GbModel>(&mut self, memory: &mut MemoryMap<M>) -> bool {
+        if !memory.is_cgb_mode() { return false; }
 
-impl CgbHdmAccessor {
-    fn read_hdma5(&self) -> u8 {
-        serialize!(
-            (self.transfer_type.as_u1()) =>> [7];
-            (self.length) =>> [6..=0];
-        )
-    }
-
-    fn write_hdma5(&mut self, val: u8, ppu_state: &PpuState) {
-        deserialize!(val;
-            [7] as bool =>> hblank_mode;
-            [6..=0] =>> (self.length);
-        );
-
-        self.transfer_type = match hblank_mode {
-            true => HdmaType::Hblank(Self::get_next_hblank(ppu_state)),
-            false => HdmaType::General,
-        }
-    }
-}
-
-impl HdmAccessor for CgbHdmAccessor {
-    fn tick(&mut self, memory: &mut MemoryMap) -> bool {
         let hdma_active_this_tick = match self.transfer_type {
             HdmaType::General => true,
             HdmaType::Hblank(next_hblank) => matches!(memory.ppu_state.get_mode(), PpuMode::HBlank) && next_hblank == memory.ppu_state.read_ly(),
@@ -109,8 +54,36 @@ impl HdmAccessor for CgbHdmAccessor {
 
         hdma_active_this_tick
     }
-    
-    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+
+    fn get_next_hblank(ppu_state: &PpuState) -> u8 {
+        let ly = ppu_state.read_ly();
+        if ly < 144 {ly} else {0}
+    }
+}
+
+impl HdmAccessor {
+    fn read_hdma5(&self) -> u8 {
+        serialize!(
+            (self.transfer_type.as_u1()) =>> [7];
+            (self.length) =>> [6..=0];
+        )
+    }
+
+    fn write_hdma5(&mut self, val: u8, ppu_state: &PpuState) {
+        deserialize!(val;
+            [7] as bool =>> hblank_mode;
+            [6..=0] =>> (self.length);
+        );
+
+        self.transfer_type = match hblank_mode {
+            true => HdmaType::Hblank(Self::get_next_hblank(ppu_state)),
+            false => HdmaType::General,
+        }
+    }
+}
+
+impl HdmAccessor {
+    pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
         match address {
             0xFF51..=0xFF54 => Ok(0xFF),
             0xFF55 => Ok(self.read_hdma5()),
@@ -118,7 +91,7 @@ impl HdmAccessor for CgbHdmAccessor {
         }
     }
 
-    fn write(&mut self, val: u8, address: u16, ppu_state: &PpuState) -> Result<(), HydraIOError> {
+    pub fn write(&mut self, val: u8, address: u16, ppu_state: &PpuState) -> Result<(), HydraIOError> {
         match address {
             0xFF51 => Ok(self.source_addr = (self.source_addr & 0xFF) | ((val as u16) << 8)),
             0xFF52 => Ok(self.source_addr = (self.source_addr & 0xFF00) | (val as u16)),

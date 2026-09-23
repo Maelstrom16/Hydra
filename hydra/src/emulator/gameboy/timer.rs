@@ -1,11 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
-use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, emulator::gameboy::{GBRevision, GbMode, Model, apu::{Apu, state::ApuState}, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::state::PpuState}, serialize};
+use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, emulator::gameboy::{DmgRevision, GbModel, apu::{Apu, state::ApuState}, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::state::PpuState}, serialize};
 
-pub struct MasterTimer {
-    model: Rc<Model>,
-    mode: Rc<GbMode>,
-
+pub struct MasterTimer<M> {
     master_dot_counter: ModuloCounter<u32>,
     machine_cycle_timer: ModuloCounter<u8>,
     div_full: u16,
@@ -17,22 +14,18 @@ pub struct MasterTimer {
 
     system_speed: SystemSpeed,
     speed_switch_queued: bool,
+
+    _model: PhantomData<M>
 }
 
-impl MasterTimer {
+impl<M: GbModel> MasterTimer<M> {
     const DOTS_PER_FRAME: u32 = 70224;
 
-    pub fn new(model: Rc<Model>, mode: Rc<GbMode>) -> Self {
+    pub fn new(model: &M) -> Self {
         MasterTimer { 
             master_dot_counter: ModuloCounter::new(0, Self::DOTS_PER_FRAME),
             machine_cycle_timer: ModuloCounter::new(0, 4),
-            div_full: match *model { 
-                Model::GameBoy(GBRevision::DMG0) => 0x18,
-                Model::GameBoy(_) => 0xAB,
-                Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles,
-            } << 6,
-            model,
-            mode,
+            div_full: model.initial_div_full(),
             
             tima: 0,
             tma: 0,
@@ -42,13 +35,14 @@ impl MasterTimer {
 
             system_speed: SystemSpeed::Standard,
             speed_switch_queued: false,
+
+            _model: PhantomData
         }
     }
     
     const MASTER_HZ: u32 = 4194304;
     const SYSTEM_HZ: u32 = Self::MASTER_HZ / 4;
     const DIV_HZ: u32 = Self::SYSTEM_HZ / 64;
-    pub const PPU_DOTS_PER_FRAME: u32 = 70224;
 
     pub fn tick(&mut self, interrupt_flags: &mut InterruptFlags, ppu_state: &mut PpuState, apu_state: &mut ApuState) {
         self.master_dot_counter.increment();
@@ -131,7 +125,7 @@ impl MasterTimer {
     }
 }
 
-impl MasterTimer {
+impl<M: GbModel> MasterTimer<M> {
     pub fn read_div(&self) -> u8 {
         (self.div_full >> 6) as u8 & 0xFF
     }
@@ -173,7 +167,7 @@ impl MasterTimer {
 
         let old_div_bit_high = self.div_full & self.tima_speed as u16 != 0;
         let new_div_bit_low = self.div_full & tima_speed as u16 == 0;
-        if match self.model.is_monochrome() {
+        if match M::is_monochrome() {
             // On DMG, tick TIMA only when falling edge from (selected DIV bit && TIMA enable bit)
             // i.e. either selected bit went from set => unset, or TIMA was disabled
             true => self.tima_enabled && old_div_bit_high
@@ -206,25 +200,25 @@ impl MasterTimer {
     }
 }
 
-impl MasterTimer {
-    pub fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+impl<M: GbModel> MasterTimer<M> {
+    pub fn read(&self, address: u16, cgb_mode: bool) -> Result<u8, HydraIOError> {
         match address {
             0xFF04 => Ok(self.read_div()),
             0xFF05 => Ok(self.read_tima()),
             0xFF06 => Ok(self.read_tma()),
             0xFF07 => Ok(self.read_tac()),
-            0xFF4D if matches!(*self.mode, GbMode::CGB) => Ok(self.read_key1()),
+            0xFF4D if cgb_mode => Ok(self.read_key1()),
             _ => Err(HydraIOError::OpenBusAccess),
         }
     }
 
-    pub fn write(&mut self, val: u8, address: u16, apu_state: &mut ApuState) -> Result<(), HydraIOError> {
+    pub fn write(&mut self, val: u8, address: u16, cgb_mode: bool, apu_state: &mut ApuState) -> Result<(), HydraIOError> {
         match address {
             0xFF04 => Ok(self.write_div(apu_state)),
             0xFF05 => Ok(self.write_tima(val)),
             0xFF06 => Ok(self.write_tma(val)),
             0xFF07 => Ok(self.write_tac(val)),
-            0xFF4D if matches!(*self.mode, GbMode::CGB) => Ok(self.write_key1(val)),
+            0xFF4D if cgb_mode => Ok(self.write_key1(val)),
             _ => Err(HydraIOError::OpenBusAccess),
         }
     }

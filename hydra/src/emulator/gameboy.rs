@@ -7,6 +7,7 @@ mod ppu;
 mod serial;
 mod timer;
 
+use ringbuf::{HeapProd, traits::Producer};
 use serde::{Deserialize, Serialize};
 use wgpu::{Device, Queue};
 use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
@@ -20,89 +21,285 @@ use std::{
     cell::{Cell, RefCell}, ffi::OsStr, fs, path::{Path, PathBuf}, rc::Rc, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}, thread, time::{Duration, Instant}
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum Model {
-    GameBoy(GBRevision),
-    SuperGameBoy(SGBRevision),
-    GameBoyColor(CGBRevision),
-    GameBoyAdvance(AGBRevision),
+pub trait GbModel: Send + 'static {
+    type Revision: GbRevision<Model = Self>;
+    fn as_str(&self) -> &'static str;
+    fn revision(&self) -> Self::Revision;
+    fn is_extension_valid(ext: Option<&str>) -> bool;
+    fn is_color() -> bool;
+    fn is_monochrome() -> bool {!Self::is_color()}
+
+    // TODO: Should be removable once boot ROMs are functional
+    fn initial_cpu_registers(&self, header: &RomHeader, cgb_mode: bool) -> ([u8; 2], [u8; 2], [u8; 2], [u8; 2]);
+    fn initial_div_full(&self) -> u16;
+    fn initial_ly(&self) -> u8;
 }
-impl Model {
-    const fn as_str(&self) -> &'static str {
-        match self {
-            Model::GameBoy(GBRevision::DMG0) => "Game Boy (DMG0)",
-            Model::GameBoy(GBRevision::DMG) => "Game Boy (DMG)",
-            Model::GameBoy(GBRevision::MGB) => "Game Boy Pocket",
-            Model::SuperGameBoy(SGBRevision::SGB) => "Super Game Boy",
-            Model::SuperGameBoy(SGBRevision::SGB2) => "Super Game Boy 2",
-            Model::GameBoyColor(CGBRevision::CGB0) => "Game Boy Color (CGB0)",
-            Model::GameBoyColor(CGBRevision::CGB) => "Game Boy Color (CGB)",
-            Model::GameBoyAdvance(AGBRevision::AGB0) => "Game Boy Advance (AGB0)",
-            Model::GameBoyAdvance(AGBRevision::AGB) => "Game Boy Advance (AGB)",
+
+pub struct Dmg(pub DmgRevision);
+impl GbModel for Dmg {
+    type Revision = DmgRevision;
+
+    fn as_str(&self) -> &'static str {
+        match self.0 {
+            DmgRevision::DMG0 => "Game Boy (DMG0)",
+            DmgRevision::DMG => "Game Boy (DMG)",
+            DmgRevision::MGB => "Game Boy Pocket",
         }
     }
 
-    fn is_extension_valid(&self, ext: Option<&str>) -> bool {
-        match self {
-            Model::GameBoy(_) => matches!(ext, Some("gb" | "gbc")),
-            Model::SuperGameBoy(_) => matches!(ext, Some("gb" | "gbc")),
-            Model::GameBoyColor(_) => matches!(ext, Some("gb" | "gbc")),
-            Model::GameBoyAdvance(_) => matches!(ext, Some("gb" | "gbc" | "gba")),
+    fn revision(&self) -> Self::Revision { self.0 }
+    fn is_extension_valid(ext: Option<&str>) -> bool { matches!(ext, Some("gb" | "gbc")) }
+    fn is_color() -> bool { false }
+
+    fn initial_cpu_registers(&self, header: &RomHeader, cgb_mode: bool) -> ([u8; 2], [u8; 2], [u8; 2], [u8; 2]) {
+        let (af, b, e, hl);
+        match self.0 {
+            DmgRevision::DMG0 => {
+                af = [0b0000 << 4, 0x01];
+                b = 0xFF;
+                e = 0xC1;
+                hl = [0x03, 0x84];
+            }
+            DmgRevision::DMG => {
+                af = [if header.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
+                b = 0x00;
+                e = 0xD8;
+                hl = [0x4D, 0x01];
+            }
+            DmgRevision::MGB => {
+                af = [if header.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
+                b = 0x00;
+                e = 0xD8;
+                hl = [0x4D, 0x01];
+            }
         }
+        (af, [0x13, b], [e, 0x00], hl)
     }
 
-    const fn is_monochrome(&self) -> bool {
-        matches!(self, Model::GameBoy(_) | Model::SuperGameBoy(_))
+    fn initial_div_full(&self) -> u16 {
+        (match self.0 { 
+            DmgRevision::DMG0 => 0x18,
+            _ => 0xAB,
+        }) << 6
     }
 
-    const fn is_color(&self) -> bool {
-        matches!(self, Model::GameBoyColor(_) | Model::GameBoyAdvance(_))
+    fn initial_ly(&self) -> u8 {
+        match self.0 { 
+            DmgRevision::DMG0 => 0x91,
+            _ => 0x00,
+        }
     }
 }
 
+pub struct Sgb(pub SgbRevision);
+impl GbModel for Sgb {
+    type Revision = SgbRevision;
+
+    fn as_str(&self) -> &'static str {
+        match self.0 {
+            SgbRevision::SGB => "Super Game Boy",
+            SgbRevision::SGB2 => "Super Game Boy 2",
+        }
+    }
+
+    fn revision(&self) -> Self::Revision { self.0 }
+    fn is_extension_valid(ext: Option<&str>) -> bool { matches!(ext, Some("gb" | "gbc")) }
+    fn is_color() -> bool { false }
+
+    fn initial_cpu_registers(&self, header: &RomHeader, cgb_mode: bool) -> ([u8; 2], [u8; 2], [u8; 2], [u8; 2]) {
+        let a = match self.0 {
+            SgbRevision::SGB => 0x01,
+            SgbRevision::SGB2 => 0xFF
+        };
+
+        ([0b0000 << 4, a], [0x14, 0x00], [0x00, 0x00], [0x60, 0xC0])
+    }
+
+    fn initial_div_full(&self) -> u16 {
+        rand::random_range(0x00..=0xFF) << 6 // TODO: Number is supposed to be based on boot rom cycles
+    }
+
+    fn initial_ly(&self) -> u8 {
+        rand::random_range(0x00..=0x99) // TODO: Number is supposed to be based on boot ROM cycles
+    }
+}
+
+pub struct Cgb(pub CgbRevision);
+impl GbModel for Cgb {
+    type Revision = CgbRevision;
+
+    fn as_str(&self) -> &'static str {
+        match self.0 {
+            CgbRevision::CGB0 => "Game Boy Color (CGB0)",
+            CgbRevision::CGB => "Game Boy Color (CGB)",
+        }
+    }
+
+    fn revision(&self) -> Self::Revision { self.0 }
+    fn is_extension_valid(ext: Option<&str>) -> bool { matches!(ext, Some("gb" | "gbc")) }
+    fn is_color() -> bool { true }
+
+    fn initial_cpu_registers(&self, header: &RomHeader, cgb_mode: bool) -> ([u8; 2], [u8; 2], [u8; 2], [u8; 2]) {
+        let (b, de, hl);
+        match cgb_mode {
+            true => {
+                b = 0x00;
+                de = [0x56, 0xFF];
+                hl = [0x0D, 0x00];
+            }
+            false => {
+                let mut b_inner = 0x00;
+                let mut hl_inner = [0x7C, 0x00];
+                if header.has_publisher_rnd1() {
+                    // If either licensee code is 0x01, B = sum of all title bytes
+                    b_inner = header.get_title().iter().sum();
+                    if b_inner == 0x43 || b_inner == 0x58 {
+                        // And, check special cases for HL
+                        hl_inner = [0x1A, 0x99];
+                    }
+                }
+                b = b_inner;
+                de = [0x08, 0x00];
+                hl = hl_inner;
+            }
+        }
+        ([0b1000 << 4, 0x11], [0x00, b], de, hl)
+    }
+
+    fn initial_div_full(&self) -> u16 {
+        rand::random_range(0x00..=0xFF) << 6 // TODO: Number is supposed to be based on boot rom cycles
+    }
+
+    fn initial_ly(&self) -> u8 {
+        rand::random_range(0x00..=0x99) // TODO: Number is supposed to be based on boot ROM cycles
+    }
+}
+
+pub struct Agb(pub AgbRevision);
+impl GbModel for Agb {
+    type Revision = AgbRevision;
+
+    fn as_str(&self) -> &'static str {
+        match self.0 {
+            AgbRevision::AGB0 => "Game Boy Advance (AGB0)",
+            AgbRevision::AGB => "Game Boy Advance (AGB)",
+        }
+    }
+
+    fn revision(&self) -> Self::Revision { self.0 }
+    fn is_extension_valid(ext: Option<&str>) -> bool { matches!(ext, Some("gb" | "gbc" | "gba")) }
+    fn is_color() -> bool { true }
+
+    fn initial_cpu_registers(&self, header: &RomHeader, cgb_mode: bool) -> ([u8; 2], [u8; 2], [u8; 2], [u8; 2]) {
+        let (f, b, de, hl);
+        match cgb_mode {
+            true => {
+                f = 0b0000 << 4;
+                b = 0x01;
+                de = [0x56, 0xFF];
+                hl = [0x0D, 0x00];
+            }
+            false => {
+                let mut b_inner = 0x01;
+                let mut hl_inner = [0x7C, 0x00];
+                let mut f_inner = 0b00000000;
+                if header.has_publisher_rnd1() {
+                    // If either licensee code is 0x01, B = sum of all title bytes
+                    b_inner = header.get_title().iter().sum();
+                    if b_inner & 0b1111 == 0 {
+                        // Last op is an INC; set h flag...
+                        f_inner |= 0b0010 << 4;
+                        if b_inner == 0 {
+                            // ...and z flag if necessary
+                            f_inner |= 0b1000 << 4
+                        }
+                    } else if b_inner == 0x44 || b_inner == 0x59 {
+                        // Otherwise, still check special cases for HL
+                        hl_inner = [0x1A, 0x99];
+                    }
+                }
+                f = f_inner;
+                b = b_inner;
+                de = [0x08, 0x00];
+                hl = hl_inner;
+            }
+        }
+        ([f, 0x11], [0x00, b], de, hl)
+    }
+
+    fn initial_div_full(&self) -> u16 {
+        rand::random_range(0x00..=0xFF) << 6 // TODO: Number is supposed to be based on boot ROM cycles
+    }
+
+    fn initial_ly(&self) -> u8 {
+        rand::random_range(0x00..=0x99) // TODO: Number is supposed to be based on boot ROM cycles
+    }
+}
+
+trait GbRevision {
+    type Model: GbModel<Revision = Self>;
+    fn into_model(self) -> Self::Model;
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum GBRevision {
+pub enum DmgRevision {
     DMG0,
     DMG,
     MGB,
 }
 
+impl GbRevision for DmgRevision {
+    type Model = Dmg;
+    fn into_model(self) -> Self::Model { Dmg(self) }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum SGBRevision {
+pub enum SgbRevision {
     SGB,
     SGB2,
 }
 
+impl GbRevision for SgbRevision {
+    type Model = Sgb;
+    fn into_model(self) -> Self::Model { Sgb(self) }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum CGBRevision {
+pub enum CgbRevision {
     CGB0,
     CGB,
 }
 
+impl GbRevision for CgbRevision {
+    type Model = Cgb;
+    fn into_model(self) -> Self::Model { Cgb(self) }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum AGBRevision {
+pub enum AgbRevision {
     AGB0,
     AGB,
 }
 
-pub enum GbMode {
-    DMG,
-    CGB
+impl GbRevision for AgbRevision {
+    type Model = Agb;
+    fn into_model(self) -> Self::Model { Agb(self) }
 }
 
-pub struct GbState {
+pub struct GbState<M> {
     apu: Apu,
-    cpu: Option<Cpu>,
-    memory: MemoryMap,
-    ppu: Ppu,
+    cpu: Option<Cpu<M>>,
+    memory: MemoryMap<M>,
+    ppu: Ppu<M>,
 }
 
-pub struct GameBoy {
-    state: GbState,
+pub struct GameBoy<M> {
+    state: GbState<M>,
 
     channel: Receiver<EmuMessage>,
     device: Arc<Device>,
     queue: Arc<Queue>,
+    ring_buffer: HeapProd<f32>,
 
     powered_on: bool,
     running: bool,
@@ -117,18 +314,15 @@ fn read_as_rom(path: &Path) -> Result<RomHeader, HydraIOError> {
     Ok(RomHeader::load_from_file(path)?)
 }
 
-impl GameBoy {
-    pub fn new(rom_path: &Path, model: Model, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
+impl<M: GbModel> GameBoy<M> {
+    pub fn new(rom_path: &Path, model: M, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         let ext = rom_path.extension().and_then(OsStr::to_str);
-        if !model.is_extension_valid(ext) {
+        if !M::is_extension_valid(ext) {
             return Err(HydraIOError::InvalidEmulator(model.as_str(), ext.map(str::to_string)));
         }
 
         let header = read_as_rom(rom_path)?;
-        let mode = match model.is_color() && header.supports_cgb_mode() {
-            true => GbMode::CGB,
-            false => GbMode::DMG
-        };
+        let cgb_mode = M::is_color() && header.supports_cgb_mode();
 
         let rom_path = rom_path.to_owned();
 
@@ -140,19 +334,17 @@ impl GameBoy {
             (gtemp.get_device(), gtemp.get_queue())
         };
         let audio = app.clone_audio();
+        let ring_buffer = audio.write().unwrap().get_producer();
         let proxy = app.clone_proxy();
 
         Self::init_graphics(&graphics);
 
         // Build Game Boy on a new thread
         thread::spawn(move || {
-            let model = Rc::new(model);
-            let mode = Rc::new(mode);
-
-            let ppu = Ppu::new(model.clone());
+            let ppu = Ppu::<M>::new();
             let apu = Apu::new(audio);
-            let cpu = Some(Cpu::new(&header, &model, &mode));
-            let mut memory = MemoryMap::new(model.clone(), mode.clone(), controllers, graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
+            let cpu = Some(Cpu::new(&header, &model, cgb_mode));
+            let mut memory = MemoryMap::new(&model, cgb_mode, controllers, graphics, proxy).unwrap(); // TODO: Error should be handled rather than unwrapped
             memory.hot_swap_rom(header, device.clone(), queue.clone()).unwrap();
 
             GameBoy {
@@ -161,6 +353,7 @@ impl GameBoy {
                 channel: recv,
                 device,
                 queue,
+                ring_buffer,
 
                 powered_on: true,
                 running: true,
@@ -224,7 +417,7 @@ impl GameBoy {
                 if let Some(ref mut mbc) = memory.cartridge {mbc.frame();};
 
                 // Send audio for playback
-                self.state.apu.frame();
+                self.ring_buffer.push_slice(self.state.apu.frame().as_slice());
 
                 // Process any new messages
                 'message: loop {
@@ -310,12 +503,12 @@ impl GameBoy {
     }
 }
 
-impl Emulator for GameBoy {
+impl<M: GbModel> Emulator for GameBoy<M> {
     const CONSOLE_NAME: &str = "Game Boy";
     const CORE_NAME: &str = "Wyrm";
     const FILE_FILTERS: &[(&str, &[&str])] = &[super::GB_FILE_FILTER];
 
-    type Model = Model;
+    type Model = M::Revision;
     
     fn main_thread(mut self) {
         println!("Launching {}", Self::CORE_NAME);
@@ -333,7 +526,7 @@ impl Emulator for GameBoy {
         self.dump_mem();
     }
     
-    fn try_init(model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> { 
-        GameBoy::new(rom_path, model, app)
+    fn try_init(revision: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> { 
+        GameBoy::new(rom_path, revision.into_model(), app)
     }
 }

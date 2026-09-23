@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{deserialize, emulator::gameboy::{GbMode, Model}};
+use crate::deserialize;
 
 pub struct TileAttributes {
     pub(super) bg_priority: bool,
@@ -11,18 +11,9 @@ pub struct TileAttributes {
 }
 
 impl TileAttributes {
-    pub fn from_u8(val: u8, mode: &Rc<GbMode>) -> Self {
-        match **mode {
-            GbMode::DMG => {
-                deserialize!(val;
-                    [7] as bool =>> bg_priority;
-                    [6] as bool =>> y_flip;
-                    [5] as bool =>> x_flip;
-                    [4] =>> palette;
-                );
-                TileAttributes { bg_priority, y_flip, x_flip, bank_index: 0, palette }
-            }
-            GbMode::CGB => {
+    pub fn from_u8(val: u8, cgb_mode: bool) -> Self {
+        match cgb_mode {
+            true => {
                 deserialize!(val;
                     [7] as bool =>> bg_priority;
                     [6] as bool =>> y_flip;
@@ -31,6 +22,15 @@ impl TileAttributes {
                     [2..=0] =>> palette;
                 );
                 TileAttributes { bg_priority, y_flip, x_flip, bank_index, palette }
+            }
+            false => {
+                deserialize!(val;
+                    [7] as bool =>> bg_priority;
+                    [6] as bool =>> y_flip;
+                    [5] as bool =>> x_flip;
+                    [4] =>> palette;
+                );
+                TileAttributes { bg_priority, y_flip, x_flip, bank_index: 0, palette }
             }
         }
     }

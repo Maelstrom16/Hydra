@@ -1,4 +1,4 @@
-use crate::emulator::gameboy::{memory::{MemoryMap, oam::ObjectOamMetadata}, ppu::{self, SCREEN_WIDTH, attributes::TileAttributes, colormap::{self, Color}, state::{ObjectHeight, PpuState}}};
+use crate::emulator::gameboy::{GbModel, memory::{MemoryMap, oam::ObjectOamMetadata}, ppu::{self, SCREEN_WIDTH, attributes::TileAttributes, colormap::{self, Color}, state::{ObjectHeight, PpuState}}};
 
 pub struct FifoFetcher {
     // bg_fifo: [Color; 16],
@@ -23,7 +23,7 @@ impl FifoFetcher {
         }
     }
     
-    pub fn resolve_color(&mut self, memory: &mut MemoryMap) -> Color {
+    pub fn resolve_color<M: GbModel>(&mut self, memory: &mut MemoryMap<M>) -> Color {
         self.screen_y = memory.ppu_state.read_ly();
         let color = self.resolve_color_inner(memory);
         self.screen_x = (self.screen_x + 1) % SCREEN_WIDTH;
@@ -31,7 +31,7 @@ impl FifoFetcher {
         color
     }
 
-    fn resolve_color_inner(&mut self, memory: &mut MemoryMap) -> Color {
+    fn resolve_color_inner<M: GbModel>(&mut self, memory: &mut MemoryMap<M>) -> Color {
         if !memory.ppu_state.lcd_enabled {
             return colormap::LCD_OFF_COLOR;
         }
@@ -58,7 +58,7 @@ impl FifoFetcher {
             let map_index_y = (map_y / 8) as u16;
             let data_index_address = map_address + map_index_x + (map_index_y * ppu::MAP_WIDTH as u16);
 
-            let (data_index, tile_attributes) = memory.vram.read_tile_map(data_index_address);
+            let (data_index, tile_attributes) = memory.vram.read_tile_map(data_index_address, memory.is_cgb_mode());
             let data_address = if data_index < 0x80 {
                 data_low_address + (data_index as u16 * 16)
             } else {
@@ -84,7 +84,7 @@ impl FifoFetcher {
         let valid_objects = self.scanline_objects.iter().filter(|obj| obj.occupies_x(self.screen_x));
         if memory.ppu_state.objects_enabled { 
             for oam_meta in valid_objects {
-                let mut render_meta = memory.oam.resolve_oam_meta(oam_meta);
+                let mut render_meta = memory.oam.resolve_oam_meta(oam_meta, memory.is_cgb_mode());
                 // Ignore LSB of tile index if objects are tall
                 if matches!(memory.ppu_state.object_size, ObjectHeight::Tall) {
                     render_meta.data_index &= 0b11111110; 
@@ -109,7 +109,7 @@ impl FifoFetcher {
         return bg_color
     }
 
-    fn resolve_color_index(&self, tile_x: u8, tile_y: u8, tile_address: u16, attributes: &TileAttributes, is_object: bool, memory: &mut MemoryMap) -> u8 {
+    fn resolve_color_index<M: GbModel>(&self, tile_x: u8, tile_y: u8, tile_address: u16, attributes: &TileAttributes, is_object: bool, memory: &mut MemoryMap<M>) -> u8 {
         let tile_x = match attributes.x_flip {
             true => 7 - tile_x,
             false => tile_x

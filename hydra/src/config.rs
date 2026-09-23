@@ -20,10 +20,10 @@ pub struct GBConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GBDefaultModelsConfig {
-    pub dmg: crate::emulator::gameboy::GBRevision,
-    pub sgb: crate::emulator::gameboy::SGBRevision,
-    pub cgb: crate::emulator::gameboy::CGBRevision,
-    pub agb: crate::emulator::gameboy::AGBRevision,
+    pub dmg: crate::emulator::gameboy::DmgRevision,
+    pub sgb: crate::emulator::gameboy::SgbRevision,
+    pub cgb: crate::emulator::gameboy::CgbRevision,
+    pub agb: crate::emulator::gameboy::AgbRevision,
 }
 
 impl Default for Config {
@@ -32,10 +32,10 @@ impl Default for Config {
             window_size: (800, 600),
             gb: GBConfig {
                 default_models: GBDefaultModelsConfig {
-                    dmg: crate::emulator::gameboy::GBRevision::MGB,
-                    sgb: crate::emulator::gameboy::SGBRevision::SGB2,
-                    cgb: crate::emulator::gameboy::CGBRevision::CGB,
-                    agb: crate::emulator::gameboy::AGBRevision::AGB,
+                    dmg: crate::emulator::gameboy::DmgRevision::MGB,
+                    sgb: crate::emulator::gameboy::SgbRevision::SGB2,
+                    cgb: crate::emulator::gameboy::CgbRevision::CGB,
+                    agb: crate::emulator::gameboy::AgbRevision::AGB,
                 },
                 show_all_revisions: false,
             },

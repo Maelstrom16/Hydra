@@ -1,12 +1,14 @@
 mod opcode;
 
+use std::marker::PhantomData;
 use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
 
 use futures::FutureExt;
 
+use crate::emulator::gameboy::GbModel;
 use crate::{
     common::{bit::BitVec, timing::{DelayedTickCounter, ModuloCounter}}, emulator::gameboy::{
-        AGBRevision, CGBRevision, GBRevision, GameBoy, GbMode, Joypad, Model, SGBRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, OpcodeFn}, interrupt::{Interrupt, InterruptEnable, InterruptFlags}, memory::{
+        AgbRevision, CgbRevision, DmgRevision, GameBoy, Joypad, SgbRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, OpcodeFn}, interrupt::{Interrupt, InterruptEnable, InterruptFlags}, memory::{
             MemoryMap, rom::{Rom, RomHeader}
         }, timer::MasterTimer
     },
@@ -48,7 +50,8 @@ pub enum Register16 {
 /// cpu.af[0] |= 0b00010000; // Set carry flag
 /// cpu.af[0] = ((true as u8) << 5) | (cpu.af[0] & 0b11011111) // Set/reset half-carry flag based on bool
 /// ```
-pub struct Cpu {
+
+pub struct Cpu<M> {
     mode: CpuMode,
 
     af: [u8; 2],
@@ -63,101 +66,13 @@ pub struct Cpu {
     ei_queue: [bool; 2],
     cycles_until_halt_bug: Option<u8>,
     unhalt_timer: DelayedTickCounter<u16>,
+
+    _model: PhantomData<M>
 }
 
-impl Cpu {
-    pub fn new(header: &RomHeader, model: &Rc<Model>, mode: &GbMode) -> Self {
-        let dmg_mode = matches!(mode, GbMode::DMG);
-        
-        let af;
-        let bc;
-        let de;
-        let hl;
-        match **model {
-            Model::GameBoy(GBRevision::DMG0) => {
-                af = [0b0000 << 4, 0x01];
-                bc = [0x13, 0xFF];
-                de = [0xC1, 0x00];
-                hl = [0x03, 0x84];
-            }
-            Model::GameBoy(GBRevision::DMG) => {
-                af = [if header.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0x01];
-                bc = [0x13, 0x00];
-                de = [0xD8, 0x00];
-                hl = [0x4D, 0x01];
-            }
-            Model::GameBoy(GBRevision::MGB) => {
-                af = [if header.get_header_checksum() == 0 { 0b1000 << 4 } else { 0b1011 << 4 }, 0xFF];
-                bc = [0x13, 0x00];
-                de = [0xD8, 0x00];
-                hl = [0x4D, 0x01];
-            }
-            Model::SuperGameBoy(SGBRevision::SGB) => {
-                af = [0b0000 << 4, 0x01];
-                bc = [0x14, 0x00];
-                de = [0x00, 0x00];
-                hl = [0x60, 0xC0];
-            }
-            Model::SuperGameBoy(SGBRevision::SGB2) => {
-                af = [0b0000 << 4, 0xFF];
-                bc = [0x14, 0x00];
-                de = [0x00, 0x00];
-                hl = [0x60, 0xC0];
-            }
-            Model::GameBoyColor(_) if dmg_mode => {
-                let mut b = 0x00;
-                let mut hl_bytes = [0x7C, 0x00];
-                if header.has_publisher_rnd1() {
-                    // If either licensee code is 0x01, B = sum of all title bytes
-                    b = header.get_title().iter().sum();
-                    if b == 0x43 || b == 0x58 {
-                        // And, check special cases for HL
-                        hl_bytes = [0x1A, 0x99];
-                    }
-                }
-                af = [0b1000 << 4, 0x11];
-                bc = [0x00, b];
-                de = [0x08, 0x00];
-                hl = hl_bytes;
-            }
-            Model::GameBoyAdvance(_) if dmg_mode => {
-                let mut b = 0x01;
-                let mut hl_bytes = [0x7C, 0x00];
-                let mut f = 0b00000000;
-                if header.has_publisher_rnd1() {
-                    // If either licensee code is 0x01, B = sum of all title bytes
-                    b = header.get_title().iter().sum();
-                    if b & 0b1111 == 0 {
-                        // Last op is an INC; set h flag...
-                        f |= 0b0010 << 4;
-                        if b == 0 {
-                            // ...and z flag if necessary
-                            f |= 0b1000 << 4
-                        }
-                    } else if b == 0x44 || b == 0x59 {
-                        // Otherwise, still check special cases for HL
-                        hl_bytes = [0x1A, 0x99];
-                    }
-                }
-                af = [f, 0x11];
-                bc = [0x00, b];
-                de = [0x08, 0x00];
-                hl = hl_bytes;
-            }
-            Model::GameBoyColor(_) => {
-                af = [0b1000 << 4, 0x11];
-                bc = [0x00, 0x00];
-                de = [0x56, 0xFF];
-                hl = [0x0D, 0x00];
-            }
-            Model::GameBoyAdvance(_) => {
-                af = [0b0000 << 4, 0x11];
-                bc = [0x00, 0x01];
-                de = [0x56, 0xFF];
-                hl = [0x0D, 0x00];
-            }
-            _ => panic!("Attempt to initialize Game Boy CPU without a proper revision"),
-        }
+impl<M: GbModel> Cpu<M> {
+    pub fn new(header: &RomHeader, model: &M, cgb_mode: bool) -> Self {
+        let (af, bc, de, hl) = model.initial_cpu_registers(header, cgb_mode);
         Cpu {
             mode: CpuMode::Normal,
 
@@ -173,6 +88,8 @@ impl Cpu {
             ei_queue: [false, false],
             cycles_until_halt_bug: None,
             unhalt_timer: DelayedTickCounter::new(None),
+
+            _model: PhantomData
         }
     }
 
@@ -198,12 +115,12 @@ impl Cpu {
     }
 
     #[inline(always)]
-    pub fn interrupt_pending(&self, system: &mut GameBoy) -> bool {
+    pub fn interrupt_pending(&self, system: &mut GameBoy<M>) -> bool {
         system.state.memory.interrupt_enable.read_ie() & system.state.memory.interrupt_flags.read_if() != 0
     }
 
     #[inline(always)]
-    fn fetch(&mut self, system: &mut GameBoy, debug: bool) -> Box<dyn Fn(&mut Cpu, &mut GameBoy)> {
+    fn fetch(&mut self, system: &mut GameBoy<M>, debug: bool) -> Box<dyn Fn(&mut Cpu<M>, &mut GameBoy<M>)> {
         if self.ime && self.interrupt_pending(system) { 
             // Generate reordered call instruction from handled interrupt
             return Box::new(move |cpu_inner, system_inner| {
@@ -266,7 +183,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn step_u8(&mut self, system: &mut GameBoy) -> u8 {
+    fn step_u8(&mut self, system: &mut GameBoy<M>) -> u8 {
         system.cycle_components();
         let result = system.state.memory.read_u8(self.pc, false);
         self.pc = self.pc.wrapping_add(1);
@@ -274,19 +191,19 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn read_u8(&self, address: u16, system: &mut GameBoy) -> u8 {
+    fn read_u8(&self, address: u16, system: &mut GameBoy<M>) -> u8 {
         system.cycle_components();
         let result = system.state.memory.read_u8(address, false);
         result
     }
 
     #[inline(always)]
-    fn write_u8(&self, address: u16, value: u8, system: &mut GameBoy) -> () {
+    fn write_u8(&self, address: u16, value: u8, system: &mut GameBoy<M>) -> () {
         system.cycle_components();
         system.state.memory.write_u8(value, address);
     }
 
-    pub fn coro(&mut self, system: &mut GameBoy, debug: bool) {
+    pub fn coro(&mut self, system: &mut GameBoy<M>, debug: bool) {
         while system.is_powered_on() {
             // Skip iterations if halted or stopped
             self.mode = match self.mode {
@@ -302,7 +219,7 @@ impl Cpu {
             // If not halted, process HDMA. Skip this cycle during HDMA transfer.
             // TODO: Remove unsafe block?
             let hdma_active = unsafe {
-                let memory: *mut MemoryMap = &mut system.state.memory;
+                let memory: *mut MemoryMap<M> = &mut system.state.memory;
                 (*memory).hdma.tick(&mut system.state.memory) 
             };
             if hdma_active {continue;}
@@ -385,14 +302,14 @@ macro_rules! reg {
     ($self:ident.L) => { $self.hl[0] };
 }
 
-impl Cpu {
+impl<M: GbModel> Cpu<M> {
     #[inline(always)]
-    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, system: &mut GameBoy, dest: O1, src: O2) {
+    fn ld<T, O1: IntOperand<T>, O2: IntOperand<T>>(&mut self, system: &mut GameBoy<M>, dest: O1, src: O2) {
         let value = src.get(self, system);
         dest.set(value, self, system);
     }
     #[inline(always)]
-    fn ld_hlspe(&mut self, system: &mut GameBoy) {
+    fn ld_hlspe(&mut self, system: &mut GameBoy<M>) {
         let e = self.step_u8(system);
 
         let [sp_lsb, sp_msb] = self.sp.to_le_bytes();
@@ -416,7 +333,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn inc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn inc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let (result, _) = o.overflowing_add(1);
         let (_, half_carry) = (o | 0xF0).overflowing_add(1);
@@ -428,7 +345,7 @@ impl Cpu {
         operand.set(result, self, system);
     }
     #[inline(always)]
-    fn inc16<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn inc16<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let result = o.wrapping_add(1);
         system.cycle_components();
@@ -436,7 +353,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn dec<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn dec<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let (result, _) = o.overflowing_sub(1);
         let (_, half_carry) = (o & 0x0F).overflowing_sub(1);
@@ -448,7 +365,7 @@ impl Cpu {
         operand.set(result, self, system);
     }
     #[inline(always)]
-    fn dec16<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn dec16<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let result = o.wrapping_sub(1);
         system.cycle_components();
@@ -456,7 +373,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn add<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn add<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.overflowing_add(operand);
         let (_, half_carry) = (a | 0xF0).overflowing_add(operand & 0x0F);
@@ -469,7 +386,7 @@ impl Cpu {
         reg!(self.A) = result;
     }
     #[inline(always)]
-    fn add_hl<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn add_hl<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let (hl, operand) = (u16::from_le_bytes(self.hl), operand.get(self, system));
         let (result, carry) = hl.overflowing_add(operand);
         let (_, half_carry) = (hl | 0xF000).overflowing_add(operand & 0x0FFF);
@@ -481,7 +398,7 @@ impl Cpu {
         self.hl = u16::to_le_bytes(result);
     }
     #[inline(always)]
-    fn add_spe(&mut self, system: &mut GameBoy) {
+    fn add_spe(&mut self, system: &mut GameBoy<M>) {
         let e = self.step_u8(system);
 
         let [sp_lsb, sp_msb] = self.sp.to_le_bytes();
@@ -506,7 +423,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn adc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn adc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.carrying_add(operand, get_flag!(self; c));
         let (_, half_carry) = (a | 0xF0).carrying_add(operand & 0x0F, get_flag!(self; c));
@@ -520,7 +437,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn sub<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn sub<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
@@ -534,7 +451,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn sbc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn sbc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry1) = a.overflowing_sub(operand);
         let (result, carry2) = result.overflowing_sub(get_flag!(self; c) as u8);
@@ -550,7 +467,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn and<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn and<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let result = reg!(self.A) & operand.get(self, system);
         set_flags!(self;
             z=(result == 0),
@@ -562,7 +479,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn or<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn or<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let result = reg!(self.A) | operand.get(self, system);
         set_flags!(self;
             z=(result == 0),
@@ -574,7 +491,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn xor<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn xor<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let result = reg!(self.A) ^ operand.get(self, system);
         set_flags!(self;
             z=(result == 0),
@@ -586,7 +503,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn cp<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn cp<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let (a, operand) = (reg!(self.A), operand.get(self, system));
         let (result, carry) = a.overflowing_sub(operand);
         let (_, half_carry) = (a & 0x0F).overflowing_sub(operand & 0x0F);
@@ -599,7 +516,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn push<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn push<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let bytes = u16::to_le_bytes(operand.get(self, system));
         system.cycle_components();
         self.sp = self.sp.wrapping_sub(1);
@@ -609,7 +526,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn pop<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn pop<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let mut bytes = [0; 2];
         bytes[0] = self.read_u8(self.sp, system);
         self.sp = self.sp.wrapping_add(1);
@@ -619,7 +536,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn ccf(&mut self, system: &mut GameBoy) {
+    fn ccf(&mut self, system: &mut GameBoy<M>) {
         set_flags!(self;
             n=(false),
             h=(false)
@@ -628,7 +545,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn scf(&mut self, system: &mut GameBoy) {
+    fn scf(&mut self, system: &mut GameBoy<M>) {
         set_flags!(self;
             n=(false),
             h=(false),
@@ -637,7 +554,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn daa(&mut self, system: &mut GameBoy) {
+    fn daa(&mut self, system: &mut GameBoy<M>) {
         let a = reg!(self.A);
         let n = get_flag!(self; n);
         let h = get_flag!(self; h);
@@ -661,7 +578,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn cpl(&mut self, system: &mut GameBoy) {
+    fn cpl(&mut self, system: &mut GameBoy<M>) {
         reg!(self.A) ^= 0xFF;
         set_flags!(self;
             n=(true),
@@ -670,7 +587,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn rlc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+    fn rlc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O, sets_z: bool) {
         let o = operand.get(self, system);
         let result = o.rotate_left(1);
         set_flags!(self;
@@ -683,7 +600,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn rrc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+    fn rrc<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O, sets_z: bool) {
         let o = operand.get(self, system);
         let result = o.rotate_right(1);
         set_flags!(self;
@@ -696,7 +613,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn rl<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+    fn rl<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O, sets_z: bool) {
         let o = operand.get(self, system);
         let carry = o.test_bit(7);
         let result = (o << 1) | get_flag!(self; c) as u8;
@@ -710,7 +627,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn rr<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O, sets_z: bool) {
+    fn rr<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O, sets_z: bool) {
         let o = operand.get(self, system);
         let carry = o.test_bit(0);
         let result = (o >> 1) | ((get_flag!(self; c) as u8) << 7);
@@ -724,7 +641,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn sla<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn sla<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let carry = o.test_bit(7);
         let result = o << 1;
@@ -738,7 +655,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn sra<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn sra<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system) as i8;
         let carry = o.test_bit(0);
         let result = o >> 1;
@@ -752,7 +669,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn swap<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn swap<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let result = (o & 0x0F) << 4 | (o & 0xF0) >> 4;
         set_flags!(self;
@@ -765,7 +682,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn srl<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, operand: O) {
+    fn srl<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, operand: O) {
         let o = operand.get(self, system);
         let carry = o.test_bit(0);
         let result = o >> 1;
@@ -779,7 +696,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn bit<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, index: u8, operand: O) {
+    fn bit<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, index: u8, operand: O) {
         let o = operand.get(self, system);
         set_flags!(self;
             z=(o & (1 << index) == 0),
@@ -789,19 +706,19 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn res<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, index: u8, operand: O) {
+    fn res<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, index: u8, operand: O) {
         let o = operand.get(self, system);
         operand.set(o & ((1 << index) ^ 0b11111111), self, system);
     }
 
     #[inline(always)]
-    fn set<O: IntOperand<u8>>(&mut self, system: &mut GameBoy, index: u8, operand: O) {
+    fn set<O: IntOperand<u8>>(&mut self, system: &mut GameBoy<M>, index: u8, operand: O) {
         let o = operand.get(self, system);
         operand.set(o | (1 << index), self, system);
     }
 
     #[inline(always)]
-    fn jp<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, condition: CondOperand, operand: O) {
+    fn jp<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, condition: CondOperand, operand: O) {
         let addr = operand.get(self, system);
         if condition.evaluate(self) {
             system.cycle_components();
@@ -810,7 +727,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn jr<O: IntOperand<i8>>(&mut self, system: &mut GameBoy, condition: CondOperand, operand: O) {
+    fn jr<O: IntOperand<i8>>(&mut self, system: &mut GameBoy<M>, condition: CondOperand, operand: O) {
         let e = operand.get(self, system) as i8;
         let addr = self.pc.wrapping_add_signed(e.into());
         if condition.evaluate(self) {
@@ -820,7 +737,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn call<O: IntOperand<u16>>(&mut self, system: &mut GameBoy, condition: CondOperand, operand: O) {
+    fn call<O: IntOperand<u16>>(&mut self, system: &mut GameBoy<M>, condition: CondOperand, operand: O) {
         let addr = operand.get(self, system);
         if condition.evaluate(self) {
             self.push(system, opcode::RegisterOperand16(Register16::PC));
@@ -829,7 +746,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn ret(&mut self, system: &mut GameBoy, condition: CondOperand) {
+    fn ret(&mut self, system: &mut GameBoy<M>, condition: CondOperand) {
         system.cycle_components();
         if condition.evaluate(self) {
             self.pop(system, opcode::RegisterOperand16(Register16::PC));
@@ -838,24 +755,24 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn reti(&mut self, system: &mut GameBoy) {
+    fn reti(&mut self, system: &mut GameBoy<M>) {
         self.ret(system, CondOperand::Unconditional);
         self.ime = true;
     }
 
     #[inline(always)]
-    fn ei(&mut self, system: &mut GameBoy) {
+    fn ei(&mut self, system: &mut GameBoy<M>) {
         self.queue_ime();
     }
 
     #[inline(always)]
-    fn di(&mut self, system: &mut GameBoy) {
+    fn di(&mut self, system: &mut GameBoy<M>) {
         self.ime = false;
         self.cancel_ime();
     }
 
     #[inline(always)]
-    fn halt(&mut self, system: &mut GameBoy) {
+    fn halt(&mut self, system: &mut GameBoy<M>) {
         self.mode = CpuMode::Halted;
 
         // If IME is off but an interrupt is already pending, trigger halt bug
@@ -865,7 +782,7 @@ impl Cpu {
     }
 
     #[inline(always)]
-    fn stop(&mut self, system: &mut GameBoy) {
+    fn stop(&mut self, system: &mut GameBoy<M>) {
         let (mode, speed_switch, extra_cycle, reset_div) = match (system.state.memory.joypad.is_input_active(), self.interrupt_pending(system), system.state.memory.timer.is_speed_switch_requested(), self.ime) {
             (true, true, _, _) => (CpuMode::Normal, false, false, false),
             (true, false, _, _) => (CpuMode::Halted, false, true, false),

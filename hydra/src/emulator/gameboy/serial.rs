@@ -1,10 +1,8 @@
 use std::rc::Rc;
 
-use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, emulator::gameboy::{GbMode, Model, interrupt::{Interrupt, InterruptFlags}, memory::MemoryMapped}, serialize};
+use crate::{common::{errors::HydraIOError, timing::ModuloCounter}, deserialize, emulator::gameboy::{interrupt::{Interrupt, InterruptFlags}, memory::MemoryMapped}, serialize};
 
 pub struct SerialConnection {
-    mode: Rc<GbMode>,
-
     m_cycle_counter: ModuloCounter<u8>,
     transfer_cycles_remaining: u8,
     local_clock: bool,
@@ -16,14 +14,11 @@ impl SerialConnection {
     const DMG_LOW_SPEED: u8 = 128;
     const CGB_HIGH_SPEED: u8 = 4;
 
-    pub fn new(mode: Rc<GbMode>) -> Self {
-        let is_cgb = matches!(*mode, GbMode::CGB);
+    pub fn new(cgb_mode: bool) -> Self {
         SerialConnection { 
-            mode, 
-
-            m_cycle_counter: ModuloCounter::new(0, if is_cgb {Self::CGB_HIGH_SPEED} else {Self::DMG_LOW_SPEED}),
+            m_cycle_counter: ModuloCounter::new(0, if cgb_mode {Self::CGB_HIGH_SPEED} else {Self::DMG_LOW_SPEED}),
             transfer_cycles_remaining: 0, 
-            local_clock: is_cgb,
+            local_clock: cgb_mode,
 
             data: 0x00,
         }
@@ -50,16 +45,16 @@ impl SerialConnection {
         self.data = val
     }
 
-    pub fn read_sc(&self) -> u8 {
+    pub fn read_sc(&self, cgb_mode: bool) -> u8 {
         serialize!(
             ((self.transfer_cycles_remaining != 0) as u8) =>> [7];
             0b01111100;
-            ((matches!(*self.mode, GbMode::DMG) || self.m_cycle_counter.modulus == Self::CGB_HIGH_SPEED) as u8) =>> [1];
+            ((!cgb_mode || self.m_cycle_counter.modulus == Self::CGB_HIGH_SPEED) as u8) =>> [1];
             (self.local_clock as u8) =>> [0];
         )
     }
 
-    pub fn write_sc(&mut self, val: u8) {
+    pub fn write_sc(&mut self, val: u8, cgb_mode: bool) {
         deserialize!(val;
             [7] as bool =>> transfer_enabled;
             [1] as bool =>> high_speed;
@@ -69,25 +64,25 @@ impl SerialConnection {
             if transfer_enabled {
                 self.transfer_cycles_remaining = 8;
             }
-            self.m_cycle_counter.modulus = if matches!(*self.mode, GbMode::CGB) && high_speed {Self::CGB_HIGH_SPEED} else {Self::DMG_LOW_SPEED};
+            self.m_cycle_counter.modulus = if cgb_mode && high_speed {Self::CGB_HIGH_SPEED} else {Self::DMG_LOW_SPEED};
             self.m_cycle_counter.reset();
         }
     }
 }
 
-impl MemoryMapped for SerialConnection {
-    fn read(&self, address: u16) -> Result<u8, HydraIOError> {
+impl SerialConnection {
+    pub fn read(&self, address: u16, cgb_mode: bool) -> Result<u8, HydraIOError> {
         match address {
             0xFF01 => Ok(self.read_sb()),
-            0xFF02 => Ok(self.read_sc()),
+            0xFF02 => Ok(self.read_sc(cgb_mode)),
             _ => Err(HydraIOError::OpenBusAccess),
         }
     }
 
-    fn write(&mut self, val: u8, address: u16) -> Result<(), HydraIOError> {
+    pub fn write(&mut self, val: u8, address: u16, cgb_mode: bool) -> Result<(), HydraIOError> {
         match address {
             0xFF01 => Ok(self.write_sb(val)),
-            0xFF02 => Ok(self.write_sc(val)),
+            0xFF02 => Ok(self.write_sc(val, cgb_mode)),
             _ => Err(HydraIOError::OpenBusAccess),
         }
     }

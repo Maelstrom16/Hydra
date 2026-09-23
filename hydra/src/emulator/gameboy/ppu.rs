@@ -4,20 +4,21 @@ pub mod fifo;
 pub mod state;
 
 use std::{
-    cell::{Cell, RefCell}, collections::VecDeque, rc::Rc, sync::{Arc, RwLock}, thread, time::{Duration, Instant}
+    cell::{Cell, RefCell}, collections::VecDeque, marker::PhantomData, rc::Rc, sync::{Arc, RwLock}, thread, time::{Duration, Instant}
 };
 
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
     emulator::gameboy::{
-        GbMode, Model, memory::{MemoryMap, oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::{Color, ColorMap}, fifo::FifoFetcher, state::{ObjectHeight, PpuState}}, timer::MasterTimer
+        GbModel, memory::{MemoryMap, oam::{Oam, ObjectOamMetadata}, vram::Vram}, ppu::{attributes::TileAttributes, colormap::{Color, ColorMap}, fifo::FifoFetcher, state::{ObjectHeight, PpuState}}, timer::MasterTimer
     }, graphics::Graphics, window::UserEvent
 };
 
-pub struct Ppu {
-    model: Rc<Model>,
+pub struct Ppu<M> {
     fifo: FifoFetcher,
+
+    _model: PhantomData<M>
 }
 
 #[repr(u8)]
@@ -59,16 +60,17 @@ const MAP_WIDTH: u8 = 32;
 const MAP_HEIGHT: u8 = 32;
 const BUFFER_SIZE: usize = SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 4;
 
-impl Ppu {
-    pub fn new(model: Rc<Model>) -> Self {
+impl<M: GbModel> Ppu<M> {
+    pub fn new() -> Self {
         Ppu {
-            model,
             fifo: FifoFetcher::new(),
+
+            _model: PhantomData
         }
     }
 
     #[inline(always)]
-    pub fn coro(&mut self, memory: &mut MemoryMap) {
+    pub fn coro(&mut self, memory: &mut MemoryMap<M>) {
         // Do nothing if PPU is disabled
         if !memory.ppu_state.lcd_enabled {return;}
 
@@ -108,7 +110,7 @@ impl Ppu {
                 // Update mode when complete
                 if *current_address > 0xFE9F {
                     // No need to sort for CGB, because objects will already be in OAM order
-                    if self.model.is_monochrome() {
+                    if M::is_monochrome() {
                         self.fifo.scanline_objects.sort_by(|obj1, obj2| obj1.x.cmp(&obj2.x));
                     }
                     memory.ppu_state.set_mode(PpuMode::Render, &mut memory.interrupt_flags);

@@ -2,19 +2,17 @@ use std::{cell::RefCell, pin::Pin, rc::Rc};
 
 use futures::FutureExt;
 
-use crate::{
-    emulator::gameboy::{GameBoy, GbMode, cpu::{self, Cpu}},
-};
+use crate::emulator::gameboy::{GameBoy, GbModel, cpu::{self, Cpu}};
 
 pub trait IntOperand<T> {
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> T;
-    fn set(&self, value: T, cpu: &mut Cpu, system: &mut GameBoy);
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> T;
+    fn set<M: GbModel>(&self, value: T, cpu: &mut Cpu<M>, system: &mut GameBoy<M>);
 }
 
 pub struct RegisterOperand8(pub cpu::Register8);
 impl IntOperand<u8> for RegisterOperand8 {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, _system: &mut GameBoy) -> u8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, _system: &mut GameBoy<M>) -> u8 {
         match self.0 {
             cpu::Register8::A => cpu.af[1],
             cpu::Register8::F => cpu.af[0],
@@ -27,7 +25,7 @@ impl IntOperand<u8> for RegisterOperand8 {
         }
     }
     #[inline(always)]
-    fn set(&self, value: u8, cpu: &mut Cpu, _system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u8, cpu: &mut Cpu<M>, _system: &mut GameBoy<M>) {
         match self.0 {
             cpu::Register8::A => cpu.af[1] = value,
             cpu::Register8::F => cpu.af[0] = value & 0xF0,
@@ -44,11 +42,11 @@ impl IntOperand<u8> for RegisterOperand8 {
 pub struct ImmediateOperand8;
 impl IntOperand<u8> for ImmediateOperand8 {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u8 {
         cpu.step_u8(system)
     }
     #[inline(always)]
-    fn set(&self, _: u8, _: &mut Cpu, _system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, _: u8, _: &mut Cpu<M>, _system: &mut GameBoy<M>) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -56,11 +54,11 @@ impl IntOperand<u8> for ImmediateOperand8 {
 pub struct ImmediateSignedOperand8;
 impl IntOperand<i8> for ImmediateSignedOperand8 {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> i8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> i8 {
         cpu.step_u8(system) as i8
     }
     #[inline(always)]
-    fn set(&self, _: i8, _: &mut Cpu, _system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, _: i8, _: &mut Cpu<M>, _system: &mut GameBoy<M>) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -68,12 +66,12 @@ impl IntOperand<i8> for ImmediateSignedOperand8 {
 pub struct IndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand8<O> {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u8 {
         let address = self.0.get(cpu, system);
         cpu.read_u8(address, system)
     }
     #[inline(always)]
-    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u8, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) {
         let address = self.0.get(cpu, system);
         cpu.write_u8(address, value, system);
     }
@@ -81,13 +79,13 @@ impl<O: IntOperand<u16>> IntOperand<u8> for IndirectOperand8<O> {
 pub struct IncIndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u8 {
         let address = self.0.get(cpu, system);
         self.0.set(address + 1, cpu, system);
         cpu.read_u8(address, system)
     }
     #[inline(always)]
-    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u8, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) {
         let address = self.0.get(cpu, system);
         self.0.set(address + 1, cpu, system);
         cpu.write_u8(address, value, system);
@@ -96,13 +94,13 @@ impl<O: IntOperand<u16>> IntOperand<u8> for IncIndirectOperand8<O> {
 pub struct DecIndirectOperand8<O: IntOperand<u16>>(pub O);
 impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u8 {
         let address = self.0.get(cpu, system);
         self.0.set(address - 1, cpu, system);
         cpu.read_u8(address, system)
     }
     #[inline(always)]
-    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u8, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) {
         let address = self.0.get(cpu, system);
         self.0.set(address - 1, cpu, system);
         cpu.write_u8(address, value, system);
@@ -112,25 +110,25 @@ impl<O: IntOperand<u16>> IntOperand<u8> for DecIndirectOperand8<O> {
 pub struct HramIndirectOperand<O: IntOperand<u8>>(pub O);
 impl<O: IntOperand<u8>> HramIndirectOperand<O> {
     #[inline(always)]
-    fn as_hram_address(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u16 {
+    fn as_hram_address<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u16 {
         0xFF00 | (self.0.get(cpu, system)) as u16
     }
 }
 impl<O: IntOperand<u8>> IntOperand<u8> for HramIndirectOperand<O> {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u8 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u8 {
         let hram_address = self.as_hram_address(cpu, system);
         cpu.read_u8(hram_address, system)
     }
     #[inline(always)]
-    fn set(&self, value: u8, cpu: &mut Cpu, system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u8, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) {
         let hram_address = self.as_hram_address(cpu, system);
         cpu.write_u8(hram_address, value, system);
     }
 }
 impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u16 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u16 {
         let address = self.0.get(cpu, system);
         u16::from_le_bytes([
             cpu.read_u8(address, system),
@@ -138,7 +136,7 @@ impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
         ])
     }
     #[inline(always)]
-    fn set(&self, value: u16, cpu: &mut Cpu, system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u16, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) {
         let address = self.0.get(cpu, system);
         let bytes = u16::to_le_bytes(value);
         cpu.write_u8(address, bytes[0], system);
@@ -149,7 +147,7 @@ impl<O: IntOperand<u16>> IntOperand<u16> for IndirectOperand8<O> {
 pub struct RegisterOperand16(pub cpu::Register16);
 impl IntOperand<u16> for RegisterOperand16 {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, _system: &mut GameBoy) -> u16 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, _system: &mut GameBoy<M>) -> u16 {
         match self.0 {
             cpu::Register16::AF => u16::from_le_bytes(cpu.af),
             cpu::Register16::BC => u16::from_le_bytes(cpu.bc),
@@ -160,7 +158,7 @@ impl IntOperand<u16> for RegisterOperand16 {
         }
     }
     #[inline(always)]
-    fn set(&self, value: u16, cpu: &mut Cpu, _system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, value: u16, cpu: &mut Cpu<M>, _system: &mut GameBoy<M>) {
         match self.0 {
             cpu::Register16::AF => cpu.af = u16::to_le_bytes(value & 0xFFF0),
             cpu::Register16::BC => cpu.bc = u16::to_le_bytes(value),
@@ -175,11 +173,11 @@ impl IntOperand<u16> for RegisterOperand16 {
 pub struct ImmediateOperand16;
 impl IntOperand<u16> for ImmediateOperand16 {
     #[inline(always)]
-    fn get(&self, cpu: &mut Cpu, system: &mut GameBoy) -> u16 {
+    fn get<M: GbModel>(&self, cpu: &mut Cpu<M>, system: &mut GameBoy<M>) -> u16 {
         u16::from_le_bytes([cpu.step_u8(system), cpu.step_u8(system)])
     }
     #[inline(always)]
-    fn set(&self, _: u16, _: &mut Cpu, _system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, _: u16, _: &mut Cpu<M>, _system: &mut GameBoy<M>) {
         panic!("Cannot write to immediate operand")
     }
 }
@@ -187,11 +185,11 @@ impl IntOperand<u16> for ImmediateOperand16 {
 pub struct ConstOperand16(pub u16);
 impl IntOperand<u16> for ConstOperand16 {
     #[inline(always)]
-    fn get(&self, _: &mut Cpu, _system: &mut GameBoy) -> u16 {
+    fn get<M: GbModel>(&self, _: &mut Cpu<M>, _system: &mut GameBoy<M>) -> u16 {
         self.0
     }
     #[inline(always)]
-    fn set(&self, _: u16, _: &mut Cpu, _system: &mut GameBoy) {
+    fn set<M: GbModel>(&self, _: u16, _: &mut Cpu<M>, _system: &mut GameBoy<M>) {
         panic!("Cannot write to constant operand")
     }
 }
@@ -205,7 +203,7 @@ pub enum CondOperand {
 }
 impl CondOperand {
     #[inline(always)]
-    pub fn evaluate(&self, cpu: &Cpu) -> bool {
+    pub fn evaluate<M: GbModel>(&self, cpu: &Cpu<M>) -> bool {
         match self {
             Self::Unconditional => true,
             Self::NZ => cpu.af[0] & 0b10000000 == 0,
@@ -217,14 +215,14 @@ impl CondOperand {
 }
 
 
-pub type OpcodeFn = fn(&mut Cpu, &mut GameBoy);
+pub type OpcodeFn<M> = fn(&mut Cpu<M>, &mut GameBoy<M>);
 
-impl Cpu {
-    pub(super) const OP_TABLE: [OpcodeFn; 0x100] = Self::generate_op();
-    pub(super) const CB_TABLE: [OpcodeFn; 0x100] = Self::generate_cb();
-    const INVALID: OpcodeFn = |_, _| {panic!("Unknown opcode")};
+impl<M: GbModel> Cpu<M> {
+    pub(super) const OP_TABLE: [OpcodeFn<M>; 0x100] = Self::generate_op();
+    pub(super) const CB_TABLE: [OpcodeFn<M>; 0x100] = Self::generate_cb();
+    const INVALID: OpcodeFn<M> = |_, _| {panic!("Unknown opcode")};
 
-    const fn generate_op() -> [OpcodeFn; 0x100] {
+    const fn generate_op() -> [OpcodeFn<M>; 0x100] {
         let mut op_table = [Self::INVALID; 0x100];
         op_table[0x00] = |cpu, system| { 
             // NOP
@@ -1237,7 +1235,7 @@ impl Cpu {
         op_table
     }
 
-    const fn generate_cb() -> [OpcodeFn; 0x100] {
+    const fn generate_cb() -> [OpcodeFn<M>; 0x100] {
         let mut op_table = [Self::INVALID; 0x100];
         op_table[0x00] = |cpu, system| {
             // RLC B

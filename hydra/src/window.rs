@@ -15,7 +15,7 @@ use winit::window::{Window, WindowId};
 use crate::audio::Audio;
 use crate::common::errors::HydraIOError;
 use crate::config::Config;
-use crate::emulator::gameboy::GameBoy;
+use crate::emulator::gameboy::{Cgb, Dmg, GameBoy, Sgb};
 use crate::emulator::gba::{self, GameBoyAdvance};
 use crate::emulator::n3ds::N3ds;
 use crate::emulator::nds::Nds;
@@ -189,10 +189,10 @@ impl ApplicationHandler<UserEvent> for HydraApp {
             UserEvent::MenuEvent(e) => {
                 match e.id.0.as_str() {
                     "load_rom" => self.try_init_emulator::<AllEmulator>(()),
-                    "load_gb" => self.try_init_emulator::<GameBoy>(gameboy::Model::GameBoy(self.config.gb.default_models.dmg)),
-                    "load_sgb" => self.try_init_emulator::<GameBoy>(gameboy::Model::SuperGameBoy(self.config.gb.default_models.sgb)),
-                    "load_gbc" => self.try_init_emulator::<GameBoy>(gameboy::Model::GameBoyColor(self.config.gb.default_models.cgb)),
-                    "load_gba" => self.try_init_emulator::<GameBoyAdvance>(gba::GbaTarget::Gb(gameboy::Model::GameBoyAdvance(self.config.gb.default_models.agb))),
+                    "load_gb" => self.try_init_emulator::<GameBoy<Dmg>>(self.config.gb.default_models.dmg),
+                    "load_sgb" => self.try_init_emulator::<GameBoy<Sgb>>(self.config.gb.default_models.sgb),
+                    "load_gbc" => self.try_init_emulator::<GameBoy<Cgb>>(self.config.gb.default_models.cgb),
+                    "load_gba" => self.try_init_emulator::<GameBoyAdvance>(gba::GbaTarget::Gb(self.config.gb.default_models.agb)),
                     "load_nds" => self.try_init_emulator::<Nds>(()),
                     "load_n3ds" => self.try_init_emulator::<N3ds>(()),
 

@@ -8,7 +8,7 @@ use rfd::FileDialog;
 use winit::window::Window;
 
 use crate::{
-    common::errors::HydraIOError, config::Config, emulator::gameboy::{AGBRevision, CGBRevision, GBRevision, SGBRevision}, propagate, propagate_or,
+    common::errors::HydraIOError, config::Config, emulator::gameboy::{AgbRevision, CgbRevision, DmgRevision, SgbRevision}, propagate, propagate_or,
 };
 
 pub struct UserInterface {
@@ -23,7 +23,7 @@ impl UserInterface {
     pub fn initialize(window: &Arc<Window>, config: &Config) -> Self {
         // Create the main menubar
         let menu = Menu::new();
-        
+
         let about_menuitem = PredefinedMenuItem::about(
             None,
             Some(
@@ -128,21 +128,21 @@ impl UserInterface {
                 true,
                 &[
                     &MenuItem::new("Game Boy", false, None),
-                    &CheckMenuItem::new("DMG0", true, config.gb.default_models.dmg == GBRevision::DMG0, None),
-                    &CheckMenuItem::new("DMG", true, config.gb.default_models.dmg == GBRevision::DMG, None),
-                    &CheckMenuItem::new("MGB", true, config.gb.default_models.dmg == GBRevision::MGB, None),
+                    &CheckMenuItem::new("DMG0", true, config.gb.default_models.dmg == DmgRevision::DMG0, None),
+                    &CheckMenuItem::new("DMG", true, config.gb.default_models.dmg == DmgRevision::DMG, None),
+                    &CheckMenuItem::new("MGB", true, config.gb.default_models.dmg == DmgRevision::MGB, None),
                     &PredefinedMenuItem::separator(),
                     &MenuItem::new("Super Game Boy", false, None),
-                    &CheckMenuItem::new("SGB", true, config.gb.default_models.sgb == SGBRevision::SGB, None),
-                    &CheckMenuItem::new("SGB2", true, config.gb.default_models.sgb == SGBRevision::SGB2, None),
+                    &CheckMenuItem::new("SGB", true, config.gb.default_models.sgb == SgbRevision::SGB, None),
+                    &CheckMenuItem::new("SGB2", true, config.gb.default_models.sgb == SgbRevision::SGB2, None),
                     &PredefinedMenuItem::separator(),
                     &MenuItem::new("Game Boy Color", false, None),
-                    &CheckMenuItem::new("CGB0", true, config.gb.default_models.cgb == CGBRevision::CGB0, None),
-                    &CheckMenuItem::new("CGB", true, config.gb.default_models.cgb == CGBRevision::CGB, None),
+                    &CheckMenuItem::new("CGB0", true, config.gb.default_models.cgb == CgbRevision::CGB0, None),
+                    &CheckMenuItem::new("CGB", true, config.gb.default_models.cgb == CgbRevision::CGB, None),
                     &PredefinedMenuItem::separator(),
                     &MenuItem::new("Game Boy Advance", false, None),
-                    &CheckMenuItem::new("AGB0", true, config.gb.default_models.agb == AGBRevision::AGB0, None),
-                    &CheckMenuItem::new("AGB", true, config.gb.default_models.agb == AGBRevision::AGB, None),
+                    &CheckMenuItem::new("AGB0", true, config.gb.default_models.agb == AgbRevision::AGB0, None),
+                    &CheckMenuItem::new("AGB", true, config.gb.default_models.agb == AgbRevision::AGB, None),
                     &PredefinedMenuItem::separator(),
                 ],
             )

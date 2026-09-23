@@ -9,7 +9,7 @@ use std::{
 
 use winit::{event::KeyEvent, window::Window};
 
-use crate::{common::errors::HydraIOError, config::Config, emulator::gba::GbaTarget, graphics::Graphics, window::HydraApp};
+use crate::{common::errors::HydraIOError, config::Config, emulator::{gameboy::{Cgb, Dmg}, gba::GbaTarget}, graphics::Graphics, window::HydraApp};
 
 const GB_FILE_FILTER: (&str, &[&str]) = ("Game Boy (Color)", &["gb", "gbc"]);
 const GBA_FILE_FILTER: (&str, &[&str]) = ("Game Boy Advance", &["gba"]);
@@ -42,8 +42,8 @@ impl Emulator for AllEmulator {
     fn main_thread(self) { unimplemented!() }
     fn try_init(_model: Self::Model, rom_path: &PathBuf, app: &HydraApp) -> Result<Sender<EmuMessage>, HydraIOError> {
         match rom_path.extension().and_then(OsStr::to_str) {
-            Some("gb") => gameboy::GameBoy::try_init(gameboy::Model::GameBoy(app.get_config().gb.default_models.dmg), rom_path, app),
-            Some("gbc") => gameboy::GameBoy::try_init(gameboy::Model::GameBoyColor(app.get_config().gb.default_models.cgb), rom_path, app),
+            Some("gb") => gameboy::GameBoy::<Dmg>::try_init(app.get_config().gb.default_models.dmg, rom_path, app),
+            Some("gbc") => gameboy::GameBoy::<Cgb>::try_init(app.get_config().gb.default_models.cgb, rom_path, app),
             Some("gba") => gba::GameBoyAdvance::try_init(GbaTarget::Gba, rom_path, app),
             Some("nds" | "srl") => nds::Nds::try_init((), rom_path, app),
             Some("3ds" | "cci") => n3ds::N3ds::try_init((), rom_path, app),

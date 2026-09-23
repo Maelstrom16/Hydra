@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc, sync::{Arc, RwLock}, time::Duration};
 
 use winit::event_loop::EventLoopProxy;
 
-use crate::{common::{bit::BitVec, errors::HydraIOError}, deserialize, emulator::gameboy::{GBRevision, Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::{self, Ppu, PpuMode}}, graphics::Graphics, serialize, window::UserEvent};
+use crate::{common::{bit::BitVec, errors::HydraIOError}, deserialize, emulator::gameboy::{GbModel, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}, ppu::{self, Ppu, PpuMode}}, graphics::Graphics, serialize, window::UserEvent};
 
 pub struct PpuState {
     pub(super) ppu_mode: PpuMode,
@@ -35,15 +35,11 @@ pub struct PpuState {
 }
 
 impl PpuState {
-    pub fn new(model: &Rc<Model>, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new<M: GbModel>(model: &M, graphics: Arc<RwLock<Graphics>>, proxy: EventLoopProxy<UserEvent>) -> Self {
         let screen_buffer = vec![0; ppu::BUFFER_SIZE].into_boxed_slice();
 
         // Start at beginning of OAM scan for selected ly
-        let ly = match **model {
-            Model::GameBoy(GBRevision::DMG0) => 0x91,
-            Model::GameBoy(_) => 0x00,
-            Model::SuperGameBoy(_) | Model::GameBoyColor(_) | Model::GameBoyAdvance(_) => rand::random(), // TODO: Number is supposed to be based on boot rom cycles
-        };
+        let ly = model.initial_ly();
         
         PpuState { 
             ppu_mode: PpuMode::default_oam(),

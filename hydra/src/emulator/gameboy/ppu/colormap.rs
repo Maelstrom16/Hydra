@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use crate::{common::errors::HydraIOError, deserialize, emulator::gameboy::{GbMode, memory::MemoryMapped}, serialize};
+use crate::{common::errors::HydraIOError, deserialize, emulator::gameboy::memory::MemoryMapped, serialize};
 
 pub type Color = [u8; 4];
 type DmgPaletteIndices = [u8; 4];
@@ -20,10 +20,11 @@ pub trait ColorMap: MemoryMapped {
     fn get_object_color(&self, palette_index: u8, color_index: u8) -> Color;
 }
 
-pub fn from_mode(mode: &GbMode) -> Box<dyn ColorMap> {
-    match mode {
-        GbMode::DMG => Box::new(DmgColorMap::new()),
-        GbMode::CGB => Box::new(CgbColorMap::new()),
+// TODO: Merge DMG and CGB structs into one--more accurate to actual GBC behavior
+pub fn from_mode(cgb_mode: bool) -> Box<dyn ColorMap> {
+    match cgb_mode {
+        false => Box::new(DmgColorMap::new()),
+        true => Box::new(CgbColorMap::new()),
     }
 }
 

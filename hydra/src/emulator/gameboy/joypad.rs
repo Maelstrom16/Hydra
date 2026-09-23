@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc, sync::{Arc, RwLock}};
 
 use sdl3::gamepad::Button;
 
-use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, emulator::gameboy::{Model, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}, input::{ControllerState, Direction, SdlContainer}};
+use crate::{common::{bit::{BitVec, MaskedBitVec}, errors::HydraIOError}, emulator::gameboy::{GbModel, interrupt::{Interrupt, InterruptFlags}, memory::{MemoryMap, MemoryMapped}}, input::{ControllerState, Direction, SdlContainer}};
 
 pub struct Joypad {
     pub keyboard_vecs: InputVectors,
@@ -12,12 +12,12 @@ pub struct Joypad {
 }
 
 impl Joypad {
-    pub fn new(model: &Rc<Model>, controllers: Arc<RwLock<ControllerState>>) -> Self {
+    pub fn new<M: GbModel>(controllers: Arc<RwLock<ControllerState>>) -> Self {
         Joypad { 
             keyboard_vecs: InputVectors::new(),
             controller_vecs: InputVectors::new(),
             controllers,
-            joyp: MaskedBitVec::new(match model.is_monochrome() {
+            joyp: MaskedBitVec::new(match M::is_monochrome() {
                 true => 0xCF,
                 false => 0xFF,
             }, 0b00111111, 0b00110000),
