@@ -16,7 +16,7 @@ use crate::{
 };
 use std::{cell::{Cell, RefCell}, fs, path::Path, rc::Rc, sync::{Arc, RwLock}, time::Duration};
 
-pub struct MemoryMap<M> {
+pub struct MemoryMap<M: GbModel> {
     pub(super) cartridge: Option<Box<dyn mbc::MemoryBankController>>,
     pub(super) vram: Vram,
     wram: Wram,
@@ -28,8 +28,8 @@ pub struct MemoryMap<M> {
     pub(super) interrupt_flags: InterruptFlags,
     pub(super) apu_state: ApuState,
     pub(super) ppu_state: PpuState,
-    pub(super) color_map: Box<dyn ColorMap>,
-    pub(super) hdma: HdmAccessor,
+    pub(super) color_map: M::ColorMap,
+    pub(super) hdma: M::HdmAccessor,
 
     dma_source: u8,
     dma_cycle: Option<u8>,
@@ -50,14 +50,14 @@ impl<M: GbModel> MemoryMap<M> {
         let wram = Wram::new::<M>();
         let ppu_state = PpuState::new(model, graphics, proxy);
         let timer = MasterTimer::new(model);
-        let color_map = colormap::from_mode(cgb_mode);
+        let color_map = M::ColorMap::new();
         let oam = Oam::new();
         let apu_state = ApuState::new();
         let dma_source = match M::is_monochrome() {
             true => 0xFF,
             false => 0x00,
         };
-        let hdma = HdmAccessor::new();
+        let hdma = M::HdmAccessor::new();
         let key0 = !cgb_mode;
 
         Ok(MemoryMap {
@@ -146,7 +146,8 @@ impl<M: GbModel> MemoryMap<M> {
             0xFF76..=0xFF77 if M::is_color() => self.apu_state.read(address),
             0xFF40..=0xFF45 | 0xFF4A..=0xFF4B => self.ppu_state.read(address),
             0xFF46 => Ok(self.dma_source),
-            0xFF47..=0xFF49 | 0xFF68..=0xFF6B => self.color_map.read(address),
+            0xFF47..=0xFF49 => self.color_map.read(address),
+            0xFF68..=0xFF6B if self.is_cgb_mode() => self.color_map.read(address),
             0xFF4F if M::is_color() => Ok(self.vram.read_vbk()),
             0xFF51..=0xFF55 if self.is_cgb_mode() => self.hdma.read(address),
             0xFF70 if self.is_cgb_mode() => Ok(self.wram.read_wbk()),
@@ -183,7 +184,8 @@ impl<M: GbModel> MemoryMap<M> {
             0xFF10..=0xFF14 | 0xFF16..=0xFF1E | 0xFF20..=0xFF26 | 0xFF30..=0xFF3F => self.apu_state.write(val, address),
             0xFF40..=0xFF45 | 0xFF4A..=0xFF4B => self.ppu_state.write(val, address, &mut self.interrupt_flags),
             0xFF46 => Ok({self.dma_source = val; self.dma_cycle = Some(0);}),
-            0xFF47..=0xFF49 | 0xFF68..=0xFF6B => self.color_map.write(val, address),
+            0xFF47..=0xFF49 => self.color_map.write(val, address),
+            0xFF68..=0xFF6B if self.is_cgb_mode() => self.color_map.write(val, address),
             0xFF4F if self.is_cgb_mode() => Ok(self.vram.write_vbk(val)),
             0xFF51..=0xFF55 if self.is_cgb_mode() => self.hdma.write(val, address, &self.ppu_state),
             0xFF70 if self.is_cgb_mode() => Ok(self.wram.write_wbk(val)),

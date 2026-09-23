@@ -16,16 +16,9 @@ const WHITE: [u8; 4] = [0xF8, 0xF8, 0xF8, 0xFF];
 const BLACK: [u8; 4] = [0x00, 0x00, 0x00, 0xFF];
 
 pub trait ColorMap: MemoryMapped {
-    fn get_tile_color(&self, palette_index: u8, color_index: u8) -> Color;
-    fn get_object_color(&self, palette_index: u8, color_index: u8) -> Color;
-}
-
-// TODO: Merge DMG and CGB structs into one--more accurate to actual GBC behavior
-pub fn from_mode(cgb_mode: bool) -> Box<dyn ColorMap> {
-    match cgb_mode {
-        false => Box::new(DmgColorMap::new()),
-        true => Box::new(CgbColorMap::new()),
-    }
+    fn new() -> Self;
+    fn get_tile_color(&self, palette_index: u8, color_index: u8, cgb_mode: bool) -> Color;
+    fn get_object_color(&self, palette_index: u8, color_index: u8, cgb_mode: bool) -> Color;
 }
 
 pub struct DmgColorMap {
@@ -42,13 +35,6 @@ impl DmgColorMap {
         [85, 85, 85, 255],
         [0, 0, 0, 255],
     ];
-
-    fn new() -> Self {
-        DmgColorMap {
-            bg_palette: [0b00, 0b11, 0b11, 0b11],
-            ob_palettes: [[0b11, 0b11, 0b11, 0b11]; 2],
-        }
-    }
 
     pub fn read_bgp(&self) -> u8 {
         serialize!(
@@ -88,11 +74,18 @@ impl DmgColorMap {
 }
 
 impl ColorMap for DmgColorMap {
-    fn get_tile_color(&self, _palette_index: u8, color_index: u8) -> Color {
+    fn new() -> Self {
+        DmgColorMap {
+            bg_palette: [0b00, 0b11, 0b11, 0b11],
+            ob_palettes: [[0b11, 0b11, 0b11, 0b11]; 2],
+        }
+    }
+
+    fn get_tile_color(&self, _palette_index: u8, color_index: u8, _cgb_mode: bool) -> Color {
         Self::COLOR_MAP[self.bg_palette[color_index as usize] as usize]
     }
 
-    fn get_object_color(&self, palette_index: u8, color_index: u8) -> Color {
+    fn get_object_color(&self, palette_index: u8, color_index: u8, _cgb_mode: bool) -> Color {
         Self::COLOR_MAP[self.ob_palettes[palette_index as usize][color_index as usize] as usize]
     }
 }
@@ -123,7 +116,7 @@ pub struct CgbColorMap {
     objects: CgbPaletteBank,
 }
 
-impl CgbColorMap {
+impl ColorMap for CgbColorMap {
     fn new() -> Self {
         CgbColorMap { 
             dmg: DmgColorMap::new(),
@@ -139,15 +132,19 @@ impl CgbColorMap {
             },
         }
     }
-}
 
-impl ColorMap for CgbColorMap {
-    fn get_tile_color(&self, palette_index: u8, color_index: u8) -> Color {
-        self.background.get_color(palette_index, color_index)
+    fn get_tile_color(&self, palette_index: u8, color_index: u8, cgb_mode: bool) -> Color {
+        match cgb_mode {
+            true => self.background.get_color(palette_index, color_index),
+            false => self.dmg.get_tile_color(palette_index, color_index, cgb_mode),
+        }
     }
 
-    fn get_object_color(&self, palette_index: u8, color_index: u8) -> Color {
-        self.objects.get_color(palette_index, color_index)
+    fn get_object_color(&self, palette_index: u8, color_index: u8, cgb_mode: bool) -> Color {
+        match cgb_mode {
+            true => self.objects.get_color(palette_index, color_index),
+            false => self.dmg.get_object_color(palette_index, color_index, cgb_mode),
+        }
     }
 }
 

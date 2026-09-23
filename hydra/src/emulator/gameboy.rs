@@ -15,7 +15,7 @@ use winit::{event::KeyEvent, keyboard::{KeyCode, PhysicalKey}};
 use crate::{
     common::{
         bit::{BitVec, MaskedBitVec}, errors::HydraIOError
-    }, emulator::{EmuMessage, Emulator, SavePath, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{JoypButton, JoypDpad, Joypad}, memory::{MemoryMap, MemoryMapped, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}}, graphics::Graphics, window::HydraApp
+    }, emulator::{EmuMessage, Emulator, SavePath, gameboy::{apu::Apu, cpu::Cpu, interrupt::{InterruptEnable, InterruptFlags}, joypad::{JoypButton, JoypDpad, Joypad}, memory::{MemoryMap, MemoryMapped, hdma::{CgbHdmAccessor, DmgHdmAccessor, HdmAccessor}, oam::Oam, rom::{Rom, RomHeader}, vram::Vram, wram::Wram}, ppu::{Ppu, PpuMode, colormap::{self, CgbColorMap, ColorMap, DmgColorMap}, state::PpuState}, timer::MasterTimer}}, graphics::Graphics, window::HydraApp
 };
 use std::{
     cell::{Cell, RefCell}, ffi::OsStr, fs, path::{Path, PathBuf}, rc::Rc, sync::{Arc, RwLock, mpsc::{Receiver, Sender, channel}}, thread, time::{Duration, Instant}
@@ -23,6 +23,9 @@ use std::{
 
 pub trait GbModel: Send + 'static {
     type Revision: GbRevision<Model = Self>;
+    type ColorMap: ColorMap;
+    type HdmAccessor: HdmAccessor;
+
     fn as_str(&self) -> &'static str;
     fn revision(&self) -> Self::Revision;
     fn is_extension_valid(ext: Option<&str>) -> bool;
@@ -38,6 +41,8 @@ pub trait GbModel: Send + 'static {
 pub struct Dmg(pub DmgRevision);
 impl GbModel for Dmg {
     type Revision = DmgRevision;
+    type ColorMap = DmgColorMap;
+    type HdmAccessor = DmgHdmAccessor;
 
     fn as_str(&self) -> &'static str {
         match self.0 {
@@ -94,6 +99,8 @@ impl GbModel for Dmg {
 pub struct Sgb(pub SgbRevision);
 impl GbModel for Sgb {
     type Revision = SgbRevision;
+    type ColorMap = DmgColorMap;
+    type HdmAccessor = DmgHdmAccessor;
 
     fn as_str(&self) -> &'static str {
         match self.0 {
@@ -127,6 +134,8 @@ impl GbModel for Sgb {
 pub struct Cgb(pub CgbRevision);
 impl GbModel for Cgb {
     type Revision = CgbRevision;
+    type ColorMap = CgbColorMap;
+    type HdmAccessor = CgbHdmAccessor;
 
     fn as_str(&self) -> &'static str {
         match self.0 {
@@ -178,6 +187,8 @@ impl GbModel for Cgb {
 pub struct Agb(pub AgbRevision);
 impl GbModel for Agb {
     type Revision = AgbRevision;
+    type ColorMap = CgbColorMap;
+    type HdmAccessor = CgbHdmAccessor;
 
     fn as_str(&self) -> &'static str {
         match self.0 {
@@ -286,14 +297,15 @@ impl GbRevision for AgbRevision {
     fn into_model(self) -> Self::Model { Agb(self) }
 }
 
-pub struct GbState<M> {
+
+pub struct GbState<M: GbModel> {
     apu: Apu,
     cpu: Option<Cpu<M>>,
     memory: MemoryMap<M>,
     ppu: Ppu<M>,
 }
 
-pub struct GameBoy<M> {
+pub struct GameBoy<M: GbModel> {
     state: GbState<M>,
 
     channel: Receiver<EmuMessage>,

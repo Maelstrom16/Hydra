@@ -1,4 +1,4 @@
-use crate::emulator::gameboy::{GbModel, memory::{MemoryMap, oam::ObjectOamMetadata}, ppu::{self, SCREEN_WIDTH, attributes::TileAttributes, colormap::{self, Color}, state::{ObjectHeight, PpuState}}};
+use crate::emulator::gameboy::{GbModel, memory::{MemoryMap, oam::ObjectOamMetadata}, ppu::{self, SCREEN_WIDTH, attributes::TileAttributes, colormap::{self, Color, ColorMap}, state::{ObjectHeight, PpuState}}};
 
 pub struct FifoFetcher {
     // bg_fifo: [Color; 16],
@@ -74,7 +74,7 @@ impl FifoFetcher {
         };
 
         // Return early if BG color has priority over any potential objects
-        let bg_color = memory.color_map.get_tile_color(bg_palette_index, bg_color_index);
+        let bg_color = memory.color_map.get_tile_color(bg_palette_index, bg_color_index, memory.is_cgb_mode());
         let bg_can_override = bg_color_index != 0;
         if bg_priority && bg_can_override {
             return bg_color;
@@ -99,7 +99,7 @@ impl FifoFetcher {
                 if obj_color_index != 0 {
                     return match render_meta.attributes.bg_priority && bg_can_override {
                         true => bg_color,
-                        false => memory.color_map.get_object_color(render_meta.attributes.palette, obj_color_index)
+                        false => memory.color_map.get_object_color(render_meta.attributes.palette, obj_color_index, memory.is_cgb_mode())
                     }
                 }
             }

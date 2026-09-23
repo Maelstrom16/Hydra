@@ -6,6 +6,7 @@ use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
 use futures::FutureExt;
 
 use crate::emulator::gameboy::GbModel;
+use crate::emulator::gameboy::memory::hdma::HdmAccessor;
 use crate::{
     common::{bit::BitVec, timing::{DelayedTickCounter, ModuloCounter}}, emulator::gameboy::{
         AgbRevision, CgbRevision, DmgRevision, GameBoy, Joypad, SgbRevision, cpu::opcode::{CondOperand, ConstOperand16, IntOperand, OpcodeFn}, interrupt::{Interrupt, InterruptEnable, InterruptFlags}, memory::{
@@ -51,6 +52,7 @@ pub enum Register16 {
 /// cpu.af[0] = ((true as u8) << 5) | (cpu.af[0] & 0b11011111) // Set/reset half-carry flag based on bool
 /// ```
 
+// TODO: Potentially remove generic parameter? CPU itself doesn't require generics other than it making function signatures cleaner
 pub struct Cpu<M> {
     mode: CpuMode,
 
